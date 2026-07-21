@@ -1,7 +1,7 @@
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from '@/lib/supabase/client'
 
 export const SPOTIFY_SCOPES =
-  "user-library-read playlist-modify-public playlist-modify-private";
+  'user-library-read playlist-modify-public playlist-modify-private'
 
 /**
  * Starts the Spotify OAuth flow (browser only). Also used to re-connect
@@ -9,12 +9,12 @@ export const SPOTIFY_SCOPES =
  * re-captures provider tokens in the auth callback.
  */
 export async function signInWithSpotify() {
-  const supabase = createClient();
+  const supabase = createClient()
   await supabase.auth.signInWithOAuth({
-    provider: "spotify",
+    provider: 'spotify',
     options: {
       scopes: SPOTIFY_SCOPES,
       redirectTo: `${window.location.origin}/auth/callback`,
     },
-  });
+  })
 }

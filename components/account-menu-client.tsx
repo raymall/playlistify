@@ -1,42 +1,42 @@
-"use client";
+'use client'
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from 'lucide-react'
 
-import { signInWithSpotify } from "@/lib/auth/spotify";
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+} from '@/components/ui/dropdown-menu'
+import { signInWithSpotify } from '@/lib/auth/spotify'
+import { cn } from '@/lib/utils'
 
 export function AccountMenuClient({
   displayName,
   needsReconnect,
 }: {
-  displayName: string;
-  needsReconnect: boolean;
+  displayName: string
+  needsReconnect: boolean
 }) {
   async function signOut() {
-    await fetch("/auth/signout", { method: "POST" });
-    window.location.assign("/");
+    await fetch('/auth/signout', { method: 'POST' })
+    window.location.assign('/')
   }
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         className={cn(
-          buttonVariants({ variant: "ghost", size: "sm" }),
-          "text-xs font-medium tracking-[0.14em] uppercase",
+          buttonVariants({ variant: 'ghost', size: 'sm' }),
+          'text-xs font-medium tracking-[0.14em] uppercase',
         )}
       >
         {displayName}
-        <ChevronDown className="size-3" />
+        <ChevronDown className='size-3' />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align='end'>
         {needsReconnect && (
           <>
             <DropdownMenuItem onClick={() => void signInWithSpotify()}>
@@ -50,5 +50,5 @@ export function AccountMenuClient({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
+  )
 }
