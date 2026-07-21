@@ -19,7 +19,7 @@ A user can log in with Spotify, watch their Liked Songs import and enrich, chat 
 
 ### Other
 
-- **Spotify Web API** — library import (`/me/tracks`), artist genres, playlist creation. **Important:** audio features / recommendations endpoints are deprecated for new apps (Nov 2024), so LLM enrichment is the *only* source of mood/energy data — it is the core of the product, not a nice-to-have.
+- **Spotify Web API** — library import (`/me/tracks`), artist genres, playlist creation. **Important:** audio features / recommendations endpoints are deprecated for new apps (Nov 2024), so LLM enrichment is the _only_ source of mood/energy data — it is the core of the product, not a nice-to-have.
 - **OpenAI API (default LLM provider)** — a small, cheap model for bulk enrichment; a stronger model for the chat/selection step. Swappable: all LLM calls go through the AI SDK's provider-agnostic `LanguageModel` interface, so switching to Anthropic (or others) is a config change, not a refactor.
 - **Vercel (Hobby tier)** — hosting and deployment; first-class Next.js support, account already connected.
 
@@ -99,97 +99,97 @@ All tables in Supabase Postgres. `auth.users` is managed by Supabase Auth.
 
 **profiles** — one row per user
 
-| column | type | notes |
-|---|---|---|
-| id | uuid PK | = `auth.users.id` |
+| column          | type        | notes                                          |
+| --------------- | ----------- | ---------------------------------------------- |
+| id              | uuid PK     | = `auth.users.id`                              |
 | spotify_user_id | text unique | Spotify account id, needed to create playlists |
-| display_name | text | |
-| created_at | timestamptz | |
+| display_name    | text        |                                                |
+| created_at      | timestamptz |                                                |
 
 **spotify_tokens** — server-side only (no client access via RLS)
 
-| column | type | notes |
-|---|---|---|
-| user_id | uuid PK → profiles | |
-| access_token | text | short-lived |
-| refresh_token | text | captured at first login; Supabase does NOT refresh provider tokens for you |
-| expires_at | timestamptz | access-token expiry |
-| updated_at | timestamptz | |
+| column        | type               | notes                                                                      |
+| ------------- | ------------------ | -------------------------------------------------------------------------- |
+| user_id       | uuid PK → profiles |                                                                            |
+| access_token  | text               | short-lived                                                                |
+| refresh_token | text               | captured at first login; Supabase does NOT refresh provider tokens for you |
+| expires_at    | timestamptz        | access-token expiry                                                        |
+| updated_at    | timestamptz        |                                                                            |
 
 **songs** — global, shared across all users
 
-| column | type | notes |
-|---|---|---|
-| id | uuid PK | |
-| spotify_track_id | text unique not null | |
-| apple_music_id | text nullable | reserved for future |
-| title | text | |
-| artists | text[] | display order |
-| album | text | |
-| album_art_url | text | |
-| duration_ms | int | |
-| release_date | date | |
-| popularity | int | Spotify 0–100 |
-| explicit | boolean | |
-| spotify_genres | text[] | from artist lookup (weak fallback signal) |
-| ai_confidence | numeric(3,2) | 0–1, LLM's self-reported recognition confidence; a real column (not buried in jsonb) so future cleanup/re-enrichment below a threshold is one SQL query |
-| ai_attributes | jsonb | energy (1–5), tempo_feel, era, instrumentation, is_sad, descriptors[] |
-| enrichment_status | text | `pending` \| `enriched` \| `unknown` |
-| enrichment_model | text | which model produced it |
-| enriched_at | timestamptz | |
+| column            | type                 | notes                                                                                                                                                   |
+| ----------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| id                | uuid PK              |                                                                                                                                                         |
+| spotify_track_id  | text unique not null |                                                                                                                                                         |
+| apple_music_id    | text nullable        | reserved for future                                                                                                                                     |
+| title             | text                 |                                                                                                                                                         |
+| artists           | text[]               | display order                                                                                                                                           |
+| album             | text                 |                                                                                                                                                         |
+| album_art_url     | text                 |                                                                                                                                                         |
+| duration_ms       | int                  |                                                                                                                                                         |
+| release_date      | date                 |                                                                                                                                                         |
+| popularity        | int                  | Spotify 0–100                                                                                                                                           |
+| explicit          | boolean              |                                                                                                                                                         |
+| spotify_genres    | text[]               | from artist lookup (weak fallback signal)                                                                                                               |
+| ai_confidence     | numeric(3,2)         | 0–1, LLM's self-reported recognition confidence; a real column (not buried in jsonb) so future cleanup/re-enrichment below a threshold is one SQL query |
+| ai_attributes     | jsonb                | energy (1–5), tempo_feel, era, instrumentation, is_sad, descriptors[]                                                                                   |
+| enrichment_status | text                 | `pending` \| `enriched` \| `unknown`                                                                                                                    |
+| enrichment_model  | text                 | which model produced it                                                                                                                                 |
+| enriched_at       | timestamptz          |                                                                                                                                                         |
 
 **genres** / **moods** — shared vocabulary tables (identical shape)
 
-| column | type | notes |
-|---|---|---|
-| id | uuid PK | |
-| name | text unique not null | normalized (lowercased, trimmed); same tag added by two users or by the AI = one row |
-| created_at | timestamptz | |
+| column     | type                 | notes                                                                                |
+| ---------- | -------------------- | ------------------------------------------------------------------------------------ |
+| id         | uuid PK              |                                                                                      |
+| name       | text unique not null | normalized (lowercased, trimmed); same tag added by two users or by the AI = one row |
+| created_at | timestamptz          |                                                                                      |
 
 **song_genres** / **song_moods** — AI-inferred tags, global (identical shape)
 
-| column | type | notes |
-|---|---|---|
-| song_id | uuid → songs | PK part 1 |
+| column             | type                | notes     |
+| ------------------ | ------------------- | --------- |
+| song_id            | uuid → songs        | PK part 1 |
 | genre_id / mood_id | uuid → genres/moods | PK part 2 |
 
 **user_genres** / **user_moods** — user-added tags, private to each user (identical shape)
 
-| column | type | notes |
-|---|---|---|
-| user_id | uuid → profiles | PK part 1 |
-| song_id | uuid → songs | PK part 2 |
+| column             | type                | notes     |
+| ------------------ | ------------------- | --------- |
+| user_id            | uuid → profiles     | PK part 1 |
+| song_id            | uuid → songs        | PK part 2 |
 | genre_id / mood_id | uuid → genres/moods | PK part 3 |
-| created_at | timestamptz | |
+| created_at         | timestamptz         |           |
 
 **user_songs** — each user's library (join table)
 
-| column | type | notes |
-|---|---|---|
-| user_id | uuid → profiles | PK part 1 |
-| song_id | uuid → songs | PK part 2 |
-| liked_at | timestamptz | `added_at` from Spotify |
-| imported_at | timestamptz | |
+| column      | type            | notes                   |
+| ----------- | --------------- | ----------------------- |
+| user_id     | uuid → profiles | PK part 1               |
+| song_id     | uuid → songs    | PK part 2               |
+| liked_at    | timestamptz     | `added_at` from Spotify |
+| imported_at | timestamptz     |                         |
 
 **playlists** — playlists created through the app
 
-| column | type | notes |
-|---|---|---|
-| id | uuid PK | |
-| user_id | uuid → profiles | |
-| spotify_playlist_id | text | |
-| name | text | |
-| description | text | |
-| prompt | text | the user's request that produced it |
-| created_at | timestamptz | |
+| column              | type            | notes                               |
+| ------------------- | --------------- | ----------------------------------- |
+| id                  | uuid PK         |                                     |
+| user_id             | uuid → profiles |                                     |
+| spotify_playlist_id | text            |                                     |
+| name                | text            |                                     |
+| description         | text            |                                     |
+| prompt              | text            | the user's request that produced it |
+| created_at          | timestamptz     |                                     |
 
 **playlist_songs**
 
-| column | type | notes |
-|---|---|---|
+| column      | type             | notes     |
+| ----------- | ---------------- | --------- |
 | playlist_id | uuid → playlists | PK part 1 |
-| song_id | uuid → songs | PK part 2 |
-| position | int | |
+| song_id     | uuid → songs     | PK part 2 |
+| position    | int              |           |
 
 ### Schema Notes
 
