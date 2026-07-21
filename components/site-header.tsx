@@ -1,0 +1,26 @@
+import Link from "next/link";
+
+import { NavLinks } from "@/components/nav-links";
+import { ThemeToggle } from "@/components/theme-toggle";
+
+export function SiteHeader() {
+  return (
+    <header className="border-b">
+      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
+        <div className="flex items-center gap-8">
+          <Link
+            href="/"
+            className="text-sm font-bold tracking-[0.14em] uppercase"
+          >
+            Playlistify
+          </Link>
+          <NavLinks />
+        </div>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          {/* Account menu mounts here once auth lands */}
+        </div>
+      </div>
+    </header>
+  );
+}
