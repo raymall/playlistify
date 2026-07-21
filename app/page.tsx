@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { SpotifySignInButton } from "@/components/spotify-sign-in-button";
 
 export default function LandingPage() {
   return (
@@ -14,9 +14,7 @@ export default function LandingPage() {
             your Spotify account.
           </p>
           <div className="mt-10">
-            <Button size="lg" disabled>
-              Continue with Spotify
-            </Button>
+            <SpotifySignInButton />
           </div>
         </div>
       </div>

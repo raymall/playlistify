@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AccountMenu } from "@/components/account-menu";
 import { NavLinks } from "@/components/nav-links";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -18,7 +19,7 @@ export function SiteHeader() {
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          {/* Account menu mounts here once auth lands */}
+          <AccountMenu />
         </div>
       </div>
     </header>
