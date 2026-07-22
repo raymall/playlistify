@@ -20,7 +20,6 @@ const enrichedSongSchema = z.object({
   tempo_feel: z.enum(['slow', 'mid', 'fast']),
   era: z.string(),
   instrumentation: z.array(z.string()).max(6),
-  is_sad: z.boolean(),
   descriptors: z.array(z.string()).max(8),
 })
 
@@ -39,7 +38,6 @@ const songAIAttributesSchema = z.object({
   tempo_feel: z.string(),
   era: z.string(),
   instrumentation: z.array(z.string()),
-  is_sad: z.boolean(),
   descriptors: z.array(z.string()),
 })
 

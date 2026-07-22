@@ -63,10 +63,9 @@ const SYSTEM_PROMPT = `You are a music-metadata expert. For each numbered song i
 - tempo_feel: slow, mid, or fast.
 - era: the decade or scene the recording belongs to, e.g. "1990s".
 - instrumentation (max 6): prominent instruments or production elements.
-- is_sad: whether the song reads as sad.
 - descriptors (max 8): short free-form qualities, e.g. "driving", "lo-fi".
 
-If you do not recognize a song with reasonable certainty, set confidence below 0.4, return empty arrays for genres, moods, instrumentation, and descriptors, era as an empty string, energy 1, tempo_feel "mid", and is_sad false. Never guess attributes for a song you do not recognize.
+If you do not recognize a song with reasonable certainty, set confidence below 0.4, return empty arrays for genres, moods, instrumentation, and descriptors, era as an empty string, energy 1, and tempo_feel "mid". Never guess attributes for a song you do not recognize.
 
 Return every input song exactly once — same count, same ids.`
 
@@ -362,7 +361,6 @@ export const enrichLibraryBatch = async (
       tempo_feel: write.entry.tempo_feel,
       era: write.entry.era,
       instrumentation: write.entry.instrumentation,
-      is_sad: write.entry.is_sad,
       descriptors: write.entry.descriptors,
     }
     const result = await admin

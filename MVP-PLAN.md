@@ -134,7 +134,7 @@ All tables in Supabase Postgres. `auth.users` is managed by Supabase Auth.
 | explicit          | boolean              |                                                                                                                                                         |
 | spotify_genres    | text[]               | from artist lookup (weak fallback signal)                                                                                                               |
 | ai_confidence     | numeric(3,2)         | 0–1, LLM's self-reported recognition confidence; a real column (not buried in jsonb) so future cleanup/re-enrichment below a threshold is one SQL query |
-| ai_attributes     | jsonb                | energy (1–5), tempo_feel, era, instrumentation, is_sad, descriptors[]                                                                                   |
+| ai_attributes     | jsonb                | energy (1–5), tempo_feel, era, instrumentation, descriptors[]                                                                                           |
 | enrichment_status | text                 | `pending` \| `enriched` \| `unknown`                                                                                                                    |
 | enrichment_model  | text                 | which model produced it                                                                                                                                 |
 | enriched_at       | timestamptz          |                                                                                                                                                         |

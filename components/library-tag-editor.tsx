@@ -121,7 +121,6 @@ const formatAttributesLine = (
 ): string => {
   const parts = [`Energy ${attributes.energy}/5`, attributes.tempo_feel]
   if (attributes.era.length > 0) parts.push(attributes.era)
-  if (attributes.is_sad) parts.push('sad')
   if (confidence !== null) parts.push(`confidence ${confidence.toFixed(2)}`)
   return parts.join(' · ')
 }
