@@ -213,6 +213,7 @@ export type Database = {
           album_art_url: string | null
           apple_music_id: string | null
           artists: string[] | null
+          artists_search: string | null
           duration_ms: number | null
           enriched_at: string | null
           enrichment_model: string | null
@@ -232,6 +233,7 @@ export type Database = {
           album_art_url?: string | null
           apple_music_id?: string | null
           artists?: string[] | null
+          artists_search?: string | null
           duration_ms?: number | null
           enriched_at?: string | null
           enrichment_model?: string | null
@@ -251,6 +253,7 @@ export type Database = {
           album_art_url?: string | null
           apple_music_id?: string | null
           artists?: string[] | null
+          artists_search?: string | null
           duration_ms?: number | null
           enriched_at?: string | null
           enrichment_model?: string | null
@@ -424,7 +427,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      songs_artists_search: { Args: { arr: string[] }; Returns: string }
     }
     Enums: {
       [_ in never]: never
