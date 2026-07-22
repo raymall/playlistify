@@ -10,6 +10,7 @@ import { buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { getDefaultModel, getEnabledModels } from '@/lib/ai/models'
 import { filterMappedModels } from '@/lib/ai/providers'
+import { readSongAIAttributes } from '@/lib/enrichment/schema'
 import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
@@ -76,10 +77,19 @@ export default async function LibraryPage({
   let filteredCount = 0
 
   if (totalSongs > 0) {
+    // The user_genres/user_moods embeds return only the requester's rows
+    // because this query runs on the RLS client — RLS is the only scoping.
     let request = supabase
       .from('user_songs')
       .select(
-        'liked_at, songs!inner(id, title, artists, album_art_url, enrichment_status)',
+        `liked_at, songs!inner(
+          id, title, artists, album_art_url, enrichment_status,
+          ai_confidence, ai_attributes,
+          song_genres(genres(name)),
+          song_moods(moods(name)),
+          user_genres(genre_id, genres(name)),
+          user_moods(mood_id, moods(name))
+        )`,
         { count: 'exact' },
       )
       .order('liked_at', { ascending: false })
@@ -107,6 +117,18 @@ export default async function LibraryPage({
       artists: row.songs.artists,
       albumArtUrl: row.songs.album_art_url,
       enrichmentStatus: row.songs.enrichment_status,
+      aiConfidence: row.songs.ai_confidence,
+      aiAttributes: readSongAIAttributes(row.songs.ai_attributes),
+      aiGenres: row.songs.song_genres.map((link) => link.genres.name),
+      aiMoods: row.songs.song_moods.map((link) => link.moods.name),
+      userGenres: row.songs.user_genres.map((link) => ({
+        id: link.genre_id,
+        name: link.genres.name,
+      })),
+      userMoods: row.songs.user_moods.map((link) => ({
+        id: link.mood_id,
+        name: link.moods.name,
+      })),
     }))
   }
 
@@ -148,10 +170,10 @@ export default async function LibraryPage({
             role='search'
           >
             <Input
-              aria-label='Search your library by title or album'
+              aria-label='Search your library by title or artist'
               defaultValue={query}
               name='q'
-              placeholder='Search title or album'
+              placeholder='Search title or artist'
               type='search'
             />
             <button

@@ -12,7 +12,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { type SongAIAttributes } from '@/lib/enrichment/schema'
 import { cn } from '@/lib/utils'
+
+export interface LibraryTag {
+  id: string
+  name: string
+}
 
 export interface LibrarySong {
   id: string
@@ -20,6 +26,12 @@ export interface LibrarySong {
   artists: string[] | null
   albumArtUrl: string | null
   enrichmentStatus: string
+  aiConfidence: number | null
+  aiAttributes: SongAIAttributes | null
+  aiGenres: string[]
+  aiMoods: string[]
+  userGenres: LibraryTag[]
+  userMoods: LibraryTag[]
 }
 
 interface LibraryTableProps {
@@ -95,6 +107,55 @@ const LibraryPagination = ({
   )
 }
 
+interface LibraryTagChipsProps {
+  song: LibrarySong
+}
+
+/**
+ * AI tags (filled) and the user's own tags (outlined) — variant is the
+ * distinction, never hue, per the monochrome theme.
+ */
+const LibraryTagChips = ({ song }: LibraryTagChipsProps) => {
+  const hasTags =
+    song.aiGenres.length > 0 ||
+    song.aiMoods.length > 0 ||
+    song.userGenres.length > 0 ||
+    song.userMoods.length > 0
+
+  if (!hasTags) {
+    return <span className='text-sm text-muted-foreground'>—</span>
+  }
+
+  return (
+    <div className='flex flex-wrap items-center gap-1'>
+      {song.aiGenres.map((name) => (
+        <Badge key={`ai-genre-${name}`} variant='secondary'>
+          <span className='sr-only'>AI genre: </span>
+          {name}
+        </Badge>
+      ))}
+      {song.aiMoods.map((name) => (
+        <Badge key={`ai-mood-${name}`} variant='secondary'>
+          <span className='sr-only'>AI mood: </span>
+          {name}
+        </Badge>
+      ))}
+      {song.userGenres.map((tag) => (
+        <Badge key={`user-genre-${tag.id}`} variant='outline'>
+          <span className='sr-only'>Your genre: </span>
+          {tag.name}
+        </Badge>
+      ))}
+      {song.userMoods.map((tag) => (
+        <Badge key={`user-mood-${tag.id}`} variant='outline'>
+          <span className='sr-only'>Your mood: </span>
+          {tag.name}
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
 export const LibraryTable = ({
   page,
   pageCount,
@@ -114,6 +175,9 @@ export const LibraryTable = ({
             </TableHead>
             <TableHead scope='col'>Title</TableHead>
             <TableHead scope='col'>Artists</TableHead>
+            <TableHead className='w-2/5' scope='col'>
+              Tags
+            </TableHead>
             <TableHead className='w-32 text-right' scope='col'>
               Status
             </TableHead>
@@ -157,10 +221,21 @@ export const LibraryTable = ({
                     {artistsText}
                   </span>
                 </TableCell>
+                <TableCell>
+                  <LibraryTagChips song={song} />
+                </TableCell>
                 <TableCell className='text-right'>
-                  <Badge variant={statusVariant(song.enrichmentStatus)}>
-                    {formatStatus(song.enrichmentStatus)}
-                  </Badge>
+                  <div className='flex flex-col items-end gap-1'>
+                    <Badge variant={statusVariant(song.enrichmentStatus)}>
+                      {formatStatus(song.enrichmentStatus)}
+                    </Badge>
+                    {song.enrichmentStatus === 'enriched' &&
+                      song.aiConfidence !== null && (
+                        <span className='text-xs text-muted-foreground tabular-nums'>
+                          {song.aiConfidence.toFixed(2)}
+                        </span>
+                      )}
+                  </div>
                 </TableCell>
               </TableRow>
             )
