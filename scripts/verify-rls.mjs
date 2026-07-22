@@ -31,6 +31,7 @@ const TABLES = [
   'moods',
   'song_genres',
   'song_moods',
+  'llm_models',
 ]
 
 let failed = false

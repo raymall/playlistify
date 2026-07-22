@@ -35,6 +35,39 @@ export type Database = {
         }
         Relationships: []
       }
+      llm_models: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          is_default: boolean
+          label: string
+          model_id: string
+          provider: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          is_default?: boolean
+          label: string
+          model_id: string
+          provider: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          is_default?: boolean
+          label?: string
+          model_id?: string
+          provider?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
       moods: {
         Row: {
           created_at: string
