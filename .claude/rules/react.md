@@ -41,4 +41,4 @@ Also follows `typescript.md`.
 
 ## Accessibility
 
-- Target WCAG Level AA conformance.
+- See `accessibility.md` — WCAG 2.2, Level AA minimum.
