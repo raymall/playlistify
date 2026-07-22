@@ -28,6 +28,14 @@ The DB is a linked remote Supabase project; `supabase/migrations/` is the source
 5. Run `npm run verify:rls` (always) plus any other `verify:*` script the change touches, then `npm run typecheck`.
 6. Commit the migration and regenerated `types.ts` together.
 
+# Improvements log
+
+`IMPROVEMENTS.md` (root, gitignored) is the running log of technical debt, sharp edges, deferred work, suggestions, and ideas. Whenever any of those surface during a session — something you noticed, worked around, deferred, or would recommend — record it there **in the same session**, don't just mention it in chat.
+
+- Follow the file's entry format: `## <Title>` + `**Issue:**` / `**Why fix:**` bullets.
+- Active sharp edges go in the top section; nice-to-haves and deferred work go under `# Deferred`.
+- Before adding, check for an existing entry covering the same item — update it instead of duplicating; delete entries that get resolved.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know

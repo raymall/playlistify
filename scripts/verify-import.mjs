@@ -109,7 +109,7 @@ console.log(
   `INFO  songs with []-genres = ${emptyGenres.error ? `err(${emptyGenres.error.message})` : emptyGenres.count}`,
 )
 
-for (const status of ['pending', 'enriched', 'failed', 'skipped']) {
+for (const status of ['pending', 'enriched', 'unknown']) {
   const row = await headCount(
     service
       .from('songs')

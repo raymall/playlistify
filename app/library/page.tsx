@@ -1,9 +1,15 @@
 import type { Metadata } from 'next'
 
+import {
+  type EnrichmentModelOption,
+  LibraryEnrichmentPanel,
+} from '@/components/library-enrichment-panel'
 import { LibraryImportPanel } from '@/components/library-import-panel'
 import { type LibrarySong, LibraryTable } from '@/components/library-table'
 import { buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { getDefaultModel, getEnabledModels } from '@/lib/ai/models'
+import { filterMappedModels } from '@/lib/ai/providers'
 import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
@@ -39,6 +45,32 @@ export default async function LibraryPage({
     .from('user_songs')
     .select('song_id', { count: 'exact', head: true })
   const totalSongs = libraryCount ?? 0
+
+  // Enrichment inputs: how many songs still need enriching, and which catalog
+  // models this build can actually run. The panel gets plain id/label rows —
+  // provider internals stay server-side.
+  let pendingSongs = 0
+  let modelOptions: EnrichmentModelOption[] = []
+  let defaultModelId: string | null = null
+  if (totalSongs > 0) {
+    const [pendingResult, enabledModels] = await Promise.all([
+      supabase
+        .from('user_songs')
+        .select('song_id, songs!inner(enrichment_status)', {
+          count: 'exact',
+          head: true,
+        })
+        .eq('songs.enrichment_status', 'pending'),
+      getEnabledModels(supabase),
+    ])
+    pendingSongs = pendingResult.count ?? 0
+    const mappedModels = filterMappedModels(enabledModels)
+    modelOptions = mappedModels.map((model) => ({
+      id: model.id,
+      label: model.label,
+    }))
+    defaultModelId = getDefaultModel(mappedModels)?.id ?? null
+  }
 
   let rows: LibrarySong[] = []
   let filteredCount = 0
@@ -97,6 +129,14 @@ export default async function LibraryPage({
             libraries take a few minutes and the import resumes where it left
             off.
           </p>
+        )}
+        {totalSongs > 0 && (
+          <LibraryEnrichmentPanel
+            defaultModelId={defaultModelId}
+            models={modelOptions}
+            pendingCount={pendingSongs}
+            totalCount={totalSongs}
+          />
         )}
       </div>
 
