@@ -1,6 +1,6 @@
 /* eslint-disable */
 // Generated from the live Supabase schema — do not edit by hand.
-// Regenerate with: supabase gen types typescript (or the Supabase MCP generate_typescript_types tool).
+// Regenerate with: npm run gen:types (wraps supabase gen types + this header + prettier).
 export type Json =
   | string
   | number

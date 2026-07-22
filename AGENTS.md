@@ -23,7 +23,7 @@ The DB is a linked remote Supabase project; `supabase/migrations/` is the source
 
 1. Add a migration file (`npx supabase migration new <name>`) with RLS enabled + policies on any new table.
 2. Apply it: `npx supabase db push`.
-3. Regenerate types: `npx supabase gen types typescript --linked > lib/supabase/types.ts`.
+3. Regenerate types: `npm run gen:types` (wraps `supabase gen types` + lint header + prettier — don't run the bare command).
 4. Run advisors (MCP `get_advisors`, `security` + `performance`) and fix findings.
 5. Run `npm run verify:rls` (always) plus any other `verify:*` script the change touches, then `npm run typecheck`.
 6. Commit the migration and regenerated `types.ts` together.

@@ -26,9 +26,11 @@ of it, in order:
    `public` table with no `enable row level security` + policies is a bug.
 3. **Apply it to the remote:** `npx supabase db push`. Prefer this so the file
    and the remote migration history stay in lockstep.
-4. **Regenerate types** into the checked-in file:
-   `npx supabase gen types typescript --linked > lib/supabase/types.ts`
-   (`--project-id <ref>` also works). Never hand-edit that file.
+4. **Regenerate types** into the checked-in file: `npm run gen:types`. It wraps
+   `npx supabase gen types typescript --linked --schema public`, re-prepends the
+   `/* eslint-disable */` header, and formats with prettier — raw gen output
+   fails lint and includes a `graphql_public` section the committed file doesn't
+   have, so never run the bare command. Never hand-edit that file.
 5. **Run the advisors** (MCP `get_advisors`) for **both** `security` and
    `performance`; fix what they flag — RLS gaps, missing FK indexes,
    security-definer views. Do this after every schema change.
@@ -56,7 +58,8 @@ migration **file** in the repo is still the source of truth.
   one-off data fixes only. **Never** use it for schema/DDL — it causes drift.
 - `list_tables` / `list_migrations` (MCP) — inspect current structure and
   applied history before making changes.
-- `generate_typescript_types` (MCP) — equivalent to step 4.
+- `generate_typescript_types` (MCP) — raw equivalent of the gen CLI call only;
+  it skips the header + prettier steps, so prefer `npm run gen:types` (step 4).
 - `get_advisors` (MCP) — step 5.
 
 ## RLS invariant (non-negotiable)
