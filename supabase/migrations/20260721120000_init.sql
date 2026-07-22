@@ -1,5 +1,5 @@
 -- Playlistify initial schema: 12 tables + RLS + indexes.
--- Source of truth: mvp-plan.md §Database Schema and §Schema Notes.
+-- Source of truth: MVP-PLAN.md §Database Schema and §Schema Notes.
 
 -- ────────────────────────────────────────────────────────────────────────
 -- Tables

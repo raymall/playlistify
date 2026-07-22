@@ -1,7 +1,7 @@
 # Playlistify
 
 Turns your Spotify library into AI-generated playlists through a
-conversational interface. See [mvp-plan.md](./mvp-plan.md) for the full
+conversational interface. See [MVP-PLAN.md](./MVP-PLAN.md) for the full
 product and architecture spec.
 
 Stack: Next.js (App Router, TypeScript) · Tailwind CSS + shadcn/ui ·
