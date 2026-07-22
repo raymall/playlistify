@@ -128,29 +128,27 @@ const formatAttributesLine = (
 interface TagKindEditorProps {
   kind: TagKind
   label: string
-  open: boolean
   placeholder: string
   selected: LibraryTag[]
   vocabulary: string[] | null
-  onOpenChange: (open: boolean) => void
   onValueChange: (next: string[]) => void
 }
 
 /**
- * One combobox over one vocabulary table. Renders `inline` with `open` bound
- * to the containing popover (the documented Base UI composition) so there is
- * no nested floating popup; the popover unmounting on close resets all
- * transient state. Free entry works by injecting the normalized query as the
- * first item when it isn't in the vocabulary yet.
+ * One combobox over one vocabulary table. Renders `inline` with `open` set
+ * unconditionally and no onOpenChange, per the Base UI inline contract —
+ * forwarding the combobox's internal close requests would dismiss the whole
+ * popover mid-interaction. There is no nested floating popup, and the
+ * popover unmounting on close resets all transient state. Free entry works
+ * by injecting the normalized query as the first item when it isn't in the
+ * vocabulary yet.
  */
 const TagKindEditor = ({
   kind,
   label,
-  open,
   placeholder,
   selected,
   vocabulary,
-  onOpenChange,
   onValueChange,
 }: TagKindEditorProps) => {
   const labelId = useId()
@@ -169,14 +167,13 @@ const TagKindEditor = ({
     <Combobox
       inline
       multiple
+      open
       filter={null}
       items={items}
-      open={open}
       value={selectedNames}
       onInputValueChange={(value) => {
         setInputValue(value)
       }}
-      onOpenChange={onOpenChange}
       onValueChange={onValueChange}
     >
       <div className='flex flex-col gap-1.5'>
@@ -405,21 +402,17 @@ export const LibraryTagEditor = ({
           <TagKindEditor
             kind='genre'
             label='Your genres'
-            open={isOpen}
             placeholder='Add genre'
             selected={genres}
             vocabulary={vocabulary?.genres ?? null}
-            onOpenChange={handleOpenChange}
             onValueChange={handleGenresChange}
           />
           <TagKindEditor
             kind='mood'
             label='Your moods'
-            open={isOpen}
             placeholder='Add mood'
             selected={moods}
             vocabulary={vocabulary?.moods ?? null}
-            onOpenChange={handleOpenChange}
             onValueChange={handleMoodsChange}
           />
         </div>
