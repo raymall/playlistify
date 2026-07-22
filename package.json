@@ -13,6 +13,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "verify:rls": "node --env-file=.env.local scripts/verify-rls.mjs",
+    "verify:import": "node --env-file=.env.local scripts/verify-import.mjs",
     "verify:tokens": "node --env-file=.env.local scripts/check-tokens.mjs",
     "verify:refresh": "node --env-file=.env.local --import tsx scripts/exercise-refresh.mts"
   },
