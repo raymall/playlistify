@@ -348,6 +348,14 @@ export const LibraryEnrichmentPanel = ({
         </Button>
       </div>
 
+      {state.phase === 'idle' && totalCount > pendingCount && (
+        <p className='text-sm text-muted-foreground tabular-nums'>
+          {(totalCount - pendingCount).toLocaleString()} of{' '}
+          {totalCount.toLocaleString()} songs already processed — the button
+          enriches the rest.
+        </p>
+      )}
+
       {(state.phase === 'running' || state.phase === 'error') && (
         <div className='flex flex-col gap-2'>
           <Progress
