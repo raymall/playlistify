@@ -1,6 +1,10 @@
 import Image from 'next/image'
 import Link from 'next/link'
 
+import {
+  type LibraryTag,
+  LibraryTagEditor,
+} from '@/components/library-tag-editor'
 import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
 import {
@@ -14,11 +18,6 @@ import {
 } from '@/components/ui/table'
 import { type SongAIAttributes } from '@/lib/enrichment/schema'
 import { cn } from '@/lib/utils'
-
-export interface LibraryTag {
-  id: string
-  name: string
-}
 
 export interface LibrarySong {
   id: string
@@ -222,7 +221,19 @@ export const LibraryTable = ({
                   </span>
                 </TableCell>
                 <TableCell>
-                  <LibraryTagChips song={song} />
+                  <div className='flex items-start gap-1'>
+                    <div className='min-w-0 flex-1'>
+                      <LibraryTagChips song={song} />
+                    </div>
+                    <LibraryTagEditor
+                      aiAttributes={song.aiAttributes}
+                      aiConfidence={song.aiConfidence}
+                      songId={song.id}
+                      songTitle={titleText}
+                      userGenres={song.userGenres}
+                      userMoods={song.userMoods}
+                    />
+                  </div>
                 </TableCell>
                 <TableCell className='text-right'>
                   <div className='flex flex-col items-end gap-1'>
