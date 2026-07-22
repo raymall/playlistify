@@ -23,7 +23,9 @@ const generated = execFileSync(
 
 // Refuse to clobber the committed file with empty/partial CLI output.
 if (!generated.includes('export type Database')) {
-  console.error('supabase gen types returned unexpected output — types.ts left untouched.')
+  console.error(
+    'supabase gen types returned unexpected output — types.ts left untouched.',
+  )
   process.exit(1)
 }
 

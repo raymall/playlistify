@@ -3,12 +3,14 @@
 Conventional Commits.
 
 ## Splitting changes
+
 - One logical change per commit. Unrelated changes never share a commit — split them, each with its own header, body, and ticket ref.
 - When the working tree mixes concerns, stage selectively (`git add -p` / per-file) rather than committing everything together.
 - Related but distinct steps get separate commits in dependency order (e.g. the enabling `refactor` commit first, then the `feat`/`fix` that builds on it).
 - Trivial drive-by fixes (typo, lint) may ride along only when they're in files the commit already touches; otherwise they get their own commit.
 
 ## Header
+
 `type(scope): [TICKET-ID] subject`
 
 - Types: full standard set — `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
@@ -18,17 +20,20 @@ Conventional Commits.
 - No breaking-change convention.
 
 ## Body
+
 - Blank line after the subject, then a `-` bullet list.
 - Bullets describe what was done: past tense, leading capital.
 - Add a "why" line only when the change isn't obvious.
 - No wrapping; keep it short — don't over-explain.
 
 ## Footer
+
 - `Ticket Ref [BUG-1234]` when the ticket is known; omit otherwise.
 - No other footers.
 - Strip `Co-authored-by:` trailers and any `Generated with Claude Code` footer. No emoji anywhere.
 
 ## Example
+
 ```
 feat(cart): [BUG-1234] add quantity stepper
 
