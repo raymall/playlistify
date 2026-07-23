@@ -60,7 +60,7 @@ const SYSTEM_PROMPT = `You are a music-metadata expert. For each numbered song i
 
 - spotify_track_id: echo the id exactly as given.
 - confidence: 0-1, how certain you are that you know this exact recording.
-- genres (max 4) and moods (max 5): lowercase, concise (1-3 words). Prefer tags from the provided vocabulary lists when they fit; invent new ones only when nothing fits. Genres describe the musical style; moods the emotional feel.
+- genres (max 4) and moods (max 5): lowercase, concise (1-3 words), real and correctly spelled. Reuse a tag from the provided vocabulary lists verbatim whenever it fits — never a spelling variant or near-duplicate of one already listed. Add a new tag only for a genuinely distinct, established style or feeling not already covered, using its canonical widely-recognized name (especially for niche or non-English genres). Genres describe the musical style; moods the emotional feel.
 - energy: 1 (calm) to 5 (intense).
 - tempo_feel: slow, mid, or fast.
 - era: the decade or scene the recording belongs to, e.g. "1990s".

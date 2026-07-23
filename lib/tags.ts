@@ -60,6 +60,9 @@ export const addUserTag = async (
   const vocabulary = await ensureVocabularyIds(supabase, table, [normalized])
   if (vocabulary.status === 'error') return vocabulary
   const tagId = vocabulary.idsByName.get(normalized)
+  // Near-duplicate spellings snap onto the existing vocabulary, so echo the
+  // canonical name the tag actually landed on rather than the raw input.
+  const canonicalName = vocabulary.canonicalByName.get(normalized) ?? normalized
   if (tagId === undefined) {
     return { status: 'error', message: 'Tag could not be created' }
   }
@@ -80,7 +83,7 @@ export const addUserTag = async (
           )
   if (link.error) return { status: 'error', message: link.error.message }
 
-  return { status: 'ok', tag: { id: tagId, name: normalized } }
+  return { status: 'ok', tag: { id: tagId, name: canonicalName } }
 }
 
 export const removeUserTag = async (
