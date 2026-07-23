@@ -18,8 +18,7 @@
     "verify:enrichment": "node --env-file=.env.local scripts/verify-enrichment.mjs",
     "verify:genres": "node --env-file=.env.local --import tsx scripts/verify-genres.mts",
     "verify:tokens": "node --env-file=.env.local scripts/check-tokens.mjs",
-    "verify:refresh": "node --env-file=.env.local --import tsx scripts/exercise-refresh.mts",
-    "backfill:genre-aliases": "node --env-file=.env.local --import tsx scripts/backfill-genre-aliases.mts"
+    "verify:refresh": "node --env-file=.env.local --import tsx scripts/exercise-refresh.mts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.18",
