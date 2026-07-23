@@ -55,6 +55,7 @@ paths:
 
 - Indent with 2 spaces.
 - Single quotes in SCSS.
+- Lint styles with `npm run lint:css` (stylelint — recess-order + standard-scss).
 
 ## Misc
 

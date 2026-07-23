@@ -38,7 +38,10 @@ of it, in order:
    `.env.local`):
    - `npm run verify:rls` — **always** after schema/RLS changes. Proves a
      signed-out (anon) client sees zero rows on every table.
-   - `npm run verify:import` — import/enrichment pipeline changes.
+   - `npm run verify:import` — import pipeline changes.
+   - `npm run verify:enrichment` — enrichment pipeline changes.
+   - `npm run verify:genres` — genre vocabulary / fuzzy-snapping
+     (`lib/vocabulary.ts`) changes.
    - `npm run verify:tokens` — `spotify_tokens` changes.
    - `npm run verify:refresh` — token-refresh flow changes.
 7. **`npm run typecheck`** — regenerated types often surface code the new schema

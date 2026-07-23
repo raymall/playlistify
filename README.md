@@ -23,8 +23,11 @@ Supabase (Postgres + Auth, Spotify OAuth) · Vercel AI SDK · Vercel hosting.
 ## Develop
 
 ```bash
-npm run dev        # dev server on :3000
-npm run lint       # eslint
-npm run typecheck  # tsc --noEmit
-npm run build      # production build
+npm run dev           # dev server on :3000
+npm run lint          # eslint
+npm run lint:css      # stylelint
+npm run format        # prettier --write
+npm run format:check  # prettier --check
+npm run typecheck     # tsc --noEmit
+npm run build         # production build
 ```
