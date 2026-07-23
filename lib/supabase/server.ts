@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
+import { fetchWithRetries } from '@/lib/supabase/fetch'
 import type { Database } from '@/lib/supabase/types'
 
 export async function createClient() {
@@ -15,6 +16,7 @@ export async function createClient() {
   }
 
   return createServerClient<Database>(url, anonKey, {
+    global: { fetch: fetchWithRetries },
     cookies: {
       getAll() {
         return cookieStore.getAll()

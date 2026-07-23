@@ -1,5 +1,6 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
+import { fetchWithRetries } from '@/lib/supabase/fetch'
 import type { Database } from '@/lib/supabase/types'
 
 /**
@@ -21,5 +22,6 @@ export function createAdminClient() {
       autoRefreshToken: false,
       persistSession: false,
     },
+    global: { fetch: fetchWithRetries },
   })
 }
