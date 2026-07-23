@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import { createClient } from '@/lib/supabase/client'
 import {
   Select,
   SelectContent,
@@ -52,6 +53,37 @@ type EnrichmentState =
  * refused song would loop (and bill) forever.
  */
 const MAX_STALLED_BATCHES = 3
+
+/**
+ * Consecutive transient failures (network drop, expired session, gateway or
+ * server hiccup) absorbed before the loop pauses. Wide enough to ride out a
+ * hotspot radio wake-up, not just a single blip; batches are resumable by
+ * design, so a retried batch only re-processes songs that never committed.
+ */
+const MAX_TRANSIENT_FAILURES = 5
+
+/** 1s → 2s → 4s → 8s (capped) between consecutive transient failures. */
+const transientDelayMs = (failures: number) =>
+  Math.min(8000, 1000 * 2 ** (failures - 1))
+
+const isTransientStatus = (status: number) =>
+  status === 401 || status === 408 || status === 429 || status >= 500
+
+/** Abort-aware sleep; resolves early (never rejects) when the run aborts. */
+const wait = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve()
+      return
+    }
+    const finish = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', finish)
+      resolve()
+    }
+    const timer = setTimeout(finish, ms)
+    signal.addEventListener('abort', finish)
+  })
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -156,13 +188,14 @@ export const LibraryEnrichmentPanel = ({
     let counts: EnrichmentCounts | null = null
     let lastDecile = -1
     let stalledBatches = 0
+    let transientFailures = 0
 
     setAnnouncement('Enrichment started.')
 
     while (!isStopped()) {
       setState({ phase: 'running', processedThisRun, counts })
 
-      let response: Response
+      let response: Response | null
       try {
         response = await fetch('/api/enrich', {
           method: 'POST',
@@ -171,17 +204,52 @@ export const LibraryEnrichmentPanel = ({
           signal,
         })
       } catch {
+        response = null
+      }
+      if (isStopped()) return
+
+      // Transient trouble is retried in place with backoff instead of
+      // pausing the run: long enrichment loops outlive auth tokens and hit
+      // the odd network blip, and a redone batch can only re-process songs
+      // that never committed.
+      if (response === null || isTransientStatus(response.status)) {
+        const status = response === null ? null : response.status
+        transientFailures += 1
+        if (transientFailures < MAX_TRANSIENT_FAILURES) {
+          // An expired Supabase session surfaces as 401; rotating the
+          // cookie here lets the retried call authenticate.
+          if (status === 401) await createClient().auth.refreshSession()
+          if (isStopped()) return
+          setAnnouncement('Connection problem — retrying.')
+          await wait(transientDelayMs(transientFailures), signal)
+          continue
+        }
+        let detail: string | null = null
+        if (response !== null) {
+          try {
+            const body: unknown = await response.json()
+            if (isRecord(body)) detail = readString(body.message)
+          } catch {
+            detail = null
+          }
+        }
         if (isStopped()) return
         setState({
           phase: 'error',
           processedThisRun,
-          message: 'Network error — check your connection and retry.',
+          message:
+            status === null
+              ? 'Network error — check your connection and retry.'
+              : status === 401
+                ? 'Your session expired. Reload the page and sign in again.'
+                : detail === null
+                  ? 'Repeated server errors. Wait a moment and retry.'
+                  : `Repeated server errors: ${detail}`,
           counts,
         })
-        setAnnouncement('Enrichment paused by a network error.')
+        setAnnouncement('Enrichment paused by a connection problem.')
         return
       }
-      if (isStopped()) return
 
       let payload: unknown = null
       try {
@@ -192,6 +260,7 @@ export const LibraryEnrichmentPanel = ({
       if (isStopped()) return
 
       const parsed = parseResponse(payload)
+      if (parsed !== null) transientFailures = 0
       if (parsed === null) {
         setState({
           phase: 'error',

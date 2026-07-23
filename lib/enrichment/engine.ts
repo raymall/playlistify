@@ -244,6 +244,10 @@ export const enrichLibraryBatch = async (
   try {
     const result = await generateText({
       model: languageModel,
+      // Above the SDK default (2): flaky links (hotspots, sleeping dev
+      // machines) surface transport errors in streaks, and this is the one
+      // long-lived billable call in the batch.
+      maxRetries: 4,
       output: Output.object({ schema: enrichmentBatchSchema }),
       instructions: SYSTEM_PROMPT,
       prompt: buildUserPrompt(
