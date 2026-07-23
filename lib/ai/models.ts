@@ -7,18 +7,24 @@ export type LlmModel = Tables<'llm_models'>
 /**
  * Enabled rows of the admin-curated model catalog, in dropdown order.
  * An empty list is the designed "enrichment unavailable" state, not an
- * error — the admin disabled everything in Supabase Studio.
+ * error — the admin disabled everything in Supabase Studio. Null means the
+ * query itself failed (e.g. Supabase unreachable) — callers must not treat
+ * that as "no models enabled".
  */
 export const getEnabledModels = async (
   supabase: SupabaseClient<Database>,
-): Promise<LlmModel[]> => {
-  const { data } = await supabase
+): Promise<LlmModel[] | null> => {
+  const { data, error } = await supabase
     .from('llm_models')
     .select('*')
     .eq('enabled', true)
     .order('sort_order')
     .order('label')
-  return data ?? []
+  if (error !== null) {
+    console.error('[models] llm_models query failed:', error.message)
+    return null
+  }
+  return data
 }
 
 /** The is_default row, else the first enabled row (admin cleared the default). */

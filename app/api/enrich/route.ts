@@ -1,3 +1,8 @@
+import {
+  type AuthError,
+  isAuthApiError,
+  isAuthSessionMissingError,
+} from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 import { findEnabledModel, getEnabledModels } from '@/lib/ai/models'
@@ -22,6 +27,18 @@ interface ParsedPayload {
   modelId: string
   processedSoFar: number
 }
+
+/**
+ * Only a provably absent or rejected session is "signed out": no error at
+ * all, no session, or the auth server itself refusing the token. Everything
+ * else (socket failures, rate limits, HTML from a broken proxy) is the auth
+ * service misbehaving — not the user's session dying.
+ */
+const INVALID_SESSION_STATUSES = [400, 401, 403]
+const isSessionDead = (error: AuthError | null) =>
+  error === null ||
+  isAuthSessionMissingError(error) ||
+  (isAuthApiError(error) && INVALID_SESSION_STATUSES.includes(error.status))
 
 const readPayload = (value: unknown): ParsedPayload | null => {
   if (!isRecord(value)) return null
@@ -50,8 +67,22 @@ export async function POST(request: Request) {
   const supabase = await createClient()
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser()
   if (!user) {
+    // A network-level or auth-service getUser() failure is not a signed-out
+    // user — report it as transient (and billing-free) so the client retries
+    // instead of claiming the session expired.
+    if (!isSessionDead(authError)) {
+      return NextResponse.json(
+        {
+          status: 'error',
+          message: 'Could not reach the auth service',
+          safeToRetry: true,
+        },
+        { status: 503 },
+      )
+    }
     return NextResponse.json(
       { status: 'error', message: 'Not signed in' },
       { status: 401 },
@@ -67,6 +98,16 @@ export async function POST(request: Request) {
   }
 
   const models = await getEnabledModels(supabase)
+  if (models === null) {
+    return NextResponse.json(
+      {
+        status: 'error',
+        message: 'Could not load the model catalog',
+        safeToRetry: true,
+      },
+      { status: 503 },
+    )
+  }
   const model = findEnabledModel(models, payload.modelId)
   if (model === null) {
     return NextResponse.json(
@@ -86,7 +127,7 @@ export async function POST(request: Request) {
     model,
     payload.processedSoFar,
   )
-  return NextResponse.json(result, {
-    status: result.status === 'error' ? 500 : 200,
-  })
+  const status =
+    result.status !== 'error' ? 200 : result.safeToRetry === true ? 503 : 500
+  return NextResponse.json(result, { status })
 }

@@ -32,7 +32,9 @@ export interface EnrichmentCounts {
 
 /**
  * Route → client response. HTTP 200 for every non-error status; the client
- * parses this one union.
+ * parses this one union. `safeToRetry` marks failures that happened before
+ * the billable model call — redoing those costs nothing, so the client rides
+ * them out indefinitely instead of burning its bounded retry budget.
  */
 export type EnrichBatchResponse =
   | ({
@@ -43,7 +45,7 @@ export type EnrichBatchResponse =
     } & EnrichmentCounts)
   | ({ status: 'done' } & EnrichmentCounts)
   | ({ status: 'cap_reached' } & EnrichmentCounts)
-  | { status: 'error'; message: string }
+  | { status: 'error'; message: string; safeToRetry?: boolean }
 
 const DEFAULT_BATCH_SIZE = 20
 const MIN_BATCH_SIZE = 1
@@ -68,6 +70,20 @@ const SYSTEM_PROMPT = `You are a music-metadata expert. For each numbered song i
 If you do not recognize a song with reasonable certainty, set confidence below 0.4, return empty arrays for genres, moods, instrumentation, and descriptors, era as an empty string, energy 1, and tempo_feel "mid". Never guess attributes for a song you do not recognize.
 
 Return every input song exactly once — same count, same ids.`
+
+/**
+ * Error result + server-side log (these failures were previously invisible in
+ * the dev console). `safeToRetry: true` = the batch failed before the
+ * billable model call, so retrying it is free.
+ */
+const fail = (
+  step: string,
+  message: string,
+  safeToRetry = false,
+): EnrichBatchResponse => {
+  console.error(`[enrich] ${step} failed: ${message}`)
+  return { status: 'error', message, safeToRetry }
+}
 
 /** Clamped integer env knob; malformed values fall back to the default. */
 const readEnvInt = (
@@ -166,7 +182,7 @@ export const enrichLibraryBatch = async (
     languageModel = resolveLanguageModel(model)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Model unavailable'
-    return { status: 'error', message }
+    return fail('model resolution', message)
   }
 
   const admin = createAdminClient()
@@ -187,7 +203,7 @@ export const enrichLibraryBatch = async (
     countByStatus('unknown'),
   ])
   for (const result of [pendingResult, enrichedResult, unknownResult]) {
-    if (result.error) return { status: 'error', message: result.error.message }
+    if (result.error) return fail('status counts', result.error.message, true)
   }
   const pending = pendingResult.count ?? 0
   const enriched = enrichedResult.count ?? 0
@@ -213,7 +229,7 @@ export const enrichLibraryBatch = async (
     .order('song_id', { ascending: true })
     .limit(batchLimit)
   if (batchResult.error) {
-    return { status: 'error', message: batchResult.error.message }
+    return fail('batch select', batchResult.error.message, true)
   }
   const batchSongs: PendingSong[] = batchResult.data.map((row) => row.songs)
 
@@ -234,10 +250,10 @@ export const enrichLibraryBatch = async (
     admin.from('moods').select('name').order('name').limit(VOCAB_PROMPT_CAP),
   ])
   if (genreVocabResult.error) {
-    return { status: 'error', message: genreVocabResult.error.message }
+    return fail('genre vocabulary', genreVocabResult.error.message, true)
   }
   if (moodVocabResult.error) {
-    return { status: 'error', message: moodVocabResult.error.message }
+    return fail('mood vocabulary', moodVocabResult.error.message, true)
   }
 
   let batch
@@ -262,7 +278,7 @@ export const enrichLibraryBatch = async (
     console.error('[enrich]', error)
     const message =
       error instanceof Error ? error.message : 'Enrichment call failed'
-    return { status: 'error', message }
+    return { status: 'error', message, safeToRetry: false }
   }
 
   // Match results back by the echoed id; drop ids we didn't ask about and
@@ -319,9 +335,13 @@ export const enrichLibraryBatch = async (
     'genres',
     allGenreNames,
   )
-  if (genreIdsResult.status === 'error') return genreIdsResult
+  if (genreIdsResult.status === 'error') {
+    return fail('genre id upsert', genreIdsResult.message)
+  }
   const moodIdsResult = await ensureVocabularyIds(admin, 'moods', allMoodNames)
-  if (moodIdsResult.status === 'error') return moodIdsResult
+  if (moodIdsResult.status === 'error') {
+    return fail('mood id upsert', moodIdsResult.message)
+  }
 
   // Links land before the status flip so a mid-batch crash leaves the song
   // pending and the retry's idempotent inserts absorb the repeat.
@@ -346,14 +366,14 @@ export const enrichLibraryBatch = async (
       onConflict: 'song_id,genre_id',
       ignoreDuplicates: true,
     })
-    if (result.error) return { status: 'error', message: result.error.message }
+    if (result.error) return fail('genre links', result.error.message)
   }
   if (songMoodRows.length > 0) {
     const result = await admin.from('song_moods').upsert(songMoodRows, {
       onConflict: 'song_id,mood_id',
       ignoreDuplicates: true,
     })
-    if (result.error) return { status: 'error', message: result.error.message }
+    if (result.error) return fail('mood links', result.error.message)
   }
 
   const modelString = toEnrichmentModelString(model)
@@ -377,7 +397,7 @@ export const enrichLibraryBatch = async (
         enriched_at: enrichedAt,
       })
       .eq('id', write.songId)
-    if (result.error) return { status: 'error', message: result.error.message }
+    if (result.error) return fail('enriched write', result.error.message)
   }
 
   for (const write of unknownWrites) {
@@ -391,7 +411,7 @@ export const enrichLibraryBatch = async (
         enriched_at: enrichedAt,
       })
       .eq('id', write.songId)
-    if (result.error) return { status: 'error', message: result.error.message }
+    if (result.error) return fail('unknown write', result.error.message)
   }
 
   const batchEnriched = enrichedWrites.length

@@ -5,7 +5,6 @@ import { useEffect, useId, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { createClient } from '@/lib/supabase/client'
 import {
   Select,
   SelectContent,
@@ -17,6 +16,7 @@ import {
   type EnrichBatchResponse,
   type EnrichmentCounts,
 } from '@/lib/enrichment/engine'
+import { createClient } from '@/lib/supabase/client'
 
 /** Catalog row shape the server page passes down — plain data only. */
 export interface EnrichmentModelOption {
@@ -37,6 +37,9 @@ type EnrichmentState =
       phase: 'running'
       processedThisRun: number
       counts: EnrichmentCounts | null
+      /** Non-null while riding out safe-to-retry server failures; holds the
+       * server's error detail ('' when it sent none). */
+      retryDetail: string | null
     }
   | { phase: 'capReached'; counts: EnrichmentCounts }
   | {
@@ -55,16 +58,32 @@ type EnrichmentState =
 const MAX_STALLED_BATCHES = 3
 
 /**
- * Consecutive transient failures (network drop, expired session, gateway or
- * server hiccup) absorbed before the loop pauses. Wide enough to ride out a
- * hotspot radio wake-up, not just a single blip; batches are resumable by
- * design, so a retried batch only re-processes songs that never committed.
+ * Consecutive ambiguous failures (client network drop, 401, gateway errors
+ * with no readable body) absorbed before the loop pauses. Batches are
+ * resumable by design, so a retried batch only re-processes songs that never
+ * committed.
  */
-const MAX_TRANSIENT_FAILURES = 5
+const MAX_TRANSIENT_FAILURES = 8
 
-/** 1s → 2s → 4s → 8s (capped) between consecutive transient failures. */
+/**
+ * Errors the server explicitly marks `safeToRetry: false` happened after the
+ * billable model call — every automatic retry re-bills a full batch. One
+ * retry absorbs a mid-batch blip; a second failure pauses before the loop
+ * burns money on a deterministic error.
+ */
+const MAX_BILLED_FAILURES = 2
+
+/**
+ * Errors marked `safeToRetry: true` cost nothing to redo, so they ride out
+ * long outages (a sleep-wake or dropped uplink can run the better part of an
+ * hour). At the 15s delay cap plus request time this is roughly an hour of
+ * riding before the loop gives up and asks for a manual retry.
+ */
+const MAX_SAFE_RETRIES = 120
+
+/** 1s → 2s → 4s → 8s → 15s (capped) between consecutive failed attempts. */
 const transientDelayMs = (failures: number) =>
-  Math.min(8000, 1000 * 2 ** (failures - 1))
+  Math.min(15000, 1000 * 2 ** (failures - 1))
 
 const isTransientStatus = (status: number) =>
   status === 401 || status === 408 || status === 429 || status >= 500
@@ -128,6 +147,7 @@ const parseResponse = (value: unknown): EnrichBatchResponse | null => {
     return {
       status,
       message: readString(value.message) ?? 'Something went wrong.',
+      safeToRetry: value.safeToRetry === true,
     }
   }
   return null
@@ -189,11 +209,16 @@ export const LibraryEnrichmentPanel = ({
     let lastDecile = -1
     let stalledBatches = 0
     let transientFailures = 0
+    let billedFailures = 0
+    let safeRetries = 0
+    // Sticky across the retried request so the banner doesn't flap off while
+    // the next attempt is in flight; cleared only by a parsed success.
+    let retryDetail: string | null = null
 
     setAnnouncement('Enrichment started.')
 
     while (!isStopped()) {
-      setState({ phase: 'running', processedThisRun, counts })
+      setState({ phase: 'running', processedThisRun, counts, retryDetail })
 
       let response: Response | null
       try {
@@ -214,8 +239,45 @@ export const LibraryEnrichmentPanel = ({
       // that never committed.
       if (response === null || isTransientStatus(response.status)) {
         const status = response === null ? null : response.status
+        let detail: string | null = null
+        let isSafeToRetry = false
+        let isBilledFailure = false
+        if (response !== null) {
+          try {
+            const body: unknown = await response.json()
+            if (isRecord(body)) {
+              detail = readString(body.message)
+              isSafeToRetry = body.safeToRetry === true
+              // Explicit false means the billable model call already ran —
+              // an absent field (gateway errors, HTML bodies) stays ambiguous.
+              isBilledFailure = body.safeToRetry === false
+            }
+          } catch {
+            detail = null
+          }
+        }
+        if (isStopped()) return
+
+        // The server marks failures that happened before the billable model
+        // call as safe to retry. Redoing those costs nothing, so ride them
+        // out — a laptop wake or dropped uplink can run the better part of
+        // an hour. Navigating away still aborts the loop.
+        if (isSafeToRetry && safeRetries < MAX_SAFE_RETRIES) {
+          safeRetries += 1
+          retryDetail = detail ?? ''
+          setState({ phase: 'running', processedThisRun, counts, retryDetail })
+          setAnnouncement('Connection problem — retrying automatically.')
+          await wait(transientDelayMs(safeRetries), signal)
+          continue
+        }
+
         transientFailures += 1
-        if (transientFailures < MAX_TRANSIENT_FAILURES) {
+        if (isBilledFailure) billedFailures += 1
+        if (
+          !isSafeToRetry &&
+          transientFailures < MAX_TRANSIENT_FAILURES &&
+          billedFailures < MAX_BILLED_FAILURES
+        ) {
           // An expired Supabase session surfaces as 401; rotating the
           // cookie here lets the retried call authenticate.
           if (status === 401) await createClient().auth.refreshSession()
@@ -224,16 +286,6 @@ export const LibraryEnrichmentPanel = ({
           await wait(transientDelayMs(transientFailures), signal)
           continue
         }
-        let detail: string | null = null
-        if (response !== null) {
-          try {
-            const body: unknown = await response.json()
-            if (isRecord(body)) detail = readString(body.message)
-          } catch {
-            detail = null
-          }
-        }
-        if (isStopped()) return
         setState({
           phase: 'error',
           processedThisRun,
@@ -260,7 +312,12 @@ export const LibraryEnrichmentPanel = ({
       if (isStopped()) return
 
       const parsed = parseResponse(payload)
-      if (parsed !== null) transientFailures = 0
+      if (parsed !== null) {
+        transientFailures = 0
+        billedFailures = 0
+        safeRetries = 0
+        retryDetail = null
+      }
       if (parsed === null) {
         setState({
           phase: 'error',
@@ -442,6 +499,12 @@ export const LibraryEnrichmentPanel = ({
                     : ''
                 }`}
           </p>
+          {state.phase === 'running' && state.retryDetail !== null && (
+            <p className='text-sm text-muted-foreground'>
+              Connection problem — retrying automatically…
+              {state.retryDetail === '' ? '' : ` (${state.retryDetail})`}
+            </p>
+          )}
         </div>
       )}
 

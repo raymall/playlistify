@@ -65,7 +65,9 @@ export default async function LibraryPage({
       getEnabledModels(supabase),
     ])
     pendingSongs = pendingResult.count ?? 0
-    const mappedModels = filterMappedModels(enabledModels)
+    // Null = catalog query failed; render the "no models" state rather than
+    // crashing the page — the enrich route re-checks with its own error.
+    const mappedModels = filterMappedModels(enabledModels ?? [])
     modelOptions = mappedModels.map((model) => ({
       id: model.id,
       label: model.label,
