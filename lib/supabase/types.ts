@@ -21,16 +21,19 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          is_approved: boolean
           name: string
         }
         Insert: {
           created_at?: string
           id?: string
+          is_approved?: boolean
           name: string
         }
         Update: {
           created_at?: string
           id?: string
+          is_approved?: boolean
           name?: string
         }
         Relationships: []
@@ -72,16 +75,19 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          is_approved: boolean
           name: string
         }
         Insert: {
           created_at?: string
           id?: string
+          is_approved?: boolean
           name: string
         }
         Update: {
           created_at?: string
           id?: string
+          is_approved?: boolean
           name?: string
         }
         Relationships: []
@@ -333,6 +339,33 @@ export type Database = {
           },
         ]
       }
+      unmatched_tags: {
+        Row: {
+          first_seen: string
+          id: string
+          kind: string
+          last_seen: string
+          name: string
+          occurrences: number
+        }
+        Insert: {
+          first_seen?: string
+          id?: string
+          kind: string
+          last_seen?: string
+          name: string
+          occurrences?: number
+        }
+        Update: {
+          first_seen?: string
+          id?: string
+          kind?: string
+          last_seen?: string
+          name?: string
+          occurrences?: number
+        }
+        Relationships: []
+      }
       user_genres: {
         Row: {
           created_at: string
@@ -460,6 +493,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      log_unmatched_tags: {
+        Args: { p_kind: string; p_names: string[] }
+        Returns: undefined
+      }
       songs_artists_search: { Args: { arr: string[] }; Returns: string }
     }
     Enums: {
