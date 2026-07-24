@@ -26,6 +26,11 @@ the same commit (rule in `AGENTS.md`).
   routes (server-only).
 - `lib/auth/` — `spotify.ts` (browser-side OAuth kick-off; scopes live here),
   `metadata.ts` (user_metadata narrowing).
+- `lib/chat/` — chat playlist assistant: `library-search.ts` (server-only
+  RLS query layer — tag summary, enriched index, link-table + candidate
+  fetches), `tools.ts` (`createChatTools`: `search_library` + `propose_playlist`
+  bound to the RLS client), `prompt.ts` (`buildChatSystemPrompt`),
+  `contract.ts` (client-safe proposal + create-response parsers).
 - `lib/enrichment/` — `engine.ts` (batch enrichment: LLM call + all DB
   writes), `schema.ts` (zod output schema, confidence threshold,
   `ai_attributes` parser).
@@ -90,6 +95,8 @@ processedSoFar}`, `maxDuration` 300
 - `POST /api/playlists` — create a playlist from a curated proposal, body
   `{name, description, songIds, prompt}`
   (`app/api/playlists/route.ts` → `lib/playlists/create.ts`).
+- `POST /api/chat` — streaming chat, body `{messages}` (UIMessage[]),
+  `maxDuration` 300 (`app/api/chat/route.ts` → `lib/chat/*`).
 
 ## Core flows
 
@@ -132,8 +139,18 @@ vocabulary upsert via `lib/vocabulary.ts` (`ensureVocabularyIds` — the open
 path; personal tags are not gated by `is_approved`), link rows in
 `user_genres`/`user_moods`.
 
-**Chat / selection** — not built yet — see MVP-PLAN.md step 7 (`/chat` is a
-placeholder page).
+**Chat / selection** — `components/chat-screen.tsx` (`useChat` +
+`DefaultChatTransport`) streams to `POST /api/chat`. The route builds a
+library-grounded system prompt (`lib/chat/prompt.ts` over
+`getLibraryTagSummary`) and runs `streamText` with a `stepCountIs(8)` tool
+loop. `search_library` (`lib/chat/tools.ts`) resolves requested tags against
+the approved vocabulary (`matchApprovedVocabulary`), unions AI + user link
+tables per kind and intersects across kinds, intersects with the enriched
+index (recency), scans ≤500, TS-post-filters by energy/era/exclude, and
+returns ≤120 candidates. `propose_playlist` verifies ownership and returns the
+preview payload. The proposal renders ONLY in
+`components/playlist-preview-panel.tsx`, never as chat text (prompt- and
+renderer-enforced).
 
 **Playlist creation** — the preview panel POSTs a curated proposal to
 `/api/playlists` → `lib/playlists/create.ts` (`createPlaylistForUser`, RLS

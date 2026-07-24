@@ -1,0 +1,349 @@
+// Server-only chat tools. createChatTools closes over the request's RLS client
+// (user-scoped by construction) and memoizes the enriched-library index for the
+// request. Two tools: search_library (SQL narrows, LLM curates) and
+// propose_playlist (verifies + shapes the preview payload). All optional inputs
+// are modeled required-with-null/empty to stay inside OpenAI strict tool
+// schemas.
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { tool } from 'ai'
+import { z } from 'zod'
+
+import type { ProposalTrack } from '@/lib/chat/contract'
+import {
+  type CandidateRow,
+  type EnrichedIndexEntry,
+  fetchCandidateRows,
+  fetchLinkedSongIds,
+  getEnrichedLibraryIndex,
+} from '@/lib/chat/library-search'
+import type { Database } from '@/lib/supabase/types'
+import { matchApprovedVocabulary, normalizeTagName } from '@/lib/vocabulary'
+
+type Client = SupabaseClient<Database>
+
+/** Enriched songs intersected before the (expensive) row fetch. */
+const SCAN_CAP = 500
+/** Candidate rows returned to the model per search. */
+const CANDIDATE_CAP = 120
+const OWNERSHIP_CHUNK = 100
+
+const NAME_MAX = 100
+const DESCRIPTION_MAX = 300
+const REASON_MAX = 160
+
+const searchLibraryInputSchema = z.object({
+  genres: z.array(z.string()).max(8),
+  moods: z.array(z.string()).max(8),
+  eras: z.array(z.string()).max(4),
+  excludeTerms: z.array(z.string()).max(8),
+  energyMin: z.number().int().min(1).max(5).nullable(),
+  energyMax: z.number().int().min(1).max(5).nullable(),
+})
+
+const proposePlaylistInputSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  tracks: z
+    .array(
+      z.object({
+        songId: z.string(),
+        reason: z.string(),
+      }),
+    )
+    .max(50),
+})
+
+type SearchLibraryInput = z.infer<typeof searchLibraryInputSchema>
+
+const normalizeNames = (raw: string[]): string[] => {
+  const seen = new Set<string>()
+  for (const value of raw) {
+    const name = normalizeTagName(value)
+    if (name.length > 0) seen.add(name)
+  }
+  return [...seen]
+}
+
+const union = (a: Set<string>, b: Set<string>): Set<string> => {
+  const out = new Set(a)
+  for (const value of b) out.add(value)
+  return out
+}
+
+const intersect = (a: Set<string>, b: Set<string>): Set<string> => {
+  const out = new Set<string>()
+  for (const value of a) if (b.has(value)) out.add(value)
+  return out
+}
+
+const buildHaystack = (row: CandidateRow): string =>
+  [
+    row.title ?? '',
+    ...row.artists,
+    ...row.genres,
+    ...row.moods,
+    row.attributes?.era ?? '',
+    ...(row.attributes?.descriptors ?? []),
+    ...(row.attributes?.instrumentation ?? []),
+  ]
+    .join(' ')
+    .toLowerCase()
+
+const passesAttributeFilters = (
+  row: CandidateRow,
+  input: SearchLibraryInput,
+): boolean => {
+  if (input.energyMin !== null || input.energyMax !== null) {
+    const energy = row.attributes?.energy
+    if (typeof energy !== 'number') return false
+    let lo = input.energyMin ?? 1
+    let hi = input.energyMax ?? 5
+    if (lo > hi) [lo, hi] = [hi, lo]
+    if (energy < lo || energy > hi) return false
+  }
+
+  if (input.eras.length > 0) {
+    const era = normalizeTagName(row.attributes?.era ?? '')
+    if (era.length === 0) return false
+    // Normalized equality or suffix match, so "90s" matches "1990s".
+    const hasEraMatch = input.eras.some((rawEra) => {
+      const req = normalizeTagName(rawEra)
+      return (
+        req.length > 0 &&
+        (era === req || era.endsWith(req) || req.endsWith(era))
+      )
+    })
+    if (!hasEraMatch) return false
+  }
+
+  if (input.excludeTerms.length > 0) {
+    const haystack = buildHaystack(row)
+    const terms = input.excludeTerms
+      .map((term) => term.trim().toLowerCase())
+      .filter((term) => term.length > 0)
+    if (terms.some((term) => haystack.includes(term))) return false
+  }
+
+  return true
+}
+
+const toCandidate = (row: CandidateRow) => ({
+  songId: row.songId,
+  title: row.title ?? 'Untitled',
+  artists: row.artists,
+  era: row.attributes?.era ?? null,
+  energy: row.attributes?.energy ?? null,
+  tempoFeel: row.attributes?.tempo_feel ?? null,
+  genres: row.genres,
+  moods: row.moods,
+  durationMs: row.durationMs,
+})
+
+const searchLibrary = async (
+  supabase: Client,
+  getIndex: () => Promise<EnrichedIndexEntry[]>,
+  input: SearchLibraryInput,
+) => {
+  const index = await getIndex()
+  if (index.length === 0) {
+    return {
+      totalTagMatches: 0,
+      scanned: 0,
+      returned: 0,
+      truncated: false,
+      unmatchedTags: [],
+      candidates: [],
+      hint: 'Your enriched library is empty — enrich songs on the Library page first.',
+    }
+  }
+
+  const genreNames = normalizeNames(input.genres)
+  const moodNames = normalizeNames(input.moods)
+
+  const genreMatch = await matchApprovedVocabulary(
+    supabase,
+    'genres',
+    genreNames,
+  )
+  if (genreMatch.status === 'error') throw new Error(genreMatch.message)
+  const moodMatch = await matchApprovedVocabulary(supabase, 'moods', moodNames)
+  if (moodMatch.status === 'error') throw new Error(moodMatch.message)
+  const unmatchedTags = [...genreMatch.unmatched, ...moodMatch.unmatched]
+
+  const genreIds = [...new Set(genreMatch.idsByName.values())]
+  const moodIds = [...new Set(moodMatch.idsByName.values())]
+
+  // AI-linked OR user-linked within a kind; AND across kinds. null = no tag
+  // filter (the whole enriched index qualifies).
+  let matchedIds: Set<string> | null = null
+  if (genreNames.length > 0) {
+    const [ai, user] = await Promise.all([
+      fetchLinkedSongIds(supabase, 'song_genres', genreIds),
+      fetchLinkedSongIds(supabase, 'user_genres', genreIds),
+    ])
+    matchedIds = union(ai, user)
+  }
+  if (moodNames.length > 0) {
+    const [ai, user] = await Promise.all([
+      fetchLinkedSongIds(supabase, 'song_moods', moodIds),
+      fetchLinkedSongIds(supabase, 'user_moods', moodIds),
+    ])
+    const moodSet = union(ai, user)
+    matchedIds = matchedIds === null ? moodSet : intersect(matchedIds, moodSet)
+  }
+
+  const filterIds = matchedIds
+  const orderedIds =
+    filterIds === null
+      ? index.map((entry) => entry.songId)
+      : index
+          .filter((entry) => filterIds.has(entry.songId))
+          .map((entry) => entry.songId)
+
+  const totalTagMatches = orderedIds.length
+  const scanIds = orderedIds.slice(0, SCAN_CAP)
+
+  // fetchCandidateRows returns rows in arbitrary order — reorder to recency.
+  const rowsById = new Map(
+    (await fetchCandidateRows(supabase, scanIds)).map((row) => [
+      row.songId,
+      row,
+    ]),
+  )
+  const orderedRows = scanIds
+    .map((songId) => rowsById.get(songId))
+    .filter((row): row is CandidateRow => row !== undefined)
+
+  const filtered = orderedRows.filter((row) =>
+    passesAttributeFilters(row, input),
+  )
+  const candidates = filtered.slice(0, CANDIDATE_CAP).map(toCandidate)
+
+  const isTruncated =
+    totalTagMatches > scanIds.length || filtered.length > candidates.length
+
+  let hint: string | undefined
+  if (candidates.length === 0) {
+    hint =
+      unmatchedTags.length > 0
+        ? 'No songs matched. Some tags are not in the vocabulary — try broader or different tags.'
+        : 'No songs matched these filters. Relax the energy range, eras, or tags and search again.'
+  }
+
+  return {
+    totalTagMatches,
+    scanned: scanIds.length,
+    returned: candidates.length,
+    truncated: isTruncated,
+    unmatchedTags,
+    candidates,
+    hint,
+  }
+}
+
+const clampName = (raw: string): string => {
+  const trimmed = raw.trim()
+  const value = trimmed.length > 0 ? trimmed : 'Playlist'
+  return value.slice(0, NAME_MAX)
+}
+
+const proposePlaylist = async (
+  supabase: Client,
+  input: z.infer<typeof proposePlaylistInputSchema>,
+) => {
+  // Dedupe by songId, preserving first-seen (proposal) order.
+  const reasonBySongId = new Map<string, string>()
+  const orderedIds: string[] = []
+  for (const track of input.tracks) {
+    if (reasonBySongId.has(track.songId)) continue
+    reasonBySongId.set(track.songId, track.reason.trim().slice(0, REASON_MAX))
+    orderedIds.push(track.songId)
+  }
+
+  if (orderedIds.length === 0) {
+    return {
+      status: 'error' as const,
+      message: 'Propose at least one song from search_library results.',
+    }
+  }
+
+  // Verify ownership against the user's library (chunked).
+  const owned = new Set<string>()
+  for (let i = 0; i < orderedIds.length; i += OWNERSHIP_CHUNK) {
+    const chunk = orderedIds.slice(i, i + OWNERSHIP_CHUNK)
+    const { data, error } = await supabase
+      .from('user_songs')
+      .select('song_id')
+      .in('song_id', chunk)
+    if (error) throw new Error(error.message)
+    for (const row of data) owned.add(row.song_id)
+  }
+
+  const rejectedSongIds = orderedIds.filter((id) => !owned.has(id))
+  const validIds = orderedIds.filter((id) => owned.has(id))
+  if (validIds.length === 0) {
+    return {
+      status: 'error' as const,
+      message:
+        'None of these songs are in your library. Use only songIds returned by search_library.',
+    }
+  }
+
+  const rowsById = new Map(
+    (await fetchCandidateRows(supabase, validIds)).map((row) => [
+      row.songId,
+      row,
+    ]),
+  )
+
+  const tracks: ProposalTrack[] = []
+  for (const songId of validIds) {
+    const row = rowsById.get(songId)
+    if (row === undefined) continue
+    tracks.push({
+      songId,
+      title: row.title ?? 'Untitled',
+      artists: row.artists,
+      albumArtUrl: row.albumArtUrl,
+      durationMs: row.durationMs,
+      reason: reasonBySongId.get(songId) ?? '',
+    })
+  }
+
+  return {
+    status: 'ok' as const,
+    name: clampName(input.name),
+    description: input.description.trim().slice(0, DESCRIPTION_MAX),
+    tracks,
+    rejectedSongIds,
+  }
+}
+
+/**
+ * Build the chat tool set bound to the request's RLS client. The enriched-
+ * library index is fetched once and shared across every search_library call in
+ * the request.
+ */
+export const createChatTools = (supabase: Client) => {
+  let indexPromise: Promise<EnrichedIndexEntry[]> | null = null
+  const getIndex = () => {
+    indexPromise ??= getEnrichedLibraryIndex(supabase)
+    return indexPromise
+  }
+
+  return {
+    search_library: tool({
+      description:
+        'Search the user\'s own enriched library. Filters are ANDed across kinds and ORed within a kind; energy is 1 (calm) to 5 (intense); eras use a decade format like "1990s". Returns candidate songs (songId, title, artists, era, energy, tempoFeel, genres, moods) to curate from — only propose songIds returned here. Call with empty arrays and null energies to get the most recent enriched songs.',
+      inputSchema: searchLibraryInputSchema,
+      execute: (input) => searchLibrary(supabase, getIndex, input),
+    }),
+    propose_playlist: tool({
+      description:
+        'Propose the final playlist to show the user in the preview panel. Provide a name, a short description, and 1–50 tracks (each a songId from search_library plus a one-line reason). This renders the proposal UI — do not also list the tracks in chat.',
+      inputSchema: proposePlaylistInputSchema,
+      execute: (input) => proposePlaylist(supabase, input),
+    }),
+  }
+}
