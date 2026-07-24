@@ -14,7 +14,9 @@ the same commit (rule in `AGENTS.md`).
   (import, enrich, tags).
 - `app/auth/` — OAuth callback + signout route handlers.
 - `components/` — React components (kebab-case, one primary per file);
-  `library-*.tsx` are the `/library` client panels.
+  `library-*.tsx` are the `/library` client panels; `chat-screen.tsx`
+  (chat state owner), `chat-conversation.tsx` (messages + composer), and
+  `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI.
 - `components/ui/` — shadcn/ui primitives, built on `@base-ui/react` (not
   Radix). Touch only to restyle a primitive; add new ones via the shadcn CLI.
 - `lib/ai/` — `models.ts` (reads over the `llm_models` catalog),
@@ -71,7 +73,10 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 - `/library` — import panel, enrichment panel (model dropdown), searchable
   paginated table with per-song tag editor (`app/library/page.tsx` +
   `components/library-{import-panel,enrichment-panel,table,tag-editor}.tsx`).
-- `/chat` — static placeholder; chat not built yet (`app/chat/page.tsx`).
+- `/chat` — describe a playlist; conversation streams beside a live preview
+  panel (rename, edit, drop tracks, create). Server-rendered empty states for
+  no-library / not-yet-enriched (`app/chat/page.tsx` + `components/chat-*`,
+  `components/playlist-preview-panel.tsx`).
 - `/playlists` — created-playlist history: name, track count, date, prompt,
   "Open in Spotify" link (`app/playlists/page.tsx`). Read-only, minimal.
 - Chrome: `app/layout.tsx` — fonts, `ThemeProvider`, `SiteHeader` (nav,
