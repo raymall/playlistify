@@ -1,3 +1,7 @@
+// Read-side helpers over the llm_models catalog (rows admin-curated in
+// Supabase Studio). Used by the /library page to build the model dropdown
+// and by /api/enrich to re-validate the client's chosen model.
+
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database, Tables } from '@/lib/supabase/types'

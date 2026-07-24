@@ -2,6 +2,12 @@
 
 `MVP-PLAN.md` is the source of truth for scope, stack, and the MVP build order. Read it before starting feature work.
 
+# Codebase map
+
+`ARCHITECTURE.md` is the wayfinding index — directory map, route inventory, core flows, and where new code goes. Read it **before** searching the codebase for where something lives; it names the exact files.
+
+Keeping it current is part of every change: any change that adds, moves, renames, or removes files, routes, tables, or env vars must update `ARCHITECTURE.md` in the same commit.
+
 # Coding rules
 
 Path-scoped rule files live in `.claude/rules/` and auto-load each session.

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { readDisplayName } from '@/lib/auth/metadata'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
@@ -26,8 +27,6 @@ export async function GET(request: Request) {
 
       // user_metadata values are provider-controlled and untyped — narrow, don't trust.
       const metadata: Record<string, unknown> = user.user_metadata
-      const fallbackDisplayName =
-        typeof metadata.name === 'string' ? metadata.name : null
 
       // profiles row first: spotify_tokens has an FK to it.
       await admin.from('profiles').upsert({
@@ -37,36 +36,34 @@ export async function GET(request: Request) {
           (typeof metadata.provider_id === 'string'
             ? metadata.provider_id
             : null),
-        display_name:
-          typeof metadata.full_name === 'string'
-            ? metadata.full_name
-            : fallbackDisplayName,
+        display_name: readDisplayName(metadata),
       })
 
       const providerToken = session.provider_token
       const providerRefreshToken = session.provider_refresh_token
 
-      if (providerToken && providerRefreshToken) {
-        await admin.from('spotify_tokens').upsert({
-          user_id: user.id,
+      if (providerToken) {
+        const tokenFields = {
           access_token: providerToken,
-          refresh_token: providerRefreshToken,
           // Supabase doesn't expose the provider token's expiry; Spotify
           // access tokens last 60 min — store a conservative 55.
           expires_at: new Date(Date.now() + 55 * 60 * 1000).toISOString(),
           updated_at: new Date().toISOString(),
-        })
-      } else if (providerToken) {
-        // Refresh token absent on this exchange: update the access token,
-        // keep any previously captured refresh token.
-        await admin
-          .from('spotify_tokens')
-          .update({
-            access_token: providerToken,
-            expires_at: new Date(Date.now() + 55 * 60 * 1000).toISOString(),
-            updated_at: new Date().toISOString(),
+        }
+        if (providerRefreshToken) {
+          await admin.from('spotify_tokens').upsert({
+            user_id: user.id,
+            refresh_token: providerRefreshToken,
+            ...tokenFields,
           })
-          .eq('user_id', user.id)
+        } else {
+          // Refresh token absent on this exchange: update the access token,
+          // keep any previously captured refresh token.
+          await admin
+            .from('spotify_tokens')
+            .update(tokenFields)
+            .eq('user_id', user.id)
+        }
       }
 
       return NextResponse.redirect(`${origin}/chat`)

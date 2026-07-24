@@ -1,9 +1,12 @@
+// Personal tags: the add/remove mutations behind /api/tags, plus the payload
+// and response types shared with components/library-tag-editor.tsx.
+
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/lib/supabase/types'
 import {
   ensureVocabularyIds,
-  MAX_TAG_LENGTH,
+  isValidTagName,
   normalizeTagName,
 } from '@/lib/vocabulary'
 
@@ -40,7 +43,7 @@ export const addUserTag = async (
   { songId, kind, name }: TagAddPayload,
 ): Promise<TagAddResponse> => {
   const normalized = normalizeTagName(name)
-  if (normalized.length === 0 || normalized.length > MAX_TAG_LENGTH) {
+  if (!isValidTagName(normalized)) {
     return { status: 'error', message: 'Invalid tag name' }
   }
 

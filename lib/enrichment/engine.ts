@@ -9,10 +9,10 @@ import {
   type SongAIAttributes,
 } from '@/lib/enrichment/schema'
 import { createAdminClient } from '@/lib/supabase/admin'
-import type { TablesInsert } from '@/lib/supabase/types'
+import type { Tables, TablesInsert } from '@/lib/supabase/types'
 import {
   ensureVocabularyIds,
-  MAX_TAG_LENGTH,
+  isValidTagName,
   normalizeTagName,
 } from '@/lib/vocabulary'
 
@@ -99,14 +99,10 @@ const readEnvInt = (
   return Math.min(max, Math.max(min, parsed))
 }
 
-interface PendingSong {
-  id: string
-  spotify_track_id: string
-  title: string | null
-  artists: string[] | null
-  album: string | null
-  release_date: string | null
-}
+type PendingSong = Pick<
+  Tables<'songs'>,
+  'id' | 'spotify_track_id' | 'title' | 'artists' | 'album' | 'release_date'
+>
 
 const describeSong = (song: PendingSong, index: number): string => {
   const title = song.title ?? 'unknown title'
@@ -142,7 +138,7 @@ const normalizeTagList = (names: string[]): string[] => {
   const seen = new Set<string>()
   for (const raw of names) {
     const name = normalizeTagName(raw)
-    if (name.length === 0 || name.length > MAX_TAG_LENGTH) continue
+    if (!isValidTagName(name)) continue
     seen.add(name)
   }
   return [...seen]
@@ -379,7 +375,9 @@ export const enrichLibraryBatch = async (
   const modelString = toEnrichmentModelString(model)
   const enrichedAt = new Date().toISOString()
 
-  for (const write of enrichedWrites) {
+  // Every update targets a distinct row with no ordering dependency, so the
+  // status flips go out concurrently instead of one round trip per song.
+  const enrichedUpdates = enrichedWrites.map((write) => {
     const attributes: SongAIAttributes = {
       energy: write.entry.energy,
       tempo_feel: write.entry.tempo_feel,
@@ -387,7 +385,7 @@ export const enrichLibraryBatch = async (
       instrumentation: write.entry.instrumentation,
       descriptors: write.entry.descriptors,
     }
-    const result = await admin
+    return admin
       .from('songs')
       .update({
         ai_confidence: write.confidence,
@@ -397,11 +395,9 @@ export const enrichLibraryBatch = async (
         enriched_at: enrichedAt,
       })
       .eq('id', write.songId)
-    if (result.error) return fail('enriched write', result.error.message)
-  }
-
-  for (const write of unknownWrites) {
-    const result = await admin
+  })
+  const unknownUpdates = unknownWrites.map((write) =>
+    admin
       .from('songs')
       .update({
         ai_confidence: write.confidence,
@@ -410,7 +406,16 @@ export const enrichLibraryBatch = async (
         enrichment_model: modelString,
         enriched_at: enrichedAt,
       })
-      .eq('id', write.songId)
+      .eq('id', write.songId),
+  )
+  const [enrichedResults, unknownResults] = await Promise.all([
+    Promise.all(enrichedUpdates),
+    Promise.all(unknownUpdates),
+  ])
+  for (const result of enrichedResults) {
+    if (result.error) return fail('enriched write', result.error.message)
+  }
+  for (const result of unknownResults) {
     if (result.error) return fail('unknown write', result.error.message)
   }
 

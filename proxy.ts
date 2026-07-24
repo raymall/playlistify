@@ -37,6 +37,12 @@ function hasAuthCookie(request: NextRequest) {
     .some((cookie) => /^sb-.+-auth-token(\.\d+)?$/.test(cookie.name))
 }
 
+/**
+ * Runs on every matched request (Next's middleware equivalent): refreshes
+ * the Supabase session cookie, bounces signed-out users off protected pages,
+ * and lands signed-in users on /chat instead of /. `/api/*` is matched (so
+ * sessions refresh) but never redirected — API routes gate on getUser().
+ */
 export async function proxy(request: NextRequest) {
   // Never refresh tokens or redirect on prefetches — see isPrefetch above.
   if (isPrefetch(request)) {

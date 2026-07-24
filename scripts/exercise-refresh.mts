@@ -7,16 +7,12 @@ import { createClient } from '@supabase/supabase-js'
 
 import { getValidSpotifyToken } from '../lib/spotify/token'
 import type { Database } from '../lib/supabase/types'
+import { requireEnv } from './lib/env.mjs'
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-if (!url || !serviceKey) {
-  console.error(
-    'Missing env vars — run with: node --env-file=.env.local --import tsx',
-  )
-  process.exit(1)
-}
+const [url, serviceKey] = requireEnv(
+  ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+  ' --import tsx',
+)
 
 const service = createClient<Database>(url, serviceKey)
 

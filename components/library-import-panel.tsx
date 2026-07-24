@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { signInWithSpotify } from '@/lib/auth/spotify'
+import { isRecord, readNumber, readString } from '@/lib/json'
+import { wait } from '@/lib/sleep'
 import { type ImportBatchResponse } from '@/lib/spotify/import'
 
 interface LibraryImportPanelProps {
@@ -17,7 +19,6 @@ type ImportState =
   | {
       phase: 'running'
       offset: number
-      processed: number
       total: number | null
       imported: number
     }
@@ -25,7 +26,6 @@ type ImportState =
       phase: 'waiting'
       offset: number
       secondsLeft: number
-      processed: number
       total: number | null
       imported: number
     }
@@ -33,7 +33,6 @@ type ImportState =
       phase: 'error'
       offset: number
       message: string
-      processed: number
       total: number | null
       imported: number
     }
@@ -42,28 +41,6 @@ type ImportState =
 
 /** router.refresh() cadence so the table fills in live behind the panel. */
 const REFRESH_EVERY_N_BATCHES = 5
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const readNumber = (value: unknown): number | null =>
-  typeof value === 'number' && Number.isFinite(value) ? value : null
-
-const readString = (value: unknown): string | null =>
-  typeof value === 'string' ? value : null
-
-const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
-  new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms)
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer)
-        resolve()
-      },
-      { once: true },
-    )
-  })
 
 /** Parse the route's JSON body into the response contract, or null if malformed. */
 const parseResponse = (value: unknown): ImportBatchResponse | null => {
@@ -103,23 +80,16 @@ const parseResponse = (value: unknown): ImportBatchResponse | null => {
  * Drives the client-side import loop: repeatedly POSTs one batch to
  * /api/import, folding each response into a small state machine. The loop is a
  * plain async function started by the button (never an effect), so React strict
- * mode can't double-fire it; unmount safety comes from the active-ref +
- * AbortController checked after every await.
+ * mode can't double-fire it; unmount safety comes from aborting the run's
+ * controller on unmount and checking its signal after every await.
  */
 export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
   const router = useRouter()
   const [state, setState] = useState<ImportState>({ phase: 'idle' })
   const [announcement, setAnnouncement] = useState('')
-  const isActiveRef = useRef(true)
   const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    isActiveRef.current = true
-    return () => {
-      isActiveRef.current = false
-      abortRef.current?.abort()
-    }
-  }, [])
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const runImport = async (
     startOffset: number,
@@ -131,10 +101,10 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
     abortRef.current = controller
     const { signal } = controller
 
-    // Unmount/abort can flip these mid-await, but TypeScript's flow analysis
-    // would narrow them to constants after the first guard and treat every
+    // Unmount/abort can flip signal.aborted mid-await, but TypeScript's flow
+    // analysis would narrow it to false after the first guard and treat every
     // later check as redundant. Funnelling through a call keeps each check live.
-    const isStopped = () => !isActiveRef.current || signal.aborted
+    const isStopped = () => signal.aborted
 
     let offset = startOffset
     let imported = startImported
@@ -143,15 +113,12 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
     let lastDecile = -1
     let hasAnnouncedWaiting = false
 
-    const processed = () => (total === null ? offset : Math.min(offset, total))
-
     setAnnouncement('Import started.')
 
     while (!isStopped()) {
       setState({
         phase: 'running',
         offset,
-        processed: processed(),
         total,
         imported,
       })
@@ -170,7 +137,6 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
           phase: 'error',
           offset,
           message: 'Network error — check your connection and retry.',
-          processed: processed(),
           total,
           imported,
         })
@@ -193,7 +159,6 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
           phase: 'error',
           offset,
           message: 'The server returned an unexpected response.',
-          processed: processed(),
           total,
           imported,
         })
@@ -211,7 +176,6 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
           phase: 'error',
           offset,
           message: parsed.message,
-          processed: processed(),
           total,
           imported,
         })
@@ -231,11 +195,10 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
             phase: 'waiting',
             offset,
             secondsLeft,
-            processed: processed(),
             total,
             imported,
           })
-          await sleep(1000, signal)
+          await wait(1000, signal)
           secondsLeft -= 1
         }
         continue
@@ -319,18 +282,16 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         <div className='flex flex-col gap-2'>
           <Progress
             aria-label='Liked Songs import progress'
-            className='w-full max-w-md motion-reduce:[&_[data-slot=progress-indicator]]:transition-none'
+            className='w-full max-w-md motion-reduce:**:data-[slot=progress-indicator]:transition-none'
             max={state.total ?? 100}
             value={
-              state.total === null
-                ? null
-                : Math.min(state.processed, state.total)
+              state.total === null ? null : Math.min(state.offset, state.total)
             }
           />
           <p className='text-sm text-muted-foreground tabular-nums'>
             {state.total === null
               ? 'Preparing…'
-              : `${Math.min(state.processed, state.total).toLocaleString()} / ${state.total.toLocaleString()} songs`}
+              : `${Math.min(state.offset, state.total).toLocaleString()} / ${state.total.toLocaleString()} songs`}
           </p>
         </div>
       )}

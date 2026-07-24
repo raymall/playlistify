@@ -12,6 +12,10 @@ export const MAX_TAG_LENGTH = 64
 export const normalizeTagName = (raw: string): string =>
   raw.trim().toLowerCase().replace(/\s+/g, ' ')
 
+/** Valid length for an already-normalized tag name. */
+export const isValidTagName = (name: string): boolean =>
+  name.length > 0 && name.length <= MAX_TAG_LENGTH
+
 /**
  * Below this length a name is never fuzzy-merged — short tags (`rap`/`trap`,
  * `pop`, `rock`) are one edit apart yet genuinely distinct. The

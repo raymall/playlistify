@@ -1,27 +1,20 @@
 import { NextResponse } from 'next/server'
 
+import { errorResponse } from '@/lib/api/route-helpers'
+import { isRecord, readJson } from '@/lib/json'
 import { createClient } from '@/lib/supabase/server'
 import {
   addUserTag,
   removeUserTag,
   type TagAddPayload,
+  type TagAddResponse,
   type TagKind,
   type TagRemovePayload,
+  type TagRemoveResponse,
 } from '@/lib/tags'
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-const readJson = async (request: Request): Promise<unknown> => {
-  try {
-    return await request.json()
-  } catch {
-    return null
-  }
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 const readKind = (value: unknown): TagKind | null =>
   value === 'genre' || value === 'mood' ? value : null
@@ -48,6 +41,8 @@ const readRemovePayload = (value: unknown): TagRemovePayload | null => {
   return { songId, kind, tagId }
 }
 
+type ServerClient = Awaited<ReturnType<typeof createClient>>
+
 /**
  * Adds/removes one personal tag for the signed-in user. Not covered by
  * proxy.ts route protection, so it gates on getUser() itself; the user id
@@ -56,54 +51,34 @@ const readRemovePayload = (value: unknown): TagRemovePayload | null => {
  * CSRF posture: Supabase auth cookies are SameSite=Lax, acceptable for this
  * authenticated MVP endpoint.
  */
-export async function POST(request: Request) {
+const handleTagMutation = async <Payload>(
+  request: Request,
+  parsePayload: (value: unknown) => Payload | null,
+  run: (
+    supabase: ServerClient,
+    userId: string,
+    payload: Payload,
+  ) => Promise<TagAddResponse | TagRemoveResponse>,
+) => {
   const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json(
-      { status: 'error', message: 'Not signed in' },
-      { status: 401 },
-    )
-  }
+  if (!user) return errorResponse('Not signed in', 401)
 
-  const payload = readAddPayload(await readJson(request))
-  if (payload === null) {
-    return NextResponse.json(
-      { status: 'error', message: 'Invalid request body' },
-      { status: 400 },
-    )
-  }
+  const payload = parsePayload(await readJson(request))
+  if (payload === null) return errorResponse('Invalid request body', 400)
 
-  const result = await addUserTag(supabase, user.id, payload)
+  const result = await run(supabase, user.id, payload)
   return NextResponse.json(result, {
     status: result.status === 'error' ? 500 : 200,
   })
 }
 
+export async function POST(request: Request) {
+  return handleTagMutation(request, readAddPayload, addUserTag)
+}
+
 export async function DELETE(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json(
-      { status: 'error', message: 'Not signed in' },
-      { status: 401 },
-    )
-  }
-
-  const payload = readRemovePayload(await readJson(request))
-  if (payload === null) {
-    return NextResponse.json(
-      { status: 'error', message: 'Invalid request body' },
-      { status: 400 },
-    )
-  }
-
-  const result = await removeUserTag(supabase, user.id, payload)
-  return NextResponse.json(result, {
-    status: result.status === 'error' ? 500 : 200,
-  })
+  return handleTagMutation(request, readRemovePayload, removeUserTag)
 }

@@ -4,13 +4,12 @@
 // Usage: node --env-file=.env.local scripts/check-tokens.mjs
 import { createClient } from '@supabase/supabase-js'
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+import { requireEnv } from './lib/env.mjs'
 
-if (!url || !serviceKey) {
-  console.error('Missing env vars — run with: node --env-file=.env.local')
-  process.exit(1)
-}
+const [url, serviceKey] = requireEnv([
+  'NEXT_PUBLIC_SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY',
+])
 
 const service = createClient(url, serviceKey)
 

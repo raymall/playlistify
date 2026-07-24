@@ -5,17 +5,16 @@
 // Usage: node --env-file=.env.local scripts/verify-enrichment.mjs
 import { createClient } from '@supabase/supabase-js'
 
+import { requireEnv } from './lib/env.mjs'
+
 // Keep in sync with CONFIDENCE_THRESHOLD in lib/enrichment/schema.ts.
 const CONFIDENCE_THRESHOLD = 0.4
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-if (!url || !anonKey || !serviceKey) {
-  console.error('Missing env vars — run with: node --env-file=.env.local')
-  process.exit(1)
-}
+const [url, anonKey, serviceKey] = requireEnv([
+  'NEXT_PUBLIC_SUPABASE_URL',
+  'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
+])
 
 const service = createClient(url, serviceKey)
 const anon = createClient(url, anonKey)

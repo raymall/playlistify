@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import type { User } from '@supabase/supabase-js'
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { getSupabaseEnv } from '@/lib/supabase/env'
 import type { Database } from '@/lib/supabase/types'
 
 /**
@@ -15,13 +16,7 @@ export async function updateSession(request: NextRequest): Promise<{
 }> {
   let response = NextResponse.next({ request })
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!url || !anonKey) {
-    throw new Error(
-      'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    )
-  }
+  const { url, anonKey } = getSupabaseEnv()
 
   const supabase = createServerClient<Database>(url, anonKey, {
     cookies: {

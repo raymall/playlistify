@@ -6,6 +6,7 @@ import {
 } from '@/components/library-enrichment-panel'
 import { LibraryImportPanel } from '@/components/library-import-panel'
 import { type LibrarySong, LibraryTable } from '@/components/library-table'
+import { PageSection } from '@/components/page-section'
 import { buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { getDefaultModel, getEnabledModels } from '@/lib/ai/models'
@@ -53,28 +54,6 @@ export default async function LibraryPage({
   let pendingSongs = 0
   let modelOptions: EnrichmentModelOption[] = []
   let defaultModelId: string | null = null
-  if (totalSongs > 0) {
-    const [pendingResult, enabledModels] = await Promise.all([
-      supabase
-        .from('user_songs')
-        .select('song_id, songs!inner(enrichment_status)', {
-          count: 'exact',
-          head: true,
-        })
-        .eq('songs.enrichment_status', 'pending'),
-      getEnabledModels(supabase),
-    ])
-    pendingSongs = pendingResult.count ?? 0
-    // Null = catalog query failed; render the "no models" state rather than
-    // crashing the page — the enrich route re-checks with its own error.
-    const mappedModels = filterMappedModels(enabledModels ?? [])
-    modelOptions = mappedModels.map((model) => ({
-      id: model.id,
-      label: model.label,
-    }))
-    defaultModelId = getDefaultModel(mappedModels)?.id ?? null
-  }
-
   let rows: LibrarySong[] = []
   let filteredCount = 0
 
@@ -108,12 +87,30 @@ export default async function LibraryPage({
     }
 
     const from = (page - 1) * LIBRARY_PAGE_SIZE
-    const { data, count } = await request.range(
-      from,
-      from + LIBRARY_PAGE_SIZE - 1,
-    )
-    filteredCount = count ?? 0
-    rows = (data ?? []).map((row) => ({
+    const [pendingResult, enabledModels, rowsResult] = await Promise.all([
+      supabase
+        .from('user_songs')
+        .select('song_id, songs!inner(enrichment_status)', {
+          count: 'exact',
+          head: true,
+        })
+        .eq('songs.enrichment_status', 'pending'),
+      getEnabledModels(supabase),
+      request.range(from, from + LIBRARY_PAGE_SIZE - 1),
+    ])
+
+    pendingSongs = pendingResult.count ?? 0
+    // Null = catalog query failed; render the "no models" state rather than
+    // crashing the page — the enrich route re-checks with its own error.
+    const mappedModels = filterMappedModels(enabledModels ?? [])
+    modelOptions = mappedModels.map((model) => ({
+      id: model.id,
+      label: model.label,
+    }))
+    defaultModelId = getDefaultModel(mappedModels)?.id ?? null
+
+    filteredCount = rowsResult.count ?? 0
+    rows = (rowsResult.data ?? []).map((row) => ({
       id: row.songs.id,
       title: row.songs.title,
       artists: row.songs.artists,
@@ -137,7 +134,7 @@ export default async function LibraryPage({
   const pageCount = Math.max(1, Math.ceil(filteredCount / LIBRARY_PAGE_SIZE))
 
   return (
-    <section className='mx-auto w-full max-w-6xl px-4 py-16 sm:px-6'>
+    <PageSection>
       <header className='flex flex-col gap-1'>
         <h1 className='text-3xl font-semibold tracking-tight'>Library</h1>
         <p className='text-muted-foreground tabular-nums'>
@@ -211,6 +208,6 @@ export default async function LibraryPage({
           )}
         </div>
       )}
-    </section>
+    </PageSection>
   )
 }

@@ -22,6 +22,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { type SongAIAttributes } from '@/lib/enrichment/schema'
+import { isRecord, readString } from '@/lib/json'
 import { createClient } from '@/lib/supabase/client'
 import {
   type TagAddResponse,
@@ -29,7 +30,7 @@ import {
   type TagRemoveResponse,
 } from '@/lib/tags'
 import { cn } from '@/lib/utils'
-import { MAX_TAG_LENGTH, normalizeTagName } from '@/lib/vocabulary'
+import { isValidTagName, normalizeTagName } from '@/lib/vocabulary'
 
 /** One personal tag: the shared-vocabulary row id plus its normalized name. */
 export interface LibraryTag {
@@ -76,12 +77,6 @@ const loadVocabulary = (): Promise<TagVocabulary> => {
   })()
   return vocabularyPromise
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const readString = (value: unknown): string | null =>
-  typeof value === 'string' ? value : null
 
 const parseAddResponse = (value: unknown): TagAddResponse | null => {
   if (!isRecord(value)) return null
@@ -159,8 +154,7 @@ const TagKindEditor = ({
   const query = normalizeTagName(inputValue)
   const matches =
     query.length === 0 ? vocab : vocab.filter((name) => name.includes(query))
-  const isCreatable =
-    query.length > 0 && query.length <= MAX_TAG_LENGTH && !vocab.includes(query)
+  const isCreatable = isValidTagName(query) && !vocab.includes(query)
   const items = isCreatable ? [query, ...matches] : matches
 
   return (
@@ -200,7 +194,7 @@ const TagKindEditor = ({
           <ComboboxList>
             {(item: string) => (
               <ComboboxItem key={item} value={item}>
-                {vocab.includes(item) ? item : `Create "${item}"`}
+                {isCreatable && item === query ? `Create "${item}"` : item}
               </ComboboxItem>
             )}
           </ComboboxList>

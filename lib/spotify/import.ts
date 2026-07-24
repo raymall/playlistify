@@ -8,11 +8,6 @@ import { getValidSpotifyToken } from '@/lib/spotify/token'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { TablesInsert } from '@/lib/supabase/types'
 
-/** Client → route request body. */
-export interface ImportBatchPayload {
-  offset: number
-}
-
 /**
  * Route → client response. HTTP 200 for every non-error status (`rate_limited`
  * is data, not an HTTP 429 from us); the client parses this one union.
@@ -129,7 +124,6 @@ export const importLikedSongsBatch = async (
 
   const items: SavedTrackItem[] = []
   let total = 0
-  let rawItemCount = 0
   let lastPageNext: string | null = null
 
   for (let pageIndex = 0; pageIndex < PAGES_PER_BATCH; pageIndex += 1) {
@@ -146,9 +140,9 @@ export const importLikedSongsBatch = async (
     }
     if (pageResult.status === 'rate_limited') {
       // The first page must surface the rate limit so the client waits. A later
-      // page is instead dropped and retried next invocation: rawItemCount hasn't
-      // advanced past it, so the next call resumes at its offset and meets the
-      // 429 cleanly.
+      // page is instead dropped and retried next invocation: the collected item
+      // count hasn't advanced past it, so the next call resumes at its offset
+      // and meets the 429 cleanly.
       if (pageIndex === 0) {
         return {
           status: 'rate_limited',
@@ -161,7 +155,6 @@ export const importLikedSongsBatch = async (
     const page = pageResult.data
     total = page.total
     items.push(...page.items)
-    rawItemCount += page.items.length
     lastPageNext = page.next
   }
 
@@ -175,7 +168,7 @@ export const importLikedSongsBatch = async (
   }
   const mappedTracks = [...mappedByTrackId.values()]
 
-  const nextOffset = offset + rawItemCount
+  const nextOffset = offset + items.length
   const isDone = nextOffset >= total || lastPageNext === null
 
   // Nothing to write (empty library, or an all-local batch): still advance.
@@ -192,17 +185,15 @@ export const importLikedSongsBatch = async (
   const trackIds = mappedTracks.map((track) => track.row.spotify_track_id)
   const existing = await admin
     .from('songs')
-    .select('spotify_track_id, spotify_genres')
+    .select('spotify_track_id')
     .in('spotify_track_id', trackIds)
+    .not('spotify_genres', 'is', null)
   if (existing.error)
     return { status: 'error', message: existing.error.message }
 
-  const trackIdsWithGenres = new Set<string>()
-  for (const songRow of existing.data) {
-    if (songRow.spotify_genres !== null) {
-      trackIdsWithGenres.add(songRow.spotify_track_id)
-    }
-  }
+  const trackIdsWithGenres = new Set(
+    existing.data.map((row) => row.spotify_track_id),
+  )
   const needsGenres = mappedTracks.filter(
     (track) => !trackIdsWithGenres.has(track.row.spotify_track_id),
   )

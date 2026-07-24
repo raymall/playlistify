@@ -1,3 +1,4 @@
+import { readDisplayName } from '@/lib/auth/metadata'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
@@ -20,14 +21,7 @@ export async function AccountMenu() {
     .eq('user_id', user.id)
     .maybeSingle()
 
-  // user_metadata values are provider-controlled and untyped — narrow, don't trust.
-  const metadata: Record<string, unknown> = user.user_metadata
-  const displayName =
-    typeof metadata.full_name === 'string'
-      ? metadata.full_name
-      : typeof metadata.name === 'string'
-        ? metadata.name
-        : 'Account'
+  const displayName = readDisplayName(user.user_metadata) ?? 'Account'
 
   return (
     <AccountMenuClient displayName={displayName} needsReconnect={!tokenRow} />

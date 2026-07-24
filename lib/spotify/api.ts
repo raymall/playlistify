@@ -2,13 +2,15 @@
 // is parsed from `unknown` with guard helpers — no `as` casts, so malformed or
 // partial payloads degrade to nulls/empties instead of throwing mid-batch.
 
-export const SPOTIFY_API_BASE = 'https://api.spotify.com/v1'
+import { isRecord, readNumber, readString } from '@/lib/json'
+
+const SPOTIFY_API_BASE = 'https://api.spotify.com/v1'
 
 /** Max page size the Saved Tracks endpoint accepts. */
 export const LIKED_TRACKS_PAGE_SIZE = 50
 
 /** Max ids the Get Several Artists endpoint accepts per call. */
-export const ARTIST_CHUNK_SIZE = 50
+const ARTIST_CHUNK_SIZE = 50
 
 const RETRY_AFTER_FALLBACK_SECONDS = 5
 const RETRY_AFTER_MIN_SECONDS = 1
@@ -61,15 +63,6 @@ export interface LikedTracksPage {
   total: number
   next: string | null
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const readString = (value: unknown): string | null =>
-  typeof value === 'string' ? value : null
-
-const readNumber = (value: unknown): number | null =>
-  typeof value === 'number' && Number.isFinite(value) ? value : null
 
 const readBoolean = (value: unknown): boolean | null =>
   typeof value === 'boolean' ? value : null

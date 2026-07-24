@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/client'
 
-export const SPOTIFY_SCOPES =
+const SPOTIFY_SCOPES =
   'user-library-read playlist-modify-public playlist-modify-private'
 
 /**

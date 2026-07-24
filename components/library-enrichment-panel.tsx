@@ -16,6 +16,8 @@ import {
   type EnrichBatchResponse,
   type EnrichmentCounts,
 } from '@/lib/enrichment/engine'
+import { isRecord, readNumber, readString } from '@/lib/json'
+import { wait } from '@/lib/sleep'
 import { createClient } from '@/lib/supabase/client'
 
 /** Catalog row shape the server page passes down — plain data only. */
@@ -88,31 +90,6 @@ const transientDelayMs = (failures: number) =>
 const isTransientStatus = (status: number) =>
   status === 401 || status === 408 || status === 429 || status >= 500
 
-/** Abort-aware sleep; resolves early (never rejects) when the run aborts. */
-const wait = (ms: number, signal: AbortSignal) =>
-  new Promise<void>((resolve) => {
-    if (signal.aborted) {
-      resolve()
-      return
-    }
-    const finish = () => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', finish)
-      resolve()
-    }
-    const timer = setTimeout(finish, ms)
-    signal.addEventListener('abort', finish)
-  })
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const readNumber = (value: unknown): number | null =>
-  typeof value === 'number' && Number.isFinite(value) ? value : null
-
-const readString = (value: unknown): string | null =>
-  typeof value === 'string' ? value : null
-
 const readCounts = (
   value: Record<string, unknown>,
 ): EnrichmentCounts | null => {
@@ -165,8 +142,8 @@ const toCounts = (value: EnrichmentCounts): EnrichmentCounts => ({
  * /api/enrich with the chosen catalog model id, folding each response into a
  * state machine. Mirrors LibraryImportPanel: the loop is a plain async
  * function started by the button (never an effect); unmount safety comes from
- * the active-ref + AbortController checked after every await. Enrichment
- * never starts on its own.
+ * aborting the run's controller on unmount and checking its signal after
+ * every await. Enrichment never starts on its own.
  */
 export const LibraryEnrichmentPanel = ({
   defaultModelId,
@@ -182,16 +159,9 @@ export const LibraryEnrichmentPanel = ({
   const [modelId, setModelId] = useState<string | null>(
     defaultModelId ?? models.at(0)?.id ?? null,
   )
-  const isActiveRef = useRef(true)
   const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    isActiveRef.current = true
-    return () => {
-      isActiveRef.current = false
-      abortRef.current?.abort()
-    }
-  }, [])
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const runEnrichment = async (startProcessed: number) => {
     if (modelId === null) return
@@ -200,9 +170,9 @@ export const LibraryEnrichmentPanel = ({
     abortRef.current = controller
     const { signal } = controller
 
-    // Unmount/abort can flip these mid-await; funnelling through a call keeps
-    // each check live against TypeScript's flow narrowing.
-    const isStopped = () => !isActiveRef.current || signal.aborted
+    // Unmount/abort can flip signal.aborted mid-await; funnelling through a
+    // call keeps each check live against TypeScript's flow narrowing.
+    const isStopped = () => signal.aborted
 
     let processedThisRun = startProcessed
     let counts: EnrichmentCounts | null = null
@@ -214,6 +184,12 @@ export const LibraryEnrichmentPanel = ({
     // Sticky across the retried request so the banner doesn't flap off while
     // the next attempt is in flight; cleared only by a parsed success.
     let retryDetail: string | null = null
+
+    // Reads the live processedThisRun/counts bindings at call time.
+    const pauseWithError = (message: string, note: string) => {
+      setState({ phase: 'error', processedThisRun, message, counts })
+      setAnnouncement(note)
+    }
 
     setAnnouncement('Enrichment started.')
 
@@ -286,20 +262,16 @@ export const LibraryEnrichmentPanel = ({
           await wait(transientDelayMs(transientFailures), signal)
           continue
         }
-        setState({
-          phase: 'error',
-          processedThisRun,
-          message:
-            status === null
-              ? 'Network error — check your connection and retry.'
-              : status === 401
-                ? 'Your session expired. Reload the page and sign in again.'
-                : detail === null
-                  ? 'Repeated server errors. Wait a moment and retry.'
-                  : `Repeated server errors: ${detail}`,
-          counts,
-        })
-        setAnnouncement('Enrichment paused by a connection problem.')
+        pauseWithError(
+          status === null
+            ? 'Network error — check your connection and retry.'
+            : status === 401
+              ? 'Your session expired. Reload the page and sign in again.'
+              : detail === null
+                ? 'Repeated server errors. Wait a moment and retry.'
+                : `Repeated server errors: ${detail}`,
+          'Enrichment paused by a connection problem.',
+        )
         return
       }
 
@@ -312,31 +284,20 @@ export const LibraryEnrichmentPanel = ({
       if (isStopped()) return
 
       const parsed = parseResponse(payload)
-      if (parsed !== null) {
-        transientFailures = 0
-        billedFailures = 0
-        safeRetries = 0
-        retryDetail = null
-      }
       if (parsed === null) {
-        setState({
-          phase: 'error',
-          processedThisRun,
-          message: 'The server returned an unexpected response.',
-          counts,
-        })
-        setAnnouncement('Enrichment paused by an error.')
+        pauseWithError(
+          'The server returned an unexpected response.',
+          'Enrichment paused by an error.',
+        )
         return
       }
+      transientFailures = 0
+      billedFailures = 0
+      safeRetries = 0
+      retryDetail = null
 
       if (parsed.status === 'error') {
-        setState({
-          phase: 'error',
-          processedThisRun,
-          message: parsed.message,
-          counts,
-        })
-        setAnnouncement('Enrichment paused by an error.')
+        pauseWithError(parsed.message, 'Enrichment paused by an error.')
         return
       }
 
@@ -365,14 +326,10 @@ export const LibraryEnrichmentPanel = ({
       if (parsed.batchEnriched + parsed.batchUnknown === 0) {
         stalledBatches += 1
         if (stalledBatches >= MAX_STALLED_BATCHES) {
-          setState({
-            phase: 'error',
-            processedThisRun,
-            message:
-              'Enrichment stalled — some songs could not be processed. Retry later.',
-            counts,
-          })
-          setAnnouncement('Enrichment stalled.')
+          pauseWithError(
+            'Enrichment stalled — some songs could not be processed. Retry later.',
+            'Enrichment stalled.',
+          )
           return
         }
       } else {

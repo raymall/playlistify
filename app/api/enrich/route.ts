@@ -7,26 +7,15 @@ import { NextResponse } from 'next/server'
 
 import { findEnabledModel, getEnabledModels } from '@/lib/ai/models'
 import { hasMappedProvider } from '@/lib/ai/providers'
-import { enrichLibraryBatch } from '@/lib/enrichment/engine'
+import { errorResponse } from '@/lib/api/route-helpers'
+import {
+  type EnrichBatchPayload,
+  enrichLibraryBatch,
+} from '@/lib/enrichment/engine'
+import { isRecord, readJson } from '@/lib/json'
 import { createClient } from '@/lib/supabase/server'
 
 export const maxDuration = 300
-
-const readJson = async (request: Request): Promise<unknown> => {
-  try {
-    return await request.json()
-  } catch {
-    return null
-  }
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-interface ParsedPayload {
-  modelId: string
-  processedSoFar: number
-}
 
 /**
  * Only a provably absent or rejected session is "signed out": no error at
@@ -40,7 +29,7 @@ const isSessionDead = (error: AuthError | null) =>
   isAuthSessionMissingError(error) ||
   (isAuthApiError(error) && INVALID_SESSION_STATUSES.includes(error.status))
 
-const readPayload = (value: unknown): ParsedPayload | null => {
+const readPayload = (value: unknown): EnrichBatchPayload | null => {
   if (!isRecord(value)) return null
   const { modelId, processedSoFar } = value
   if (typeof modelId !== 'string' || modelId.length === 0) return null
@@ -74,52 +63,22 @@ export async function POST(request: Request) {
     // user — report it as transient (and billing-free) so the client retries
     // instead of claiming the session expired.
     if (!isSessionDead(authError)) {
-      return NextResponse.json(
-        {
-          status: 'error',
-          message: 'Could not reach the auth service',
-          safeToRetry: true,
-        },
-        { status: 503 },
-      )
+      return errorResponse('Could not reach the auth service', 503, true)
     }
-    return NextResponse.json(
-      { status: 'error', message: 'Not signed in' },
-      { status: 401 },
-    )
+    return errorResponse('Not signed in', 401)
   }
 
   const payload = readPayload(await readJson(request))
-  if (payload === null) {
-    return NextResponse.json(
-      { status: 'error', message: 'Invalid request body' },
-      { status: 400 },
-    )
-  }
+  if (payload === null) return errorResponse('Invalid request body', 400)
 
   const models = await getEnabledModels(supabase)
   if (models === null) {
-    return NextResponse.json(
-      {
-        status: 'error',
-        message: 'Could not load the model catalog',
-        safeToRetry: true,
-      },
-      { status: 503 },
-    )
+    return errorResponse('Could not load the model catalog', 503, true)
   }
   const model = findEnabledModel(models, payload.modelId)
-  if (model === null) {
-    return NextResponse.json(
-      { status: 'error', message: 'Unknown or disabled model' },
-      { status: 400 },
-    )
-  }
+  if (model === null) return errorResponse('Unknown or disabled model', 400)
   if (!hasMappedProvider(model)) {
-    return NextResponse.json(
-      { status: 'error', message: 'Model provider not available' },
-      { status: 400 },
-    )
+    return errorResponse('Model provider not available', 400)
   }
 
   const result = await enrichLibraryBatch(
