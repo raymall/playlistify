@@ -28,13 +28,36 @@ export const hasMappedProvider = (model: LlmModel): boolean =>
 export const filterMappedModels = (models: LlmModel[]): LlmModel[] =>
   models.filter(hasMappedProvider)
 
-export const resolveLanguageModel = (model: LlmModel): LanguageModel => {
-  const definition = PROVIDERS[model.provider]
+export type ResolveModelResult =
+  { status: 'ok'; model: LanguageModel } | { status: 'error'; message: string }
+
+/**
+ * Resolve a provider + model id to an AI SDK model, or an error variant when
+ * the provider isn't mapped in this build or its API key is missing. Non-
+ * throwing — the chat path maps the error to an HTTP 503.
+ */
+export const resolveProviderModel = (
+  provider: string,
+  modelId: string,
+): ResolveModelResult => {
+  const definition = PROVIDERS[provider]
   if (definition === undefined) {
-    throw new Error(`No provider mapping for '${model.provider}'`)
+    return { status: 'error', message: `No provider mapping for '${provider}'` }
   }
   if (!process.env[definition.requiredEnv]) {
-    throw new Error(`Missing ${definition.requiredEnv}`)
+    return { status: 'error', message: `Missing ${definition.requiredEnv}` }
   }
-  return definition.createModel(model.model_id)
+  return { status: 'ok', model: definition.createModel(modelId) }
+}
+
+/**
+ * Throwing wrapper over resolveProviderModel for the enrichment engine, which
+ * catches the throw and folds it into its own error result.
+ */
+export const resolveLanguageModel = (model: LlmModel): LanguageModel => {
+  const result = resolveProviderModel(model.provider, model.model_id)
+  if (result.status === 'error') {
+    throw new Error(result.message)
+  }
+  return result.model
 }

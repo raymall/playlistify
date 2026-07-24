@@ -18,7 +18,10 @@ the same commit (rule in `AGENTS.md`).
 - `components/ui/` — shadcn/ui primitives, built on `@base-ui/react` (not
   Radix). Touch only to restyle a primitive; add new ones via the shadcn CLI.
 - `lib/ai/` — `models.ts` (reads over the `llm_models` catalog),
-  `providers.ts` (server-only provider → AI SDK factory map).
+  `providers.ts` (server-only provider → AI SDK factory map;
+  `resolveProviderModel` non-throwing + `resolveLanguageModel` throwing
+  wrapper), `chat-model.ts` (resolves the chat model from the `CHAT_MODEL`
+  env var, not the catalog).
 - `lib/api/` — `route-helpers.ts`: shared JSON error response for the API
   routes (server-only).
 - `lib/auth/` — `spotify.ts` (browser-side OAuth kick-off; scopes live here),
