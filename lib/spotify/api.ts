@@ -91,25 +91,14 @@ const parseRetryAfter = (header: string | null): number => {
   )
 }
 
-/** Single GET against the Spotify API, reduced to a SpotifyApiResult. */
-const spotifyGet = async (
-  accessToken: string,
-  url: string,
+/**
+ * Reduce a completed Spotify Response to a SpotifyApiResult, parsing the JSON
+ * body on success. Shared by the GET and POST wrappers so the 429/401/403/!ok
+ * mapping stays identical.
+ */
+const reduceResponse = async (
+  response: Response,
 ): Promise<SpotifyApiResult<unknown>> => {
-  let response: Response
-  try {
-    response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: 'no-store',
-    })
-  } catch (error) {
-    return {
-      status: 'error',
-      message:
-        error instanceof Error ? error.message : 'Spotify request failed',
-    }
-  }
-
   if (response.status === 429) {
     return {
       status: 'rate_limited',
@@ -135,6 +124,57 @@ const spotifyGet = async (
       message: 'Spotify returned an unparseable response',
     }
   }
+}
+
+/** Single GET against the Spotify API, reduced to a SpotifyApiResult. */
+const spotifyGet = async (
+  accessToken: string,
+  url: string,
+): Promise<SpotifyApiResult<unknown>> => {
+  let response: Response
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    })
+  } catch (error) {
+    return {
+      status: 'error',
+      message:
+        error instanceof Error ? error.message : 'Spotify request failed',
+    }
+  }
+  return reduceResponse(response)
+}
+
+/**
+ * Single POST against the Spotify API with a JSON body, reduced to a
+ * SpotifyApiResult. 201 (playlist created, tracks added) passes `response.ok`.
+ */
+const spotifyPost = async (
+  accessToken: string,
+  url: string,
+  body: unknown,
+): Promise<SpotifyApiResult<unknown>> => {
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    })
+  } catch (error) {
+    return {
+      status: 'error',
+      message:
+        error instanceof Error ? error.message : 'Spotify request failed',
+    }
+  }
+  return reduceResponse(response)
 }
 
 const parseImages = (value: unknown): SpotifyImage[] => {
@@ -273,4 +313,80 @@ export const fetchArtistGenres = async (
     }
   }
   return { status: 'ok', data: genresByArtist }
+}
+
+/** Max track uris the Add Items to Playlist endpoint accepts per request. */
+export const PLAYLIST_ADD_CHUNK_SIZE = 100
+
+export interface SpotifyCreatedPlaylist {
+  id: string
+  url: string | null
+}
+
+/**
+ * Resolve the current user's Spotify id. Fallback for the null
+ * `profiles.spotify_user_id` case (a playlist can only be created under a
+ * known user id).
+ */
+export const fetchCurrentUserId = async (
+  accessToken: string,
+): Promise<SpotifyApiResult<string>> => {
+  const result = await spotifyGet(accessToken, `${SPOTIFY_API_BASE}/me`)
+  if (result.status !== 'ok') return result
+  if (!isRecord(result.data)) {
+    return { status: 'error', message: 'Unexpected /me payload' }
+  }
+  const id = readString(result.data.id)
+  if (id === null || id.length === 0) {
+    return { status: 'error', message: 'Spotify profile has no id' }
+  }
+  return { status: 'ok', data: id }
+}
+
+/**
+ * Create a private playlist under the given user id and return its id + web
+ * url. `public: false` — the app never creates public playlists.
+ */
+export const createSpotifyPlaylist = async (
+  accessToken: string,
+  spotifyUserId: string,
+  details: { name: string; description: string },
+): Promise<SpotifyApiResult<SpotifyCreatedPlaylist>> => {
+  const url = `${SPOTIFY_API_BASE}/users/${encodeURIComponent(spotifyUserId)}/playlists`
+  const result = await spotifyPost(accessToken, url, {
+    name: details.name,
+    description: details.description,
+    public: false,
+  })
+  if (result.status !== 'ok') return result
+  if (!isRecord(result.data)) {
+    return { status: 'error', message: 'Unexpected playlist payload' }
+  }
+  const id = readString(result.data.id)
+  if (id === null || id.length === 0) {
+    return { status: 'error', message: 'Spotify playlist has no id' }
+  }
+  const externalUrls = result.data.external_urls
+  const spotifyUrl = isRecord(externalUrls)
+    ? readString(externalUrls.spotify)
+    : null
+  return { status: 'ok', data: { id, url: spotifyUrl } }
+}
+
+/**
+ * Add one chunk (≤100) of track ids to a playlist, in order. Track ids are the
+ * bare Spotify ids; they're expanded to `spotify:track:` uris here. The caller
+ * owns the chunk loop and partial-failure accounting.
+ */
+export const addPlaylistTracksChunk = async (
+  accessToken: string,
+  playlistId: string,
+  trackIds: string[],
+): Promise<SpotifyApiResult<null>> => {
+  const url = `${SPOTIFY_API_BASE}/playlists/${encodeURIComponent(playlistId)}/tracks`
+  const result = await spotifyPost(accessToken, url, {
+    uris: trackIds.map((trackId) => `spotify:track:${trackId}`),
+  })
+  if (result.status !== 'ok') return result
+  return { status: 'ok', data: null }
 }
