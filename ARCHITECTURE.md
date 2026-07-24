@@ -67,7 +67,8 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   paginated table with per-song tag editor (`app/library/page.tsx` +
   `components/library-{import-panel,enrichment-panel,table,tag-editor}.tsx`).
 - `/chat` — static placeholder; chat not built yet (`app/chat/page.tsx`).
-- `/playlists` — static placeholder; not built yet (`app/playlists/page.tsx`).
+- `/playlists` — created-playlist history: name, track count, date, prompt,
+  "Open in Spotify" link (`app/playlists/page.tsx`). Read-only, minimal.
 - Chrome: `app/layout.tsx` — fonts, `ThemeProvider`, `SiteHeader` (nav,
   theme toggle, account menu with sign-out).
 
@@ -86,6 +87,9 @@ processedSoFar}`, `maxDuration` 300
   (`app/api/enrich/route.ts` → `lib/enrichment/engine.ts`).
 - `POST|DELETE /api/tags` — add/remove one personal tag
   (`app/api/tags/route.ts` → `lib/tags.ts`).
+- `POST /api/playlists` — create a playlist from a curated proposal, body
+  `{name, description, songIds, prompt}`
+  (`app/api/playlists/route.ts` → `lib/playlists/create.ts`).
 
 ## Core flows
 
@@ -131,8 +135,16 @@ path; personal tags are not gated by `is_approved`), link rows in
 **Chat / selection** — not built yet — see MVP-PLAN.md step 7 (`/chat` is a
 placeholder page).
 
-**Playlist creation** — not built yet — see MVP-PLAN.md step 8 (`playlists` /
-`playlist_songs` exist in the schema but nothing writes to them).
+**Playlist creation** — the preview panel POSTs a curated proposal to
+`/api/playlists` → `lib/playlists/create.ts` (`createPlaylistForUser`, RLS
+client): resolves song ids → Spotify track ids scoped by RLS, refreshes the
+token (`lib/spotify/token.ts`), resolves the Spotify user id (own `profiles`
+row, else `/me` + admin backfill), creates a private playlist and adds tracks
+in chunks (`lib/spotify/api.ts`), then persists `playlists` + `playlist_songs`.
+Failure policy: pre-Spotify failures create nothing (clean
+error/reconnect/rate-limited); an add-tracks failure keeps the Spotify playlist
+and reports `partial`; a DB write failure after Spotify success reports
+`created` with `persisted: false`. `/playlists` lists the persisted rows.
 
 ## Where does new code go
 
