@@ -324,35 +324,18 @@ export interface SpotifyCreatedPlaylist {
 }
 
 /**
- * Resolve the current user's Spotify id. Fallback for the null
- * `profiles.spotify_user_id` case (a playlist can only be created under a
- * known user id).
- */
-export const fetchCurrentUserId = async (
-  accessToken: string,
-): Promise<SpotifyApiResult<string>> => {
-  const result = await spotifyGet(accessToken, `${SPOTIFY_API_BASE}/me`)
-  if (result.status !== 'ok') return result
-  if (!isRecord(result.data)) {
-    return { status: 'error', message: 'Unexpected /me payload' }
-  }
-  const id = readString(result.data.id)
-  if (id === null || id.length === 0) {
-    return { status: 'error', message: 'Spotify profile has no id' }
-  }
-  return { status: 'ok', data: id }
-}
-
-/**
- * Create a private playlist under the given user id and return its id + web
- * url. `public: false` — the app never creates public playlists.
+ * Create a private playlist for the current user and return its id + web url.
+ * `public: false` — the app never creates public playlists.
+ *
+ * Uses `POST /me/playlists`: Spotify's Feb 2026 Web API migration retired the
+ * old `POST /users/{id}/playlists` form for Development Mode apps, which now
+ * 403s ("Forbidden") for every caller. `/me/playlists` needs no user id.
  */
 export const createSpotifyPlaylist = async (
   accessToken: string,
-  spotifyUserId: string,
   details: { name: string; description: string },
 ): Promise<SpotifyApiResult<SpotifyCreatedPlaylist>> => {
-  const url = `${SPOTIFY_API_BASE}/users/${encodeURIComponent(spotifyUserId)}/playlists`
+  const url = `${SPOTIFY_API_BASE}/me/playlists`
   const result = await spotifyPost(accessToken, url, {
     name: details.name,
     description: details.description,

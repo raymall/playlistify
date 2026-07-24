@@ -1,6 +1,7 @@
 // Playlist creation engine — role-mirror of lib/spotify/import.ts. Owns the
 // full create flow: ownership + track-id resolution (RLS client), Spotify
-// playlist creation + chunked track adds, then best-effort persistence into
+// playlist creation (POST /me/playlists) + chunked track adds, then best-effort
+// persistence into
 // `playlists`/`playlist_songs`. Failure policy: pre-Spotify failures leave
 // nothing created (clean error/reconnect/rate-limited); an add-tracks failure
 // mid-loop keeps the Spotify playlist and reports `partial` (never auto-delete
@@ -12,11 +13,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   addPlaylistTracksChunk,
   createSpotifyPlaylist,
-  fetchCurrentUserId,
   PLAYLIST_ADD_CHUNK_SIZE,
 } from '@/lib/spotify/api'
 import { getValidSpotifyToken } from '@/lib/spotify/token'
-import { createAdminClient } from '@/lib/supabase/admin'
 import type { Database } from '@/lib/supabase/types'
 
 /** Client → engine request. Order of `songIds` is the playlist order. */
@@ -102,54 +101,6 @@ const resolveTrackIds = async (
   return { status: 'ok', trackIds }
 }
 
-/**
- * Resolve the requester's Spotify user id: their own `profiles` row first,
- * falling back to `/me` (the column is nullable — captured only at the auth
- * callback) and backfilling it via the admin client for next time.
- */
-const resolveSpotifyUserId = async (
-  supabase: SupabaseClient<Database>,
-  userId: string,
-  accessToken: string,
-): Promise<
-  { status: 'ok'; spotifyUserId: string } | CreatePlaylistResponse
-> => {
-  const profile = await supabase
-    .from('profiles')
-    .select('spotify_user_id')
-    .eq('id', userId)
-    .maybeSingle()
-  if (profile.data?.spotify_user_id) {
-    return { status: 'ok', spotifyUserId: profile.data.spotify_user_id }
-  }
-
-  const meResult = await fetchCurrentUserId(accessToken)
-  if (meResult.status === 'auth_failed') return { status: 'reconnect_required' }
-  if (meResult.status === 'rate_limited') {
-    return {
-      status: 'rate_limited',
-      retryAfterSeconds: meResult.retryAfterSeconds,
-    }
-  }
-  if (meResult.status === 'error') {
-    return { status: 'error', message: meResult.message }
-  }
-
-  // Backfill for next time — best-effort, never fails the request.
-  const admin = createAdminClient()
-  const update = await admin
-    .from('profiles')
-    .update({ spotify_user_id: meResult.data })
-    .eq('id', userId)
-  if (update.error) {
-    console.error(
-      '[playlists] spotify_user_id backfill failed:',
-      update.error.message,
-    )
-  }
-  return { status: 'ok', spotifyUserId: meResult.data }
-}
-
 export const createPlaylistForUser = async (
   supabase: SupabaseClient<Database>,
   userId: string,
@@ -168,11 +119,8 @@ export const createPlaylistForUser = async (
   }
   const { accessToken } = tokenResult
 
-  const userIdResult = await resolveSpotifyUserId(supabase, userId, accessToken)
-  if (userIdResult.status !== 'ok') return userIdResult
-  const { spotifyUserId } = userIdResult
-
-  const createResult = await createSpotifyPlaylist(accessToken, spotifyUserId, {
+  // Create via /me/playlists — no Spotify user id needed (see api.ts).
+  const createResult = await createSpotifyPlaylist(accessToken, {
     name: payload.name,
     description: payload.description,
   })

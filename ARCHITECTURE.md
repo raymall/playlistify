@@ -160,9 +160,9 @@ renderer-enforced).
 **Playlist creation** — the preview panel POSTs a curated proposal to
 `/api/playlists` → `lib/playlists/create.ts` (`createPlaylistForUser`, RLS
 client): resolves song ids → Spotify track ids scoped by RLS, refreshes the
-token (`lib/spotify/token.ts`), resolves the Spotify user id (own `profiles`
-row, else `/me` + admin backfill), creates a private playlist and adds tracks
-in chunks (`lib/spotify/api.ts`), then persists `playlists` + `playlist_songs`.
+token (`lib/spotify/token.ts`), creates a private playlist via
+`POST /me/playlists` and adds tracks in chunks (`lib/spotify/api.ts`), then
+persists `playlists` + `playlist_songs`.
 Failure policy: pre-Spotify failures create nothing (clean
 error/reconnect/rate-limited); an add-tracks failure keeps the Spotify playlist
 and reports `partial`; a DB write failure after Spotify success reports
