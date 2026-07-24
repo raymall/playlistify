@@ -7,9 +7,6 @@ import { createClient } from '@supabase/supabase-js'
 
 import { requireEnv } from './lib/env.mjs'
 
-// Keep in sync with CONFIDENCE_THRESHOLD in lib/enrichment/schema.ts.
-const CONFIDENCE_THRESHOLD = 0.4
-
 const [url, anonKey, serviceKey] = requireEnv([
   'NEXT_PUBLIC_SUPABASE_URL',
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',
@@ -31,55 +28,46 @@ const hard = (label, ok, detail) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`)
 }
 
-// Hard: every enriched row carries the full enrichment column set.
-for (const column of [
-  'ai_confidence',
-  'enrichment_model',
-  'enriched_at',
-  'ai_attributes',
+// Hard: enriched rows carry the full enrichment column set; unknown rows
+// carry confidence/model/timestamp (ai_attributes intentionally stays null,
+// hence the shorter list).
+for (const [status, columns] of [
+  [
+    'enriched',
+    ['ai_confidence', 'enrichment_model', 'enriched_at', 'ai_attributes'],
+  ],
+  ['unknown', ['ai_confidence', 'enrichment_model', 'enriched_at']],
 ]) {
-  const row = await headCount(
-    service
-      .from('songs')
-      .select('id', { count: 'exact', head: true })
-      .eq('enrichment_status', 'enriched')
-      .is(column, null),
-  )
-  hard(
-    `enriched rows with null ${column} = 0`,
-    row.count === 0,
-    `count=${row.count}`,
-  )
+  for (const column of columns) {
+    const row = await headCount(
+      service
+        .from('songs')
+        .select('id', { count: 'exact', head: true })
+        .eq('enrichment_status', status)
+        .is(column, null),
+    )
+    hard(
+      `${status} rows with null ${column} = 0`,
+      row.count === 0,
+      `count=${row.count}`,
+    )
+  }
 }
 
-// Hard: unknown rows carry confidence/model/timestamp (attributes stay null).
-for (const column of ['ai_confidence', 'enrichment_model', 'enriched_at']) {
-  const row = await headCount(
-    service
-      .from('songs')
-      .select('id', { count: 'exact', head: true })
-      .eq('enrichment_status', 'unknown')
-      .is(column, null),
-  )
-  hard(
-    `unknown rows with null ${column} = 0`,
-    row.count === 0,
-    `count=${row.count}`,
-  )
-}
-
-// Hard: unknown means the stored (rounded) confidence sits below the threshold.
-const confidentUnknown = await headCount(
+// Hard: unknown rows carry no AI output. Unknown = confidence below the
+// threshold OR the model's zero-tag placeholder shape, so confidence alone
+// is deliberately NOT asserted — attributes and links are.
+const unknownWithAttributes = await headCount(
   service
     .from('songs')
     .select('id', { count: 'exact', head: true })
     .eq('enrichment_status', 'unknown')
-    .gte('ai_confidence', CONFIDENCE_THRESHOLD),
+    .not('ai_attributes', 'is', null),
 )
 hard(
-  `unknown rows with ai_confidence >= ${CONFIDENCE_THRESHOLD} = 0`,
-  confidentUnknown.count === 0,
-  `count=${confidentUnknown.count}`,
+  'unknown rows with ai_attributes set = 0',
+  unknownWithAttributes.count === 0,
+  `count=${unknownWithAttributes.count}`,
 )
 
 // Hard: pending rows carry no enrichment output.
@@ -98,7 +86,7 @@ for (const column of ['enriched_at', 'ai_attributes']) {
   )
 }
 
-// Hard: no AI tag links on songs that are still pending.
+// Hard: AI tag links exist only on enriched songs.
 for (const table of ['song_genres', 'song_moods']) {
   const row = await headCount(
     service
@@ -107,13 +95,50 @@ for (const table of ['song_genres', 'song_moods']) {
         count: 'exact',
         head: true,
       })
-      .eq('songs.enrichment_status', 'pending'),
+      .neq('songs.enrichment_status', 'enriched'),
   )
   hard(
-    `${table} rows on pending songs = 0`,
+    `${table} rows on non-enriched songs = 0`,
     row.count === 0,
     `count=${row.count}`,
   )
+}
+
+// Hard: every enriched song carries at least one AI tag link — the engine
+// classifies a zero-tag result as unknown (placeholder guard), so an
+// enriched-but-tagless song means that guard leaked.
+{
+  const pageSize = 1000
+  let zeroTag = 0
+  let checked = 0
+  for (let from = 0; ; from += pageSize) {
+    const page = await service
+      .from('songs')
+      .select('id, song_genres(genre_id), song_moods(mood_id)')
+      .eq('enrichment_status', 'enriched')
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (page.error) {
+      hard(
+        'enriched rows with zero AI tags = 0',
+        false,
+        `err(${page.error.message})`,
+      )
+      break
+    }
+    checked += page.data.length
+    zeroTag += page.data.filter(
+      (row) => row.song_genres.length === 0 && row.song_moods.length === 0,
+    ).length
+    if (page.data.length < pageSize) {
+      hard(
+        'enriched rows with zero AI tags = 0',
+        zeroTag === 0,
+        `count=${zeroTag} of ${checked}`,
+      )
+      break
+    }
+  }
 }
 
 // Hard: confidence stays inside [0, 1].

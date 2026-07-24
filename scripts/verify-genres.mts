@@ -1,6 +1,7 @@
-// Genre vocabulary verification: proves the fuzzy near-duplicate snapping in
-// lib/vocabulary.ts is tuned so real genres never merge while known
-// misspellings do, and that the dembow cleanup left no malformed rows behind.
+// Vocabulary verification for the closed (approved) enrichment vocabulary:
+// proves both approved lists resolve deterministically under the fuzzy
+// snapper in lib/vocabulary.ts, that known variant spellings land on their
+// approved canonical, and that no AI tag link points at an unapproved row.
 //
 // Usage: node --env-file=.env.local --import tsx scripts/verify-genres.mts
 import { createClient } from '@supabase/supabase-js'
@@ -9,6 +10,8 @@ import type { Database } from '../lib/supabase/types'
 import {
   FUZZY_MIN_LENGTH,
   FUZZY_THRESHOLD,
+  isValidTagName,
+  normalizeTagName,
   snapToExistingName,
   trigramSimilarity,
 } from '../lib/vocabulary'
@@ -21,16 +24,18 @@ const [url, serviceKey] = requireEnv(
 
 const service = createClient<Database>(url, serviceKey)
 
-// The dembow variants merged by scripts/backfill-genre-aliases.mts. Pairs here
-// are expected to be similar, so they are exempt from the "no legit pair
-// merges" sweep (relevant only if verify runs before the backfill).
-const KNOWN_VARIANTS = new Map<string, string>([
-  ['dem bow', 'dembow'],
-  ['dominic dembow', 'dominican dembow'],
-  ['dominion dembow', 'dominican dembow'],
+// Approved pairs inside trigram-snapping distance that are real, deliberately
+// distinct styles. Exact matching wins before fuzzy, so verbatim model output
+// still resolves correctly; only a typo near one of these is ambiguous. Any
+// NEW pair showing up here must be reviewed (rename one side in the seed, or
+// accept it into this list) — that is the check, not a formality.
+const REVIEWED_CLOSE_PAIRS = new Set([
+  'afrobeat / afrobeats',
+  'american / americana',
+  'boogie / boogie-woogie',
+  'classic / classical',
+  'tropical / tropicalia',
 ])
-const BAD_NAMES = [...KNOWN_VARIANTS.keys()]
-const canonicalOf = (name: string) => KNOWN_VARIANTS.get(name) ?? name
 
 const failures: string[] = []
 
@@ -39,92 +44,145 @@ const hard = (label: string, ok: boolean, detail?: string) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`)
 }
 
-const genreRows = await service.from('genres').select('id, name')
-if (genreRows.error) {
-  console.error('Could not read genres:', genreRows.error.message)
-  process.exit(1)
-}
-const names = genreRows.data.map((row) => row.name)
+const approvedByTable = new Map<'genres' | 'moods', string[]>()
 
-// 1. No two distinct real genres snap onto each other (either direction),
-//    excluding the known dembow variants. This locks FUZZY_THRESHOLD against
-//    the real catalog.
-const collisions: string[] = []
-for (const a of names) {
-  for (const b of names) {
-    if (a === b) continue
-    if (canonicalOf(a) === canonicalOf(b)) continue
-    if (snapToExistingName(a, [b]) !== null) collisions.push(`${a} → ${b}`)
+for (const table of ['genres', 'moods'] as const) {
+  const rows = await service.from(table).select('name, is_approved')
+  if (rows.error) {
+    console.error(`Could not read ${table}:`, rows.error.message)
+    process.exit(1)
   }
-}
-hard(
-  'no legit genre pair snaps together',
-  collisions.length === 0,
-  collisions.length > 0 ? `[${collisions.join(', ')}]` : `pairs=${names.length}`,
-)
+  const approved = rows.data
+    .filter((row) => row.is_approved)
+    .map((row) => row.name)
+  approvedByTable.set(table, approved)
 
-// 2. Known misspellings snap onto their canonical spelling (literal, so this
-//    holds regardless of current DB state).
+  hard(`${table}: approved vocabulary present`, approved.length > 0)
+
+  // 1. Every approved name is already normalized and valid — the matcher
+  //    compares against normalized model output, so a denormalized approved
+  //    name would be unreachable.
+  const denormalized = approved.filter(
+    (name) => normalizeTagName(name) !== name || !isValidTagName(name),
+  )
+  hard(
+    `${table}: approved names normalized`,
+    denormalized.length === 0,
+    denormalized.length > 0
+      ? `[${denormalized.join(', ')}]`
+      : `count=${approved.length}`,
+  )
+
+  // 2. No two approved names collide space-insensitively — that tier of the
+  //    snapper is exact, so a collision would make resolution order-dependent.
+  const byDespaced = new Map<string, string>()
+  const collisions: string[] = []
+  for (const name of approved) {
+    const key = name.replace(/ /g, '')
+    const other = byDespaced.get(key)
+    if (other !== undefined) collisions.push(`${other} / ${name}`)
+    byDespaced.set(key, name)
+  }
+  hard(
+    `${table}: no space-insensitive collisions`,
+    collisions.length === 0,
+    collisions.length > 0 ? `[${collisions.join(', ')}]` : '',
+  )
+
+  // 3. Every approved name resolves to itself through the matcher.
+  const misresolved = approved.filter(
+    (name) => snapToExistingName(name, approved) !== name,
+  )
+  hard(
+    `${table}: every approved name self-resolves`,
+    misresolved.length === 0,
+    misresolved.length > 0 ? `[${misresolved.join(', ')}]` : '',
+  )
+
+  // 4. Trigram-close approved pairs are exactly the reviewed set.
+  const unreviewed: string[] = []
+  for (let i = 0; i < approved.length; i += 1) {
+    for (let j = i + 1; j < approved.length; j += 1) {
+      const [a, b] = [approved[i], approved[j]].sort()
+      if (a.length < FUZZY_MIN_LENGTH || b.length < FUZZY_MIN_LENGTH) continue
+      if (trigramSimilarity(a, b) < FUZZY_THRESHOLD) continue
+      if (!REVIEWED_CLOSE_PAIRS.has(`${a} / ${b}`)) {
+        unreviewed.push(`${a} / ${b}`)
+      }
+    }
+  }
+  hard(
+    `${table}: close pairs all reviewed`,
+    unreviewed.length === 0,
+    unreviewed.length > 0 ? `[${unreviewed.join(', ')}]` : '',
+  )
+
+  // 5. No AI tag link points at an unapproved row — the closed matcher is
+  //    the only writer, so one escaping means the gate leaks.
+  const linkTable = table === 'genres' ? 'song_genres' : 'song_moods'
+  const leaked = await service
+    .from(linkTable)
+    .select(`${table}!inner(is_approved)`, { count: 'exact', head: true })
+    .eq(`${table}.is_approved`, false)
+  hard(
+    `${linkTable}: no links to unapproved rows`,
+    leaked.error === null && (leaked.count ?? 0) === 0,
+    leaked.error?.message ?? `count=${leaked.count ?? 0}`,
+  )
+}
+
+// 6. Known variant spellings resolve onto their approved canonical (literal
+//    lists, so these hold regardless of DB state) — and legacy compound tags
+//    from the pre-atomic vocabulary drop to unmatched instead of snapping.
+const approvedGenres = approvedByTable.get('genres') ?? []
+const approvedMoods = approvedByTable.get('moods') ?? []
+
 const expectSnap = (
+  label: string,
   candidate: string,
   vocab: string[],
   expected: string | null,
 ) => {
   const got = snapToExistingName(candidate, vocab)
   hard(
-    `snap "${candidate}" → ${expected ?? 'null'}`,
+    `snap ${label}: "${candidate}" → ${expected ?? 'null'}`,
     got === expected,
     got === expected ? '' : `got=${got ?? 'null'}`,
   )
 }
-expectSnap('dominic dembow', ['dominican dembow'], 'dominican dembow') // trigram
-expectSnap('dominion dembow', ['dominican dembow'], 'dominican dembow') // trigram
-expectSnap('dem bow', ['dembow'], 'dembow') // space-insensitive
-expectSnap('dominican dembo', ['dominican dembow'], 'dominican dembow') // novel typo
-// Negative controls: genuinely distinct genres must not merge.
-expectSnap('reggae', ['reggaeton'], null)
-expectSnap('latin pop', ['latin rock'], null)
 
-// 3. The cleanup left no malformed rows and no dangling links.
-const remnants = names.filter((name) => BAD_NAMES.includes(name))
-hard(
-  'no known-bad genre names remain',
-  remnants.length === 0,
-  remnants.length > 0 ? `[${remnants.join(', ')}]` : 'count=0',
-)
-
-const genreIds = new Set(genreRows.data.map((row) => row.id))
-for (const table of ['song_genres', 'user_genres'] as const) {
-  const links = await service.from(table).select('genre_id').limit(10000)
-  if (links.error) {
-    hard(`${table} has no orphaned genre_id`, false, links.error.message)
-    continue
-  }
-  const orphans = links.data.filter((row) => !genreIds.has(row.genre_id)).length
-  hard(`${table} has no orphaned genre_id`, orphans === 0, `count=${orphans}`)
-}
+expectSnap('space variant', 'afro beat', approvedGenres, 'afrobeat')
+expectSnap('space variant', 'hiphop', approvedGenres, 'hip hop')
+expectSnap('typo', 'regaeton', approvedGenres, 'reggaeton')
+expectSnap('legacy compound', 'dominican dembow', approvedGenres, null)
+expectSnap('short tag, no fuzzy', 'chill', approvedMoods, null)
+expectSnap('space variant', 'up beat', approvedMoods, 'upbeat')
 
 console.log('')
-console.log(`INFO  FUZZY_THRESHOLD=${FUZZY_THRESHOLD} MIN_LENGTH=${FUZZY_MIN_LENGTH}`)
+console.log(
+  `INFO  FUZZY_THRESHOLD=${FUZZY_THRESHOLD} MIN_LENGTH=${FUZZY_MIN_LENGTH}`,
+)
 
-// Show the closest real genre pairs so the threshold margin is visible.
-const scored: { pair: string; score: number }[] = []
-for (let i = 0; i < names.length; i += 1) {
-  for (let j = i + 1; j < names.length; j += 1) {
-    const a = names[i]
-    const b = names[j]
-    if (canonicalOf(a) === canonicalOf(b)) continue
-    scored.push({ pair: `${a} / ${b}`, score: trigramSimilarity(a, b) })
+// Closest approved pairs per vocabulary, so the threshold margin stays
+// visible as the lists evolve.
+for (const [table, approved] of approvedByTable) {
+  const scored: { pair: string; score: number }[] = []
+  for (let i = 0; i < approved.length; i += 1) {
+    for (let j = i + 1; j < approved.length; j += 1) {
+      const a = approved[i]
+      const b = approved[j]
+      scored.push({ pair: `${a} / ${b}`, score: trigramSimilarity(a, b) })
+    }
   }
-}
-scored.sort((x, y) => y.score - x.score)
-for (const { pair, score } of scored.slice(0, 5)) {
-  console.log(`INFO  closest legit pair: ${pair} = ${score.toFixed(3)}`)
+  scored.sort((x, y) => y.score - x.score)
+  for (const { pair, score } of scored.slice(0, 5)) {
+    console.log(`INFO  ${table} closest pair: ${pair} = ${score.toFixed(3)}`)
+  }
 }
 
 console.log(
   failures.length > 0
-    ? '\nGENRE VOCAB CHECKS FAILED: see FAIL lines above.'
-    : '\nGENRE VOCAB OK: fuzzy snapping is safe and cleanup is complete.',
+    ? '\nVOCAB CHECKS FAILED: see FAIL lines above.'
+    : '\nVOCAB OK: approved lists resolve deterministically and AI links are gated.',
 )
 process.exit(failures.length > 0 ? 1 : 0)

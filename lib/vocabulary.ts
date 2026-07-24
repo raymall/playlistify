@@ -1,3 +1,9 @@
+// Shared genres/moods vocabulary: tag-name normalization, fuzzy snapping of
+// near-duplicate spellings onto existing rows, and name→id resolution. Two
+// paths: matchApprovedVocabulary (closed, approved rows only — enrichment
+// engine, admin client) and ensureVocabularyIds (open, inserts new names —
+// lib/tags.ts personal tags, RLS client).
+
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/lib/supabase/types'
@@ -104,6 +110,65 @@ export type VocabularyResult =
  * under both the RLS client (no UPDATE policy on the vocabulary tables) and
  * the admin client. `names` must already be normalized and deduped.
  */
+export type ApprovedMatchResult =
+  | {
+      status: 'ok'
+      /** input name → id of the approved row it resolved to. */
+      idsByName: Map<string, string>
+      /** input name → the approved canonical name it snapped to. */
+      canonicalByName: Map<string, string>
+      /** input names that matched no approved row (for review logging). */
+      unmatched: string[]
+    }
+  | { status: 'error'; message: string }
+
+/**
+ * Resolves normalized tag names against the **approved** vocabulary only —
+ * same snapping order as ensureVocabularyIds (exact → space-insensitive →
+ * trigram), but closed: nothing is ever inserted, and names that match no
+ * approved row come back in `unmatched`. Enrichment path; personal tags keep
+ * the open ensureVocabularyIds path below.
+ */
+export const matchApprovedVocabulary = async (
+  client: SupabaseClient<Database>,
+  table: VocabularyTable,
+  names: string[],
+): Promise<ApprovedMatchResult> => {
+  if (names.length === 0) {
+    return {
+      status: 'ok',
+      idsByName: new Map(),
+      canonicalByName: new Map(),
+      unmatched: [],
+    }
+  }
+
+  const approved = await client
+    .from(table)
+    .select('id, name')
+    .eq('is_approved', true)
+  if (approved.error) {
+    return { status: 'error', message: approved.error.message }
+  }
+  const idByName = new Map(approved.data.map((row) => [row.name, row.id]))
+  const approvedNames = approved.data.map((row) => row.name)
+
+  const idsByName = new Map<string, string>()
+  const canonicalByName = new Map<string, string>()
+  const unmatched: string[] = []
+  for (const name of names) {
+    const canonical = snapToExistingName(name, approvedNames)
+    const id = canonical === null ? undefined : idByName.get(canonical)
+    if (canonical === null || id === undefined) {
+      unmatched.push(name)
+      continue
+    }
+    idsByName.set(name, id)
+    canonicalByName.set(name, canonical)
+  }
+  return { status: 'ok', idsByName, canonicalByName, unmatched }
+}
+
 export const ensureVocabularyIds = async (
   client: SupabaseClient<Database>,
   table: VocabularyTable,

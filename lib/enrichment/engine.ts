@@ -11,8 +11,8 @@ import {
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { Tables, TablesInsert } from '@/lib/supabase/types'
 import {
-  ensureVocabularyIds,
   isValidTagName,
+  matchApprovedVocabulary,
   normalizeTagName,
 } from '@/lib/vocabulary'
 
@@ -53,14 +53,12 @@ const MAX_BATCH_SIZE = 50
 const DEFAULT_MAX_SONGS_PER_RUN = 500
 const MIN_MAX_SONGS_PER_RUN = 1
 const MAX_MAX_SONGS_PER_RUN = 5000
-/** Vocabulary names per table offered to the model for tag reuse. */
-const VOCAB_PROMPT_CAP = 300
 
 const SYSTEM_PROMPT = `You are a music-metadata expert. For each numbered song in the user message, return one entry in "songs" with every schema field:
 
 - spotify_track_id: echo the id exactly as given.
 - confidence: 0-1, how certain you are that you know this exact recording.
-- genres (max 4) and moods (max 5): lowercase, concise (1-3 words), real and correctly spelled. Reuse a tag from the provided vocabulary lists verbatim whenever it fits — never a spelling variant or near-duplicate of one already listed. Add a new tag only for a genuinely distinct, established style or feeling not already covered, using its canonical widely-recognized name (especially for niche or non-English genres). Genres describe the musical style; moods the emotional feel.
+- genres (max 4) and moods (max 5): choose ONLY from the approved vocabulary lists in the user message, copying each tag verbatim. Never invent, translate, combine, or add a tag that is not on the lists — off-list tags are discarded. If nothing on a list fits, return fewer tags or none. Genres describe the musical style; moods the emotional feel.
 - energy: 1 (calm) to 5 (intense).
 - tempo_feel: slow, mid, or fast.
 - era: the decade or scene the recording belongs to, e.g. "1990s".
@@ -122,11 +120,11 @@ const buildUserPrompt = (
   moodNames: string[],
 ): string =>
   [
-    `Existing genre vocabulary (prefer when fitting): ${
-      genreNames.join(', ') || '(none yet)'
+    `Approved genre vocabulary (choose only from these): ${
+      genreNames.join(', ') || '(none)'
     }`,
-    `Existing mood vocabulary (prefer when fitting): ${
-      moodNames.join(', ') || '(none yet)'
+    `Approved mood vocabulary (choose only from these): ${
+      moodNames.join(', ') || '(none)'
     }`,
     '',
     'Songs:',
@@ -147,6 +145,29 @@ const normalizeTagList = (names: string[]): string[] => {
 /** Round to the numeric(3,2) precision the column stores, clamped to 0-1. */
 const roundConfidence = (value: number): number =>
   Math.min(1, Math.max(0, Math.round(value * 100) / 100))
+
+/**
+ * Records tags that matched no approved vocabulary row (unmatched_tags:
+ * name + occurrence count) so gaps in the approved lists can be reviewed.
+ * Best-effort — a logging failure must not fail a batch the model call
+ * already paid for.
+ */
+const logUnmatchedTags = async (
+  admin: ReturnType<typeof createAdminClient>,
+  kind: 'genre' | 'mood',
+  names: string[],
+) => {
+  if (names.length === 0) return
+  const result = await admin.rpc('log_unmatched_tags', {
+    p_kind: kind,
+    p_names: names,
+  })
+  if (result.error !== null) {
+    console.error(
+      `[enrich] unmatched ${kind} log failed: ${result.error.message}`,
+    )
+  }
+}
 
 /**
  * Enrich one batch of the user's pending songs with one structured-output
@@ -242,8 +263,8 @@ export const enrichLibraryBatch = async (
   }
 
   const [genreVocabResult, moodVocabResult] = await Promise.all([
-    admin.from('genres').select('name').order('name').limit(VOCAB_PROMPT_CAP),
-    admin.from('moods').select('name').order('name').limit(VOCAB_PROMPT_CAP),
+    admin.from('genres').select('name').eq('is_approved', true).order('name'),
+    admin.from('moods').select('name').eq('is_approved', true).order('name'),
   ])
   if (genreVocabResult.error) {
     return fail('genre vocabulary', genreVocabResult.error.message, true)
@@ -307,15 +328,21 @@ export const enrichLibraryBatch = async (
     const song = songsById.get(trackId)
     if (song === undefined) continue
     const confidence = roundConfidence(entry.confidence)
-    if (confidence < CONFIDENCE_THRESHOLD) {
+    const genreNames = normalizeTagList(entry.genres)
+    const moodNames = normalizeTagList(entry.moods)
+    // Zero genres AND zero moods is the "unrecognized" placeholder shape —
+    // the model sometimes emits it with confidence just above the threshold,
+    // which would surface as an enriched song with no tags.
+    const isPlaceholder = genreNames.length === 0 && moodNames.length === 0
+    if (confidence < CONFIDENCE_THRESHOLD || isPlaceholder) {
       unknownWrites.push({ songId: song.id, confidence })
     } else {
       enrichedWrites.push({
         songId: song.id,
         confidence,
         entry,
-        genreNames: normalizeTagList(entry.genres),
-        moodNames: normalizeTagList(entry.moods),
+        genreNames,
+        moodNames,
       })
     }
   }
@@ -326,18 +353,29 @@ export const enrichLibraryBatch = async (
   const allMoodNames = normalizeTagList(
     enrichedWrites.flatMap((write) => write.moodNames),
   )
-  const genreIdsResult = await ensureVocabularyIds(
+  const genreIdsResult = await matchApprovedVocabulary(
     admin,
     'genres',
     allGenreNames,
   )
   if (genreIdsResult.status === 'error') {
-    return fail('genre id upsert', genreIdsResult.message)
+    return fail('genre match', genreIdsResult.message)
   }
-  const moodIdsResult = await ensureVocabularyIds(admin, 'moods', allMoodNames)
+  const moodIdsResult = await matchApprovedVocabulary(
+    admin,
+    'moods',
+    allMoodNames,
+  )
   if (moodIdsResult.status === 'error') {
-    return fail('mood id upsert', moodIdsResult.message)
+    return fail('mood match', moodIdsResult.message)
   }
+
+  // Off-list tags simply drop from their songs (the link loop below skips
+  // names with no id); record them so gaps in the approved lists surface.
+  await Promise.all([
+    logUnmatchedTags(admin, 'genre', genreIdsResult.unmatched),
+    logUnmatchedTags(admin, 'mood', moodIdsResult.unmatched),
+  ])
 
   // Links land before the status flip so a mid-batch crash leaves the song
   // pending and the retry's idempotent inserts absorb the repeat.

@@ -34,16 +34,21 @@ the same commit (rule in `AGENTS.md`).
   connection env guard), `types.ts` (generated — regenerate with
   `npm run gen:types`, never edit).
 - `lib/tags.ts` / `lib/vocabulary.ts` — personal-tag mutations / shared
-  genre-mood vocabulary (normalize, validate, fuzzy-snap, name→id).
+  genre-mood vocabulary (normalize, validate, fuzzy-snap, name→id). Two match
+  paths: `matchApprovedVocabulary` (closed, `is_approved` rows only —
+  enrichment) and `ensureVocabularyIds` (open, inserts — personal tags).
 - `lib/json.ts` / `lib/sleep.ts` — shared JSON narrowing guards / abort-aware
   sleep (importable from server and client code).
 - `scripts/` — Node ops + verification scripts (`npm run verify:*`,
-  `gen:types`); each file's header comment says what it proves. Shared env
-  guard in `scripts/lib/env.mjs`.
+  `gen:types`, `reset:enrichment`); each file's header comment says what it
+  proves. Shared env guard in `scripts/lib/env.mjs`.
 - `supabase/migrations/` — schema source of truth. Tables: `profiles`,
-  `spotify_tokens`, `songs`, `genres`, `moods`, `song_genres`, `song_moods`,
+  `spotify_tokens`, `songs`, `genres`, `moods` (both with `is_approved` — the
+  seeded, closed enrichment vocabulary), `song_genres`, `song_moods`,
   `user_genres`, `user_moods`, `user_songs`, `playlists`, `playlist_songs`,
-  `llm_models` (column detail: `MVP-PLAN.md` § Database Schema).
+  `llm_models`, `unmatched_tags` (review log of off-list enrichment tags,
+  written via the `log_unmatched_tags` service-role RPC) (column detail:
+  `MVP-PLAN.md` § Database Schema).
 - `proxy.ts` — runs on every request: session refresh + route protection.
 - Root: `MVP-PLAN.md` (product spec), `IMPROVEMENTS.md` (gitignored debt
   log), `README.md` (setup), `.env.example` (every env var, commented),
@@ -106,15 +111,19 @@ with the chosen model's row id. `lib/enrichment/engine.ts` selects ~20
 pending songs (env caps `ENRICHMENT_BATCH_SIZE` /
 `ENRICHMENT_MAX_SONGS_PER_RUN`), makes one structured-output call (AI SDK v7
 `generateText` + `Output.object`; divergence: MVP-PLAN says SDK 5 /
-`generateObject`). Returned tags resolve through `ensureVocabularyIds`
-(`lib/vocabulary.ts`) — fuzzy-snapped onto an existing row or inserted.
-Writes `song_genres`/`song_moods` and the `songs` enrichment columns.
+`generateObject`). The vocabulary is **closed**: the prompt carries only
+`is_approved` `genres`/`moods` rows and output resolves through
+`matchApprovedVocabulary` (`lib/vocabulary.ts`) — snap onto an approved row
+or drop. Dropped names are counted in `unmatched_tags` (via the
+`log_unmatched_tags` RPC) for review; enrichment never inserts vocabulary
+rows. Writes `song_genres`/`song_moods` and the `songs` enrichment columns.
 Confidence < 0.4 (`lib/enrichment/schema.ts`) → `unknown`, no tags.
 
 **Personal tags** — `components/library-tag-editor.tsx` → `/api/tags` →
 `lib/tags.ts` on the RLS client: ownership check against `user_songs`,
-vocabulary upsert via `lib/vocabulary.ts` (`ensureVocabularyIds`), link rows
-in `user_genres`/`user_moods`.
+vocabulary upsert via `lib/vocabulary.ts` (`ensureVocabularyIds` — the open
+path; personal tags are not gated by `is_approved`), link rows in
+`user_genres`/`user_moods`.
 
 **Chat / selection** — not built yet — see MVP-PLAN.md step 7 (`/chat` is a
 placeholder page).

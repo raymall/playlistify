@@ -17,6 +17,7 @@
     "verify:import": "node --env-file=.env.local scripts/verify-import.mjs",
     "verify:enrichment": "node --env-file=.env.local scripts/verify-enrichment.mjs",
     "verify:genres": "node --env-file=.env.local --import tsx scripts/verify-genres.mts",
+    "reset:enrichment": "node --env-file=.env.local --import tsx scripts/reset-enrichment.mts",
     "verify:tokens": "node --env-file=.env.local scripts/check-tokens.mjs",
     "verify:refresh": "node --env-file=.env.local --import tsx scripts/exercise-refresh.mts"
   },
