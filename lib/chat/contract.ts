@@ -22,6 +22,65 @@ export interface PlaylistProposal {
   tracks: ProposalTrack[]
 }
 
+/**
+ * What the UI needs from a `search_library` result. Parsed here rather than
+ * inline in the renderer so the tool's output shape has exactly one client-side
+ * reader — renaming a field in lib/chat/tools.ts then shows up as a type error
+ * here instead of silently rendering "Found 0 matching songs".
+ */
+export interface SearchSummary {
+  /** Full number of matches — the playlist-relevant figure. */
+  matchCount: number
+  /** How many of those were sampled back to the model. */
+  sampled: number
+  unmatchedTagCount: number
+}
+
+/** One sampled candidate row as `search_library` reports it to the model. */
+export interface SearchCandidate {
+  songId: string
+  title: string
+  artists: string[]
+  era: string | null
+  energy: number | null
+  tempoFeel: string | null
+  genres: string[]
+  moods: string[]
+  durationMs: number | null
+}
+
+/**
+ * The full `search_library` output shape. The tool's return value is checked
+ * against this (`satisfies`), so renaming or dropping a field is a build error
+ * rather than a silent "Found 0 matching songs" in the UI.
+ */
+export interface SearchResultContract {
+  /** Full number of matches — the playlist-relevant figure. */
+  matchCount: number
+  /** Matches found by tag filters, before attribute post-filtering. */
+  totalTagMatches: number
+  scanned: number
+  /** How many matches were sampled back to the model. */
+  sampled: number
+  truncated: boolean
+  unmatchedTags: string[]
+  candidates: SearchCandidate[]
+  hint: string | undefined
+}
+
+export const readSearchSummary = (value: unknown): SearchSummary | null => {
+  if (!isRecord(value)) return null
+  const matchCount = readNumber(value.matchCount)
+  if (matchCount === null) return null
+  return {
+    matchCount,
+    sampled: readNumber(value.sampled) ?? matchCount,
+    unmatchedTagCount: Array.isArray(value.unmatchedTags)
+      ? value.unmatchedTags.length
+      : 0,
+  }
+}
+
 const readStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return []
   const out: string[] = []

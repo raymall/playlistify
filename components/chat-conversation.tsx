@@ -11,7 +11,8 @@ import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { isRecord, readNumber } from '@/lib/json'
+import { readSearchSummary } from '@/lib/chat/contract'
+import { isRecord } from '@/lib/json'
 
 interface ChatConversationProps {
   messages: UIMessage[]
@@ -52,15 +53,15 @@ const toolActivityText = (part: ToolUIPart): string => {
       return 'Library search failed.'
     }
     if (part.state === 'output-available') {
-      const output = part.output
-      const returned = isRecord(output) ? readNumber(output.returned) : null
-      const unmatched =
-        isRecord(output) && Array.isArray(output.unmatchedTags)
-          ? output.unmatchedTags.length
-          : 0
-      const count = returned ?? 0
-      const base = `Found ${count} matching ${count === 1 ? 'song' : 'songs'}.`
-      return unmatched > 0 ? `${base} Some tags weren’t in your library.` : base
+      const summary = readSearchSummary(part.output)
+      if (summary === null) return 'Searched your library.'
+      const { matchCount, unmatchedTagCount } = summary
+      const base = `Found ${matchCount} matching ${
+        matchCount === 1 ? 'song' : 'songs'
+      }.`
+      return unmatchedTagCount > 0
+        ? `${base} Some tags weren’t in your library.`
+        : base
     }
     const terms = describeSearchInput(part.input)
     return terms.length > 0

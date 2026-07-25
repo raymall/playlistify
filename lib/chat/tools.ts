@@ -9,7 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { tool } from 'ai'
 import { z } from 'zod'
 
-import type { ProposalTrack } from '@/lib/chat/contract'
+import type { ProposalTrack, SearchResultContract } from '@/lib/chat/contract'
 import {
   type CandidateRow,
   type EnrichedIndexEntry,
@@ -172,7 +172,7 @@ const searchLibrary = async (
         unmatchedTags: [],
         candidates: [],
         hint: 'Your enriched library is empty — enrich songs on the Library page first.',
-      },
+      } satisfies SearchResultContract,
       matchIds: [],
     }
   }
@@ -264,7 +264,7 @@ const searchLibrary = async (
       unmatchedTags,
       candidates: sample,
       hint,
-    },
+    } satisfies SearchResultContract,
     matchIds,
   }
 }
