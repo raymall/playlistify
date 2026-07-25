@@ -15,7 +15,12 @@ const NAME_MAX = 100
 const DESCRIPTION_MAX = 300
 const PROMPT_MAX = 500
 const SONGS_MIN = 1
-const SONGS_MAX = 50
+/**
+ * No product cap on playlist size — this is only an abuse bound, matched to the
+ * chat search ceiling (SCAN_CAP in lib/chat/tools.ts). Spotify itself allows
+ * 10,000 tracks per playlist.
+ */
+const SONGS_MAX = 1000
 
 const readSongIds = (value: unknown): string[] | null => {
   if (!Array.isArray(value)) return null

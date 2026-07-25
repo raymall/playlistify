@@ -22,15 +22,26 @@ import { matchApprovedVocabulary, normalizeTagName } from '@/lib/vocabulary'
 
 type Client = SupabaseClient<Database>
 
-/** Enriched songs intersected before the (expensive) row fetch. */
-const SCAN_CAP = 500
-/** Candidate rows returned to the model per search. */
-const CANDIDATE_CAP = 120
+/**
+ * Ceiling on matches fetched + carried per search. There is no product cap on
+ * playlist size — by default the whole match set becomes the playlist — but a
+ * technical bound protects against a single filter dragging in an entire large
+ * library (and the token cost of round-tripping the proposal). Sits well above
+ * any realistic single-intent match; searches that exceed it are truncated with
+ * a hint rather than silently.
+ */
+const SCAN_CAP = 1000
+/** Sample of matches shown to the model — it decides by count, not by reading
+ *  every row; the full set is included via propose's includeAllMatches. */
+const MODEL_SAMPLE_CAP = 80
 const OWNERSHIP_CHUNK = 100
 
 const NAME_MAX = 100
 const DESCRIPTION_MAX = 300
 const REASON_MAX = 160
+/** Max tracks the model may enumerate explicitly (the include-all path does not
+ *  enumerate, so a bigger playlist doesn't need a bigger list here). */
+const EXPLICIT_TRACKS_MAX = 1000
 
 const searchLibraryInputSchema = z.object({
   genres: z.array(z.string()).max(8),
@@ -44,6 +55,10 @@ const searchLibraryInputSchema = z.object({
 const proposePlaylistInputSchema = z.object({
   name: z.string(),
   description: z.string(),
+  // Default true: build the playlist from EVERY match of the last search (no
+  // size cap). Set false only when the user asked for a specific number or a
+  // hand-picked selection, and then enumerate that subset in `tracks`.
+  includeAllMatches: z.boolean(),
   tracks: z
     .array(
       z.object({
@@ -51,7 +66,7 @@ const proposePlaylistInputSchema = z.object({
         reason: z.string(),
       }),
     )
-    .max(50),
+    .max(EXPLICIT_TRACKS_MAX),
 })
 
 type SearchLibraryInput = z.infer<typeof searchLibraryInputSchema>
@@ -148,13 +163,17 @@ const searchLibrary = async (
   const index = await getIndex()
   if (index.length === 0) {
     return {
-      totalTagMatches: 0,
-      scanned: 0,
-      returned: 0,
-      truncated: false,
-      unmatchedTags: [],
-      candidates: [],
-      hint: 'Your enriched library is empty — enrich songs on the Library page first.',
+      result: {
+        matchCount: 0,
+        totalTagMatches: 0,
+        scanned: 0,
+        sampled: 0,
+        truncated: false,
+        unmatchedTags: [],
+        candidates: [],
+        hint: 'Your enriched library is empty — enrich songs on the Library page first.',
+      },
+      matchIds: [],
     }
   }
 
@@ -218,27 +237,35 @@ const searchLibrary = async (
   const filtered = orderedRows.filter((row) =>
     passesAttributeFilters(row, input),
   )
-  const candidates = filtered.slice(0, CANDIDATE_CAP).map(toCandidate)
+  // The full match set — this, not the sample below, is what an
+  // includeAllMatches proposal turns into a playlist.
+  const matchIds = filtered.map((row) => row.songId)
+  const sample = filtered.slice(0, MODEL_SAMPLE_CAP).map(toCandidate)
 
-  const isTruncated =
-    totalTagMatches > scanIds.length || filtered.length > candidates.length
+  const isTruncated = totalTagMatches > scanIds.length
 
   let hint: string | undefined
-  if (candidates.length === 0) {
+  if (matchIds.length === 0) {
     hint =
       unmatchedTags.length > 0
         ? 'No songs matched. Some tags are not in the vocabulary — try broader or different tags.'
         : 'No songs matched these filters. Relax the energy range, eras, or tags and search again.'
+  } else if (sample.length < matchIds.length) {
+    hint = `Showing ${sample.length} of ${matchIds.length} matches as a sample. Propose with includeAllMatches: true to use all ${matchIds.length}.`
   }
 
   return {
-    totalTagMatches,
-    scanned: scanIds.length,
-    returned: candidates.length,
-    truncated: isTruncated,
-    unmatchedTags,
-    candidates,
-    hint,
+    result: {
+      matchCount: matchIds.length,
+      totalTagMatches,
+      scanned: scanIds.length,
+      sampled: sample.length,
+      truncated: isTruncated,
+      unmatchedTags,
+      candidates: sample,
+      hint,
+    },
+    matchIds,
   }
 }
 
@@ -251,37 +278,51 @@ const clampName = (raw: string): string => {
 const proposePlaylist = async (
   supabase: Client,
   input: z.infer<typeof proposePlaylistInputSchema>,
+  lastMatchIds: string[],
 ) => {
   // Dedupe by songId, preserving first-seen (proposal) order.
   const reasonBySongId = new Map<string, string>()
-  const orderedIds: string[] = []
+  const enumeratedIds: string[] = []
   for (const track of input.tracks) {
     if (reasonBySongId.has(track.songId)) continue
     reasonBySongId.set(track.songId, track.reason.trim().slice(0, REASON_MAX))
-    orderedIds.push(track.songId)
+    enumeratedIds.push(track.songId)
   }
+
+  // Default path: the playlist IS the full match set of the last search, so a
+  // "all my salsa" request yields every match rather than a sampled subset.
+  // The model only enumerates tracks when it deliberately curates a subset.
+  const shouldIncludeAll = input.includeAllMatches && lastMatchIds.length > 0
+  const orderedIds = shouldIncludeAll ? lastMatchIds : enumeratedIds
 
   if (orderedIds.length === 0) {
     return {
       status: 'error' as const,
-      message: 'Propose at least one song from search_library results.',
+      message:
+        'No songs to propose. Run search_library first, then propose with includeAllMatches: true, or list specific songIds in tracks.',
     }
   }
 
-  // Verify ownership against the user's library (chunked).
-  const owned = new Set<string>()
-  for (let i = 0; i < orderedIds.length; i += OWNERSHIP_CHUNK) {
-    const chunk = orderedIds.slice(i, i + OWNERSHIP_CHUNK)
-    const { data, error } = await supabase
-      .from('user_songs')
-      .select('song_id')
-      .in('song_id', chunk)
-    if (error) throw new Error(error.message)
-    for (const row of data) owned.add(row.song_id)
+  // Ownership check. The includeAllMatches ids came straight from the user's
+  // own RLS-scoped enriched index, so they are owned by construction — skip the
+  // extra round-trips there and only verify model-enumerated ids.
+  let rejectedSongIds: string[] = []
+  let validIds = orderedIds
+  if (!shouldIncludeAll) {
+    const owned = new Set<string>()
+    for (let i = 0; i < orderedIds.length; i += OWNERSHIP_CHUNK) {
+      const chunk = orderedIds.slice(i, i + OWNERSHIP_CHUNK)
+      const { data, error } = await supabase
+        .from('user_songs')
+        .select('song_id')
+        .in('song_id', chunk)
+      if (error) throw new Error(error.message)
+      for (const row of data) owned.add(row.song_id)
+    }
+    rejectedSongIds = orderedIds.filter((id) => !owned.has(id))
+    validIds = orderedIds.filter((id) => owned.has(id))
   }
 
-  const rejectedSongIds = orderedIds.filter((id) => !owned.has(id))
-  const validIds = orderedIds.filter((id) => owned.has(id))
   if (validIds.length === 0) {
     return {
       status: 'error' as const,
@@ -332,18 +373,30 @@ export const createChatTools = (supabase: Client) => {
     return indexPromise
   }
 
+  // Full match set of the most recent search, so propose_playlist can build a
+  // playlist from every match without the model enumerating them all.
+  let lastMatchIds: string[] = []
+
   return {
     search_library: tool({
       description:
-        'Search the user\'s own enriched library. Filters are ANDed across kinds and ORed within a kind; energy is 1 (calm) to 5 (intense); eras use a decade format like "1990s". Returns candidate songs (songId, title, artists, era, energy, tempoFeel, genres, moods) to curate from — only propose songIds returned here. Call with empty arrays and null energies to get the most recent enriched songs.',
+        'Search the user\'s own enriched library. Filters are ANDed across kinds and ORed within a kind; energy is 1 (calm) to 5 (intense); eras use a decade format like "1990s". Returns `matchCount` (the full number of matches) plus a `candidates` SAMPLE of them — the sample is for judging fit, not the playlist size. Call with empty arrays and null energies to get the most recent enriched songs.',
       inputSchema: searchLibraryInputSchema,
-      execute: (input) => searchLibrary(supabase, getIndex, input),
+      execute: async (input) => {
+        const { result, matchIds } = await searchLibrary(
+          supabase,
+          getIndex,
+          input,
+        )
+        lastMatchIds = matchIds
+        return result
+      },
     }),
     propose_playlist: tool({
       description:
-        'Propose the final playlist to show the user in the preview panel. Provide a name, a short description, and 1–50 tracks (each a songId from search_library plus a one-line reason). This renders the proposal UI — do not also list the tracks in chat.',
+        'Propose the final playlist to show the user in the preview panel. Provide a name and a short description. Set includeAllMatches: true (the DEFAULT) to use EVERY match from the last search — leave `tracks` empty in that case; there is no playlist size limit. Only set includeAllMatches: false when the user asked for a specific count or a hand-picked subset, and then list exactly those songIds in `tracks`. This renders the proposal UI — never also list the tracks in chat.',
       inputSchema: proposePlaylistInputSchema,
-      execute: (input) => proposePlaylist(supabase, input),
+      execute: (input) => proposePlaylist(supabase, input, lastMatchIds),
     }),
   }
 }
