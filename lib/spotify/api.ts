@@ -105,6 +105,23 @@ const reduceResponse = async (
       retryAfterSeconds: parseRetryAfter(response.headers.get('retry-after')),
     }
   }
+
+  // Log the raw failure body server-side before it is reduced to a status.
+  // A bare `auth_failed` once masked a retired endpoint path as an expired
+  // Spotify connection — the body ("Forbidden" vs. a scope error) is the only
+  // thing that distinguishes them.
+  if (!response.ok) {
+    let body = ''
+    try {
+      body = (await response.text()).slice(0, 300)
+    } catch {
+      body = '(unreadable body)'
+    }
+    console.error(
+      `[spotify] ${response.status} ${new URL(response.url).pathname}: ${body}`,
+    )
+  }
+
   if (response.status === 401 || response.status === 403) {
     return { status: 'auth_failed' }
   }
@@ -360,16 +377,53 @@ export const createSpotifyPlaylist = async (
  * Add one chunk (≤100) of track ids to a playlist, in order. Track ids are the
  * bare Spotify ids; they're expanded to `spotify:track:` uris here. The caller
  * owns the chunk loop and partial-failure accounting.
+ *
+ * Path is `/items`, NOT the older `/tracks`: Spotify's API migration renamed
+ * the playlist-contents segment, and the retired `/tracks` form now 403s
+ * ("Forbidden") for every caller — indistinguishable from a permissions
+ * problem unless the response body is read.
  */
 export const addPlaylistTracksChunk = async (
   accessToken: string,
   playlistId: string,
   trackIds: string[],
 ): Promise<SpotifyApiResult<null>> => {
-  const url = `${SPOTIFY_API_BASE}/playlists/${encodeURIComponent(playlistId)}/tracks`
+  const url = `${SPOTIFY_API_BASE}/playlists/${encodeURIComponent(playlistId)}/items`
   const result = await spotifyPost(accessToken, url, {
     uris: trackIds.map((trackId) => `spotify:track:${trackId}`),
   })
   if (result.status !== 'ok') return result
   return { status: 'ok', data: null }
+}
+
+/**
+ * Remove a playlist from the user's library by unfollowing it — Spotify has no
+ * hard-delete for playlists; unfollow is what its own clients call "delete".
+ * Used only to clean up a playlist this app created moments earlier and then
+ * failed to fill, so an empty shell is never left behind.
+ */
+export const deleteSpotifyPlaylist = async (
+  accessToken: string,
+  playlistId: string,
+): Promise<SpotifyApiResult<null>> => {
+  const url = `${SPOTIFY_API_BASE}/playlists/${encodeURIComponent(playlistId)}/followers`
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    })
+  } catch (error) {
+    return {
+      status: 'error',
+      message:
+        error instanceof Error ? error.message : 'Spotify request failed',
+    }
+  }
+  const result = await reduceResponse(response)
+  if (result.status !== 'ok' && result.status !== 'error') return result
+  return response.ok
+    ? { status: 'ok', data: null }
+    : { status: 'error', message: `Unfollow failed (HTTP ${response.status})` }
 }

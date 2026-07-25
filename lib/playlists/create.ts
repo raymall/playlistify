@@ -1,11 +1,12 @@
 // Playlist creation engine — role-mirror of lib/spotify/import.ts. Owns the
 // full create flow: ownership + track-id resolution (RLS client), Spotify
-// playlist creation (POST /me/playlists) + chunked track adds, then best-effort
-// persistence into
+// playlist creation (POST /me/playlists) + chunked track adds (POST
+// /playlists/{id}/items), then best-effort persistence into
 // `playlists`/`playlist_songs`. Failure policy: pre-Spotify failures leave
-// nothing created (clean error/reconnect/rate-limited); an add-tracks failure
-// mid-loop keeps the Spotify playlist and reports `partial` (never auto-delete
-// user data); a DB persist failure after Spotify success reports `created`
+// nothing created (clean error/reconnect/rate-limited); a partial add keeps the
+// playlist and reports `partial` (never discards tracks the user got); adding
+// ZERO tracks removes the empty shell this call just created and reports the
+// real error; a DB persist failure after Spotify success reports `created`
 // with persisted:false.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -13,7 +14,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   addPlaylistTracksChunk,
   createSpotifyPlaylist,
+  deleteSpotifyPlaylist,
   PLAYLIST_ADD_CHUNK_SIZE,
+  type SpotifyApiResult,
 } from '@/lib/spotify/api'
 import { getValidSpotifyToken } from '@/lib/spotify/token'
 import type { Database } from '@/lib/supabase/types'
@@ -144,6 +147,7 @@ export const createPlaylistForUser = async (
   // actually landed.
   let addedCount = 0
   let didAddFail = false
+  let addFailure: SpotifyApiResult<null> | null = null
   for (let i = 0; i < trackIds.length; i += PLAYLIST_ADD_CHUNK_SIZE) {
     const chunk = trackIds.slice(i, i + PLAYLIST_ADD_CHUNK_SIZE)
     const addResult = await addPlaylistTracksChunk(
@@ -153,9 +157,37 @@ export const createPlaylistForUser = async (
     )
     if (addResult.status !== 'ok') {
       didAddFail = true
+      addFailure = addResult
       break
     }
     addedCount += chunk.length
+  }
+
+  // Nothing landed: the playlist is an empty shell this request just created,
+  // so remove it rather than leaving it in the user's account, and report the
+  // real reason. (Only ever applies to a playlist created moments ago in this
+  // same call — existing playlists are never touched.)
+  if (addedCount === 0) {
+    const cleanup = await deleteSpotifyPlaylist(accessToken, playlist.id)
+    if (cleanup.status !== 'ok') {
+      console.error('[playlists] empty-playlist cleanup failed')
+    }
+    if (addFailure?.status === 'auth_failed') {
+      return { status: 'reconnect_required' }
+    }
+    if (addFailure?.status === 'rate_limited') {
+      return {
+        status: 'rate_limited',
+        retryAfterSeconds: addFailure.retryAfterSeconds,
+      }
+    }
+    return {
+      status: 'error',
+      message:
+        addFailure?.status === 'error'
+          ? `Could not add songs to the playlist: ${addFailure.message}`
+          : 'Could not add any songs to the playlist.',
+    }
   }
 
   // Persist the playlist + its linked songs (RLS client — the user owns both
