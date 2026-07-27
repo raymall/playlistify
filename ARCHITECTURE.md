@@ -132,7 +132,7 @@ works).
 (`lib/ai/models.ts`, filtered by `lib/ai/providers.ts`) into
 `components/library-enrichment-panel.tsx`; the panel loops `POST /api/enrich`
 with the chosen model's row id. `lib/enrichment/engine.ts` selects ~20
-pending songs (env caps `ENRICHMENT_BATCH_SIZE` /
+pending songs, newest-liked first (env caps `ENRICHMENT_BATCH_SIZE` /
 `ENRICHMENT_MAX_SONGS_PER_RUN`), makes one structured-output call (AI SDK v7
 `generateText` + `Output.object`; divergence: MVP-PLAN says SDK 5 /
 `generateObject`). The vocabulary is **closed**: the prompt carries only
