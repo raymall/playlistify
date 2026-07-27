@@ -28,6 +28,12 @@ export interface EnrichmentModelOption {
 
 interface LibraryEnrichmentPanelProps {
   defaultModelId: string | null
+  /**
+   * None/Low songs that *some* model could redo. Model-independent — the page
+   * counts them before a model is chosen, so this can be > 0 while the
+   * selected model is allowed to redo none of them.
+   */
+  improvableCount: number
   models: EnrichmentModelOption[]
   pendingCount: number
   totalCount: number
@@ -44,6 +50,8 @@ type EnrichmentState =
       retryDetail: string | null
     }
   | { phase: 'capReached'; counts: EnrichmentCounts }
+  /** Nothing pending, and the chosen model outranks none of the weak rows. */
+  | { phase: 'modelTooWeak'; counts: EnrichmentCounts }
   | {
       phase: 'error'
       processedThisRun: number
@@ -56,6 +64,12 @@ type EnrichmentState =
  * Consecutive zero-progress batches before the loop stops. Songs the model
  * omits stay pending and are re-selected first, so without this brake a
  * refused song would loop (and bill) forever.
+ *
+ * Re-enrichment doesn't weaken it. The counters below count *writes*, not
+ * status changes, so a None row a better model still can't place counts as
+ * progress and doesn't trip the guard. And every write raises that row to the
+ * selected model's rank, which puts it outside the selector's `rank <` filter
+ * — so an improvable song is picked at most once per run.
  */
 const MAX_STALLED_BATCHES = 3
 
@@ -97,9 +111,10 @@ const readCounts = (
   const enriched = readNumber(value.enriched)
   const unknown = readNumber(value.unknown)
   const pending = readNumber(value.pending)
+  const improvable = readNumber(value.improvable)
   if (total === null || enriched === null) return null
-  if (unknown === null || pending === null) return null
-  return { total, enriched, unknown, pending }
+  if (unknown === null || pending === null || improvable === null) return null
+  return { total, enriched, unknown, pending, improvable }
 }
 
 /** Parse the route's JSON body into the response contract, or null if malformed. */
@@ -135,6 +150,7 @@ const toCounts = (value: EnrichmentCounts): EnrichmentCounts => ({
   enriched: value.enriched,
   unknown: value.unknown,
   pending: value.pending,
+  improvable: value.improvable,
 })
 
 /**
@@ -147,6 +163,7 @@ const toCounts = (value: EnrichmentCounts): EnrichmentCounts => ({
  */
 export const LibraryEnrichmentPanel = ({
   defaultModelId,
+  improvableCount,
   models,
   pendingCount,
   totalCount,
@@ -303,6 +320,19 @@ export const LibraryEnrichmentPanel = ({
 
       if (parsed.status === 'done') {
         const finalCounts = toCounts(parsed)
+        // Done on the very first batch, with weak rows in the library that
+        // this model simply doesn't outrank — that isn't "complete", it's the
+        // wrong model.
+        if (
+          processedThisRun === 0 &&
+          finalCounts.improvable === 0 &&
+          improvableCount > 0
+        ) {
+          setState({ phase: 'modelTooWeak', counts: finalCounts })
+          setAnnouncement('No songs can be improved by this model.')
+          router.refresh()
+          return
+        }
         setState({ phase: 'done', counts: finalCounts })
         setAnnouncement(
           `Enrichment complete. ${finalCounts.enriched.toLocaleString()} songs enriched.`,
@@ -359,9 +389,12 @@ export const LibraryEnrichmentPanel = ({
     }
   }
 
-  // Invisible for fully-enriched libraries, but keep post-run states visible
-  // after router.refresh() zeroes pendingCount.
-  if (state.phase === 'idle' && pendingCount === 0) return null
+  // Invisible only when there is nothing to do at all — a fully-enriched
+  // library can still hold None/Low rows a stronger model could improve. Post-
+  // run states stay visible after router.refresh() zeroes the counts.
+  if (state.phase === 'idle' && pendingCount === 0 && improvableCount === 0) {
+    return null
+  }
 
   if (models.length === 0) {
     return (
@@ -374,6 +407,13 @@ export const LibraryEnrichmentPanel = ({
   }
 
   const isRunning = state.phase === 'running'
+  const songWord = (count: number) => (count === 1 ? 'song' : 'songs')
+  const idleLabel =
+    pendingCount === 0
+      ? `Improve ${improvableCount.toLocaleString()} ${songWord(improvableCount)}`
+      : improvableCount === 0
+        ? `Enrich ${pendingCount.toLocaleString()} ${songWord(pendingCount)}`
+        : `Enrich ${pendingCount.toLocaleString()} ${songWord(pendingCount)} · ${improvableCount.toLocaleString()} improvable`
   const primaryLabel =
     state.phase === 'error'
       ? 'Retry'
@@ -381,9 +421,7 @@ export const LibraryEnrichmentPanel = ({
         ? 'Continue enriching'
         : isRunning
           ? 'Enriching…'
-          : `Enrich ${pendingCount.toLocaleString()} ${
-              pendingCount === 1 ? 'song' : 'songs'
-            }`
+          : idleLabel
 
   const counts = state.phase === 'idle' ? null : state.counts
 
@@ -432,10 +470,12 @@ export const LibraryEnrichmentPanel = ({
       </div>
 
       {state.phase === 'idle' && totalCount > pendingCount && (
-        <p className='text-sm text-muted-foreground tabular-nums'>
+        <p className='max-w-prose text-sm text-muted-foreground tabular-nums'>
           {(totalCount - pendingCount).toLocaleString()} of{' '}
           {totalCount.toLocaleString()} songs already processed — the button
           enriches the rest.
+          {improvableCount > 0 &&
+            ` ${improvableCount.toLocaleString()} of them came back None or Low and can be redone, but only by a model that ranks above the one that wrote them.`}
         </p>
       )}
 
@@ -473,6 +513,14 @@ export const LibraryEnrichmentPanel = ({
         <p className='text-sm text-muted-foreground tabular-nums'>
           Paused at the per-run cap — {state.counts.pending.toLocaleString()}{' '}
           songs still pending.
+        </p>
+      )}
+
+      {state.phase === 'modelTooWeak' && (
+        <p className='max-w-prose text-sm text-muted-foreground'>
+          No songs can be improved by this model. Redoing a None or Low song
+          needs a model that ranks above the one that wrote it — pick a stronger
+          one.
         </p>
       )}
 
