@@ -244,6 +244,11 @@ export const enrichLibraryBatch = async (
     )
     .eq('user_id', userId)
     .eq('songs.enrichment_status', 'pending')
+    // Newest-liked first, so a partially-enriched library fills in from the top
+    // of what /library shows. song_id breaks ties, keeping the order fully
+    // deterministic — that is what lets the zero-progress guard re-pick the
+    // same songs on each strike.
+    .order('liked_at', { ascending: false })
     .order('song_id', { ascending: true })
     .limit(batchLimit)
   if (batchResult.error) {
