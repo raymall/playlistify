@@ -141,7 +141,8 @@ pending songs (env caps `ENRICHMENT_BATCH_SIZE` /
 or drop. Dropped names are counted in `unmatched_tags` (via the
 `log_unmatched_tags` RPC) for review; enrichment never inserts vocabulary
 rows. Writes `song_genres`/`song_moods` and the `songs` enrichment columns.
-Confidence < 0.4 (`lib/enrichment/schema.ts`) → `unknown`, no tags.
+Confidence < 0.4 (`lib/enrichment/schema.ts`) → `unknown`, no tags — the flip
+also deletes any links a crashed earlier attempt left on that song.
 
 **Personal tags** — `components/library-tag-editor.tsx` → `/api/tags` →
 `lib/tags.ts` on the RLS client: ownership check against `user_songs`,

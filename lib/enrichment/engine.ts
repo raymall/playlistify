@@ -411,6 +411,22 @@ export const enrichLibraryBatch = async (
     if (result.error) return fail('mood links', result.error.message)
   }
 
+  // An unknown song must carry no AI tags, but a batch that died after its
+  // link writes leaves the earlier attempt's rows behind. Clear them before
+  // the flip: a crash in between leaves the song in its previous state with
+  // no links, which the next run re-enriches cleanly.
+  const unknownSongIds = unknownWrites.map((write) => write.songId)
+  if (unknownSongIds.length > 0) {
+    const [staleGenres, staleMoods] = await Promise.all([
+      admin.from('song_genres').delete().in('song_id', unknownSongIds),
+      admin.from('song_moods').delete().in('song_id', unknownSongIds),
+    ])
+    if (staleGenres.error) {
+      return fail('unknown links', staleGenres.error.message)
+    }
+    if (staleMoods.error) return fail('unknown links', staleMoods.error.message)
+  }
+
   const modelString = toEnrichmentModelString(model)
   const enrichedAt = new Date().toISOString()
 
