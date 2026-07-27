@@ -2,6 +2,10 @@
 
 `MVP-PLAN.md` is the source of truth for scope, stack, and the MVP build order. Read it before starting feature work.
 
+# Product reasoning
+
+`HOW-IT-WORKS.md` explains, in plain language, what the product does and why it decides what it decides — enrichment, the Accuracy bands, when a song may be re-analyzed, and how a chat request becomes a playlist. Read it before changing any of that behaviour; keep it free of implementation detail.
+
 # Codebase map
 
 `ARCHITECTURE.md` is the wayfinding index — directory map, route inventory, core flows, and where new code goes. Read it **before** searching the codebase for where something lives; it names the exact files.
