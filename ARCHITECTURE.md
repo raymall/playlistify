@@ -64,9 +64,11 @@ the same commit (rule in `AGENTS.md`).
   by music-metadata recall; `songs.enrichment_rank` snapshots the rank that
   wrote the row (0 = never enriched).
 - `proxy.ts` — runs on every request: session refresh + route protection.
-- Root: `MVP-PLAN.md` (product spec), `IMPROVEMENTS.md` (gitignored debt
-  log), `README.md` (setup), `.env.example` (every env var, commented),
-  `next.config.ts` (album-art image host allowlist).
+- Root: `MVP-PLAN.md` (product spec), `HOW-IT-WORKS.md` (plain-language
+  product reasoning: enrichment, Accuracy bands, re-enrichment policy, chat →
+  playlist), `IMPROVEMENTS.md` (gitignored debt log), `README.md` (setup),
+  `.env.example` (every env var, commented), `next.config.ts` (album-art image
+  host allowlist).
 
 ## Route inventory
 
