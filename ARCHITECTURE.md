@@ -131,9 +131,15 @@ works).
 **Enrichment** — `app/library/page.tsx` loads enabled `llm_models`
 (`lib/ai/models.ts`, filtered by `lib/ai/providers.ts`) into
 `components/library-enrichment-panel.tsx`; the panel loops `POST /api/enrich`
-with the chosen model's row id. `lib/enrichment/engine.ts` selects ~20
-pending songs, newest-liked first (env caps `ENRICHMENT_BATCH_SIZE` /
-`ENRICHMENT_MAX_SONGS_PER_RUN`), makes one structured-output call (AI SDK v7
+with the chosen model's row id. `lib/enrichment/engine.ts` selects ~20 songs,
+newest-liked first (env caps `ENRICHMENT_BATCH_SIZE` /
+`ENRICHMENT_MAX_SONGS_PER_RUN`): `pending` rows first, then — only if the batch
+isn't full — _improvable_ ones, meaning None/Low rows
+(`IMPROVABLE_SONGS_FILTER` in `lib/enrichment/accuracy.ts`) whose
+`enrichment_rank` is strictly below the selected model's. Medium and High are
+finished; same-or-weaker model refuses. That rank gate is also what makes the
+run terminate: every write raises the row to the model's rank, so a song is
+picked at most once per run. It then makes one structured-output call (AI SDK v7
 `generateText` + `Output.object`; divergence: MVP-PLAN says SDK 5 /
 `generateObject`). The vocabulary is **closed**: the prompt carries only
 `is_approved` `genres`/`moods` rows and output resolves through

@@ -11,6 +11,7 @@ import { buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { getDefaultModel, getEnabledModels } from '@/lib/ai/models'
 import { filterMappedModels } from '@/lib/ai/providers'
+import { IMPROVABLE_SONGS_FILTER } from '@/lib/enrichment/accuracy'
 import { readSongAIAttributes } from '@/lib/enrichment/schema'
 import { createClient } from '@/lib/supabase/server'
 
@@ -52,6 +53,7 @@ export default async function LibraryPage({
   // models this build can actually run. The panel gets plain id/label rows —
   // provider internals stay server-side.
   let pendingSongs = 0
+  let improvableSongs = 0
   let modelOptions: EnrichmentModelOption[] = []
   let defaultModelId: string | null = null
   let rows: LibrarySong[] = []
@@ -87,19 +89,32 @@ export default async function LibraryPage({
     }
 
     const from = (page - 1) * LIBRARY_PAGE_SIZE
-    const [pendingResult, enabledModels, rowsResult] = await Promise.all([
-      supabase
-        .from('user_songs')
-        .select('song_id, songs!inner(enrichment_status)', {
-          count: 'exact',
-          head: true,
-        })
-        .eq('songs.enrichment_status', 'pending'),
-      getEnabledModels(supabase),
-      request.range(from, from + LIBRARY_PAGE_SIZE - 1),
-    ])
+    const [pendingResult, improvableResult, enabledModels, rowsResult] =
+      await Promise.all([
+        supabase
+          .from('user_songs')
+          .select('song_id, songs!inner(enrichment_status)', {
+            count: 'exact',
+            head: true,
+          })
+          .eq('songs.enrichment_status', 'pending'),
+        // None/Low rows a strong enough model could redo. Deliberately not
+        // rank-filtered: the model isn't chosen until the client renders, so
+        // this is the model-independent ceiling. The engine narrows it to the
+        // selected model per batch.
+        supabase
+          .from('user_songs')
+          .select('song_id, songs!inner(enrichment_status, ai_confidence)', {
+            count: 'exact',
+            head: true,
+          })
+          .or(IMPROVABLE_SONGS_FILTER, { referencedTable: 'songs' }),
+        getEnabledModels(supabase),
+        request.range(from, from + LIBRARY_PAGE_SIZE - 1),
+      ])
 
     pendingSongs = pendingResult.count ?? 0
+    improvableSongs = improvableResult.count ?? 0
     // Null = catalog query failed; render the "no models" state rather than
     // crashing the page — the enrich route re-checks with its own error.
     const mappedModels = filterMappedModels(enabledModels ?? [])
@@ -154,6 +169,7 @@ export default async function LibraryPage({
         {totalSongs > 0 && (
           <LibraryEnrichmentPanel
             defaultModelId={defaultModelId}
+            improvableCount={improvableSongs}
             models={modelOptions}
             pendingCount={pendingSongs}
             totalCount={totalSongs}

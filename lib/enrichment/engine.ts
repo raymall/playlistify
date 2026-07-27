@@ -2,6 +2,7 @@ import { generateText, Output } from 'ai'
 
 import { type LlmModel, toEnrichmentModelString } from '@/lib/ai/models'
 import { resolveLanguageModel } from '@/lib/ai/providers'
+import { IMPROVABLE_SONGS_FILTER } from '@/lib/enrichment/accuracy'
 import {
   CONFIDENCE_THRESHOLD,
   type EnrichedSong,
@@ -22,12 +23,18 @@ export interface EnrichBatchPayload {
   processedSoFar: number
 }
 
-/** Library-wide counts for the requesting user; total = sum of the rest. */
+/**
+ * Library-wide counts for the requesting user. `total` is the sum of
+ * pending + enriched + unknown. `improvable` overlaps those: it counts the
+ * None and Low rows the *selected model* is allowed to redo (rank strictly
+ * below the model's), so it changes with the chosen model.
+ */
 export interface EnrichmentCounts {
   total: number
   enriched: number
   unknown: number
   pending: number
+  improvable: number
 }
 
 /**
@@ -97,12 +104,22 @@ const readEnvInt = (
   return Math.min(max, Math.max(min, parsed))
 }
 
-type PendingSong = Pick<
+type BatchSong = Pick<
   Tables<'songs'>,
-  'id' | 'spotify_track_id' | 'title' | 'artists' | 'album' | 'release_date'
+  | 'id'
+  | 'spotify_track_id'
+  | 'title'
+  | 'artists'
+  | 'album'
+  | 'release_date'
+  | 'enrichment_status'
+  | 'enrichment_rank'
 >
 
-const describeSong = (song: PendingSong, index: number): string => {
+const BATCH_SONG_COLUMNS =
+  'songs!inner(id, spotify_track_id, title, artists, album, release_date, enrichment_status, enrichment_rank)'
+
+const describeSong = (song: BatchSong, index: number): string => {
   const title = song.title ?? 'unknown title'
   const artists =
     song.artists !== null && song.artists.length > 0
@@ -115,7 +132,7 @@ const describeSong = (song: PendingSong, index: number): string => {
 }
 
 const buildUserPrompt = (
-  songs: PendingSong[],
+  songs: BatchSong[],
   genreNames: string[],
   moodNames: string[],
 ): string =>
@@ -215,46 +232,90 @@ export const enrichLibraryBatch = async (
       .eq('user_id', userId)
       .eq('songs.enrichment_status', status)
 
-  const [pendingResult, enrichedResult, unknownResult] = await Promise.all([
-    countByStatus('pending'),
-    countByStatus('enriched'),
-    countByStatus('unknown'),
-  ])
-  for (const result of [pendingResult, enrichedResult, unknownResult]) {
+  // None/Low rows this model is allowed to redo: eligible by band, and ranked
+  // strictly below it. Because songs.enrichment_rank is not null default 0,
+  // "never enriched" sorts below every real rank with no null branch.
+  const countImprovable = async () =>
+    admin
+      .from('user_songs')
+      .select('song_id, songs!inner(enrichment_status, ai_confidence)', {
+        count: 'exact',
+        head: true,
+      })
+      .eq('user_id', userId)
+      .or(IMPROVABLE_SONGS_FILTER, { referencedTable: 'songs' })
+      .lt('songs.enrichment_rank', model.enrichment_rank)
+
+  const [pendingResult, enrichedResult, unknownResult, improvableResult] =
+    await Promise.all([
+      countByStatus('pending'),
+      countByStatus('enriched'),
+      countByStatus('unknown'),
+      countImprovable(),
+    ])
+  for (const result of [
+    pendingResult,
+    enrichedResult,
+    unknownResult,
+    improvableResult,
+  ]) {
     if (result.error) return fail('status counts', result.error.message, true)
   }
   const pending = pendingResult.count ?? 0
   const enriched = enrichedResult.count ?? 0
   const unknown = unknownResult.count ?? 0
+  const improvable = improvableResult.count ?? 0
   const counts: EnrichmentCounts = {
     total: pending + enriched + unknown,
     enriched,
     unknown,
     pending,
+    improvable,
   }
 
-  if (pending === 0) return { status: 'done', ...counts }
+  // Nothing left for this model: neither a first pass nor an upgrade.
+  if (pending === 0 && improvable === 0) return { status: 'done', ...counts }
   if (processedSoFar >= runCap) return { status: 'cap_reached', ...counts }
 
   const batchLimit = Math.min(batchSize, runCap - processedSoFar)
-  const batchResult = await admin
-    .from('user_songs')
-    .select(
-      'songs!inner(id, spotify_track_id, title, artists, album, release_date)',
-    )
-    .eq('user_id', userId)
-    .eq('songs.enrichment_status', 'pending')
-    // Newest-liked first, so a partially-enriched library fills in from the top
-    // of what /library shows. song_id breaks ties, keeping the order fully
-    // deterministic — that is what lets the zero-progress guard re-pick the
-    // same songs on each strike.
-    .order('liked_at', { ascending: false })
-    .order('song_id', { ascending: true })
-    .limit(batchLimit)
-  if (batchResult.error) {
-    return fail('batch select', batchResult.error.message, true)
+
+  // Newest-liked first, so a partially-enriched library fills in from the top
+  // of what /library shows. song_id breaks ties, keeping the order fully
+  // deterministic — that is what lets the zero-progress guard re-pick the same
+  // songs on each strike.
+  const selectSongs = (limit: number) =>
+    admin
+      .from('user_songs')
+      .select(BATCH_SONG_COLUMNS)
+      .eq('user_id', userId)
+      .order('liked_at', { ascending: false })
+      .order('song_id', { ascending: true })
+      .limit(limit)
+
+  const pendingBatch = await selectSongs(batchLimit).eq(
+    'songs.enrichment_status',
+    'pending',
+  )
+  if (pendingBatch.error) {
+    return fail('batch select', pendingBatch.error.message, true)
   }
-  const batchSongs: PendingSong[] = batchResult.data.map((row) => row.songs)
+  const batchSongs: BatchSong[] = pendingBatch.data.map((row) => row.songs)
+
+  // Pending first, improvable at the tail: a first pass over songs that have
+  // never been analyzed always outranks re-asking about one that has.
+  const improvableSongIds = new Set<string>()
+  if (batchSongs.length < batchLimit) {
+    const improvableBatch = await selectSongs(batchLimit - batchSongs.length)
+      .or(IMPROVABLE_SONGS_FILTER, { referencedTable: 'songs' })
+      .lt('songs.enrichment_rank', model.enrichment_rank)
+    if (improvableBatch.error) {
+      return fail('improvable select', improvableBatch.error.message, true)
+    }
+    for (const row of improvableBatch.data) {
+      improvableSongIds.add(row.songs.id)
+      batchSongs.push(row.songs)
+    }
+  }
 
   // Another run may have drained the queue between the count and the select;
   // the next invocation recounts and returns done with fresh numbers.
@@ -316,8 +377,12 @@ export const enrichLibraryBatch = async (
     resultsByTrackId.set(entry.spotify_track_id, entry)
   }
 
+  // priorStatus: with improvable rows in the batch, a write no longer
+  // necessarily came from `pending` — the count deltas at the end are computed
+  // from where each song actually started.
   interface EnrichedWrite {
     songId: string
+    priorStatus: string
     confidence: number
     entry: EnrichedSong
     genreNames: string[]
@@ -325,6 +390,7 @@ export const enrichLibraryBatch = async (
   }
   interface UnknownWrite {
     songId: string
+    priorStatus: string
     confidence: number
   }
 
@@ -341,10 +407,15 @@ export const enrichLibraryBatch = async (
     // which would surface as an enriched song with no tags.
     const isPlaceholder = genreNames.length === 0 && moodNames.length === 0
     if (confidence < CONFIDENCE_THRESHOLD || isPlaceholder) {
-      unknownWrites.push({ songId: song.id, confidence })
+      unknownWrites.push({
+        songId: song.id,
+        priorStatus: song.enrichment_status,
+        confidence,
+      })
     } else {
       enrichedWrites.push({
         songId: song.id,
+        priorStatus: song.enrichment_status,
         confidence,
         entry,
         genreNames,
@@ -483,14 +554,41 @@ export const enrichLibraryBatch = async (
 
   const batchEnriched = enrichedWrites.length
   const batchUnknown = unknownWrites.length
+
+  // Project the new counts from where each written song started. A re-enriched
+  // Low row that stays Low moves nothing between the status buckets; only a
+  // genuine transition does.
+  const statusDelta = { pending: 0, enriched: 0, unknown: 0 }
+  const recordTransition = (from: string, to: 'enriched' | 'unknown') => {
+    if (from === to) return
+    if (from === 'pending') statusDelta.pending -= 1
+    else if (from === 'enriched') statusDelta.enriched -= 1
+    else if (from === 'unknown') statusDelta.unknown -= 1
+    statusDelta[to] += 1
+  }
+  for (const write of enrichedWrites) {
+    recordTransition(write.priorStatus, 'enriched')
+  }
+  for (const write of unknownWrites) {
+    recordTransition(write.priorStatus, 'unknown')
+  }
+
+  // Every write raises the row to this model's rank, so an improvable song
+  // that was written is no longer improvable *by this model*. Songs the model
+  // omitted were never written and stay eligible.
+  const improvableWritten = [...enrichedWrites, ...unknownWrites].filter(
+    (write) => improvableSongIds.has(write.songId),
+  ).length
+
   return {
     status: 'progress',
     batchProcessed: batchSongs.length,
     batchEnriched,
     batchUnknown,
     total: counts.total,
-    enriched: counts.enriched + batchEnriched,
-    unknown: counts.unknown + batchUnknown,
-    pending: counts.pending - batchEnriched - batchUnknown,
+    enriched: counts.enriched + statusDelta.enriched,
+    unknown: counts.unknown + statusDelta.unknown,
+    pending: counts.pending + statusDelta.pending,
+    improvable: counts.improvable - improvableWritten,
   }
 }

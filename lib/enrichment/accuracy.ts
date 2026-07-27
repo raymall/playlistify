@@ -42,6 +42,17 @@ export const getAccuracyBand = (
   return 'high'
 }
 
+/**
+ * The None and Low rows re-enrichment is allowed to redo, as a PostgREST
+ * filter over an embedded `songs` table. Lives here so it cannot drift from
+ * the band cuts above.
+ *
+ * Enriched rows with a null confidence are deliberately not matched:
+ * `verify:enrichment` asserts there are none, and matching them would add an
+ * `.or()` branch the (enrichment_status, enrichment_rank) index can't serve.
+ */
+export const IMPROVABLE_SONGS_FILTER = `enrichment_status.eq.unknown,and(enrichment_status.eq.enriched,ai_confidence.lte.${LOW_MAX_CONFIDENCE})`
+
 const asPercent = (value: number) => `${Math.round(value * 100)}%`
 
 /**
