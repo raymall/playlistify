@@ -35,7 +35,8 @@ the same commit (rule in `AGENTS.md`).
   `contract.ts` (client-safe proposal + create-response parsers).
 - `lib/enrichment/` — `engine.ts` (batch enrichment: LLM call + all DB
   writes), `schema.ts` (zod output schema, confidence threshold,
-  `ai_attributes` parser).
+  `ai_attributes` parser), `rank.ts` (the strictly-outranks comparison that
+  gates re-enrichment).
 - `lib/spotify/` — `api.ts` (typed Web API client), `import.ts` (Liked Songs
   batch import), `token.ts` (Spotify access-token refresh).
 - `lib/supabase/` — client factories + plumbing: `client.ts` (browser anon),
@@ -58,7 +59,9 @@ the same commit (rule in `AGENTS.md`).
   `user_genres`, `user_moods`, `user_songs`, `playlists`, `playlist_songs`,
   `llm_models`, `unmatched_tags` (review log of off-list enrichment tags,
   written via the `log_unmatched_tags` service-role RPC) (column detail:
-  `MVP-PLAN.md` § Database Schema).
+  `MVP-PLAN.md` § Database Schema). `llm_models.enrichment_rank` orders models
+  by music-metadata recall; `songs.enrichment_rank` snapshots the rank that
+  wrote the row (0 = never enriched).
 - `proxy.ts` — runs on every request: session refresh + route protection.
 - Root: `MVP-PLAN.md` (product spec), `IMPROVEMENTS.md` (gitignored debt
   log), `README.md` (setup), `.env.example` (every env var, commented),

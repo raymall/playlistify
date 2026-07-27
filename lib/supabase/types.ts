@@ -42,6 +42,7 @@ export type Database = {
         Row: {
           created_at: string
           enabled: boolean
+          enrichment_rank: number
           id: string
           is_default: boolean
           label: string
@@ -52,6 +53,7 @@ export type Database = {
         Insert: {
           created_at?: string
           enabled?: boolean
+          enrichment_rank?: number
           id?: string
           is_default?: boolean
           label: string
@@ -62,6 +64,7 @@ export type Database = {
         Update: {
           created_at?: string
           enabled?: boolean
+          enrichment_rank?: number
           id?: string
           is_default?: boolean
           label?: string
@@ -256,6 +259,7 @@ export type Database = {
           duration_ms: number | null
           enriched_at: string | null
           enrichment_model: string | null
+          enrichment_rank: number
           enrichment_status: string
           explicit: boolean | null
           id: string
@@ -276,6 +280,7 @@ export type Database = {
           duration_ms?: number | null
           enriched_at?: string | null
           enrichment_model?: string | null
+          enrichment_rank?: number
           enrichment_status?: string
           explicit?: boolean | null
           id?: string
@@ -296,6 +301,7 @@ export type Database = {
           duration_ms?: number | null
           enriched_at?: string | null
           enrichment_model?: string | null
+          enrichment_rank?: number
           enrichment_status?: string
           explicit?: boolean | null
           id?: string

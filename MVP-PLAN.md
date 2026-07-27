@@ -119,25 +119,26 @@ All tables in Supabase Postgres. `auth.users` is managed by Supabase Auth.
 
 **songs** — global, shared across all users
 
-| column            | type                 | notes                                                                                                                                                   |
-| ----------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| id                | uuid PK              |                                                                                                                                                         |
-| spotify_track_id  | text unique not null |                                                                                                                                                         |
-| apple_music_id    | text nullable        | reserved for future                                                                                                                                     |
-| title             | text                 |                                                                                                                                                         |
-| artists           | text[]               | display order                                                                                                                                           |
-| album             | text                 |                                                                                                                                                         |
-| album_art_url     | text                 |                                                                                                                                                         |
-| duration_ms       | int                  |                                                                                                                                                         |
-| release_date      | date                 |                                                                                                                                                         |
-| popularity        | int                  | Spotify 0–100                                                                                                                                           |
-| explicit          | boolean              |                                                                                                                                                         |
-| spotify_genres    | text[]               | from artist lookup (weak fallback signal)                                                                                                               |
-| ai_confidence     | numeric(3,2)         | 0–1, LLM's self-reported recognition confidence; a real column (not buried in jsonb) so future cleanup/re-enrichment below a threshold is one SQL query |
-| ai_attributes     | jsonb                | energy (1–5), tempo_feel, era, instrumentation, descriptors[]                                                                                           |
-| enrichment_status | text                 | `pending` \| `enriched` \| `unknown`                                                                                                                    |
-| enrichment_model  | text                 | which model produced it                                                                                                                                 |
-| enriched_at       | timestamptz          |                                                                                                                                                         |
+| column            | type                        | notes                                                                                                                                                   |
+| ----------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| id                | uuid PK                     |                                                                                                                                                         |
+| spotify_track_id  | text unique not null        |                                                                                                                                                         |
+| apple_music_id    | text nullable               | reserved for future                                                                                                                                     |
+| title             | text                        |                                                                                                                                                         |
+| artists           | text[]                      | display order                                                                                                                                           |
+| album             | text                        |                                                                                                                                                         |
+| album_art_url     | text                        |                                                                                                                                                         |
+| duration_ms       | int                         |                                                                                                                                                         |
+| release_date      | date                        |                                                                                                                                                         |
+| popularity        | int                         | Spotify 0–100                                                                                                                                           |
+| explicit          | boolean                     |                                                                                                                                                         |
+| spotify_genres    | text[]                      | from artist lookup (weak fallback signal)                                                                                                               |
+| ai_confidence     | numeric(3,2)                | 0–1, LLM's self-reported recognition confidence; a real column (not buried in jsonb) so future cleanup/re-enrichment below a threshold is one SQL query |
+| ai_attributes     | jsonb                       | energy (1–5), tempo_feel, era, instrumentation, descriptors[]                                                                                           |
+| enrichment_status | text                        | `pending` \| `enriched` \| `unknown`                                                                                                                    |
+| enrichment_model  | text                        | which model produced it                                                                                                                                 |
+| enrichment_rank   | smallint not null default 0 | snapshot of that model's `enrichment_rank` at write time; 0 = never enriched. Re-enrichment requires a strictly higher rank                             |
+| enriched_at       | timestamptz                 |                                                                                                                                                         |
 
 **genres** / **moods** — shared vocabulary tables (identical shape)
 
@@ -194,16 +195,17 @@ All tables in Supabase Postgres. `auth.users` is managed by Supabase Auth.
 
 **llm_models** — admin-curated catalog of enrichment models; rows are edited directly in Supabase Studio (operational data, not schema)
 
-| column     | type                           | notes                                                         |
-| ---------- | ------------------------------ | ------------------------------------------------------------- |
-| id         | uuid PK                        |                                                               |
-| provider   | text not null                  | free text (`openai`, …); adding a provider needs no migration |
-| model_id   | text not null                  | AI SDK model string, e.g. `gpt-5-mini`; unique per provider   |
-| label      | text not null                  | dropdown display name                                         |
-| enabled    | boolean not null default true  | only enabled rows are offered in the dropdown                 |
-| is_default | boolean not null default false | at most one (partial unique index); must be enabled (check)   |
-| sort_order | smallint not null default 0    | dropdown order                                                |
-| created_at | timestamptz                    |                                                               |
+| column          | type                           | notes                                                                                                     |
+| --------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| id              | uuid PK                        |                                                                                                           |
+| provider        | text not null                  | free text (`openai`, …); adding a provider needs no migration                                             |
+| model_id        | text not null                  | AI SDK model string, e.g. `gpt-5-mini`; unique per provider                                               |
+| label           | text not null                  | dropdown display name                                                                                     |
+| enabled         | boolean not null default true  | only enabled rows are offered in the dropdown                                                             |
+| is_default      | boolean not null default false | at most one (partial unique index); must be enabled (check)                                               |
+| sort_order      | smallint not null default 0    | dropdown order                                                                                            |
+| enrichment_rank | smallint not null default 0    | music-metadata recall ordering, sparse (100/200/300); unrelated to `sort_order`. Ties refuse (strict `>`) |
+| created_at      | timestamptz                    |                                                                                                           |
 
 ### Schema Notes
 

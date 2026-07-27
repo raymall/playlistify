@@ -174,7 +174,8 @@ const logUnmatchedTags = async (
  * call. Stateless per call — resumable by construction. Writes go through
  * the service-role client and touch only the enrichment columns
  * (`ai_confidence`, `ai_attributes`, `enrichment_status`,
- * `enrichment_model`, `enriched_at`) plus the AI tag link tables.
+ * `enrichment_model`, `enrichment_rank`, `enriched_at`) plus the AI tag link
+ * tables.
  */
 export const enrichLibraryBatch = async (
   userId: string,
@@ -430,6 +431,7 @@ export const enrichLibraryBatch = async (
         ai_attributes: attributes,
         enrichment_status: 'enriched',
         enrichment_model: modelString,
+        enrichment_rank: model.enrichment_rank,
         enriched_at: enrichedAt,
       })
       .eq('id', write.songId)
@@ -442,6 +444,7 @@ export const enrichLibraryBatch = async (
         ai_attributes: null,
         enrichment_status: 'unknown',
         enrichment_model: modelString,
+        enrichment_rank: model.enrichment_rank,
         enriched_at: enrichedAt,
       })
       .eq('id', write.songId),
