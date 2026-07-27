@@ -36,7 +36,8 @@ the same commit (rule in `AGENTS.md`).
 - `lib/enrichment/` — `engine.ts` (batch enrichment: LLM call + all DB
   writes), `schema.ts` (zod output schema, confidence threshold,
   `ai_attributes` parser), `rank.ts` (the strictly-outranks comparison that
-  gates re-enrichment).
+  gates re-enrichment), `accuracy.ts` (client-safe: the five derived Accuracy
+  bands and their confidence cuts).
 - `lib/spotify/` — `api.ts` (typed Web API client), `import.ts` (Liked Songs
   batch import), `token.ts` (Spotify access-token refresh).
 - `lib/supabase/` — client factories + plumbing: `client.ts` (browser anon),
@@ -74,8 +75,9 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 - `/` — landing + "Continue with Spotify"; proxy redirects signed-in users
   to `/chat` (`app/page.tsx`, `components/spotify-sign-in-button.tsx`).
 - `/library` — import panel, enrichment panel (model dropdown), searchable
-  paginated table with per-song tag editor (`app/library/page.tsx` +
-  `components/library-{import-panel,enrichment-panel,table,tag-editor}.tsx`).
+  paginated table with an Accuracy band per song and a per-song tag editor
+  (`app/library/page.tsx` +
+  `components/library-{import-panel,enrichment-panel,table,tag-editor,accuracy-info}.tsx`).
 - `/chat` — describe a playlist; conversation streams beside a live preview
   panel (rename, edit, drop tracks, create). Server-rendered empty states for
   no-library / not-yet-enriched (`app/chat/page.tsx` + `components/chat-*`,

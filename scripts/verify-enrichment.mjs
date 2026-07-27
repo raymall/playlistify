@@ -16,6 +16,11 @@ const [url, anonKey, serviceKey] = requireEnv([
 const service = createClient(url, serviceKey)
 const anon = createClient(url, anonKey)
 
+// Mirrored from lib/enrichment/accuracy.ts — this script is .mjs and cannot
+// import TS. Same convention as CONFIDENCE_THRESHOLD.
+const LOW_MAX_CONFIDENCE = 0.5
+const MEDIUM_MAX_CONFIDENCE = 0.75
+
 let failed = false
 
 const headCount = async (query) => {
@@ -213,6 +218,43 @@ for (const status of ['pending', 'enriched', 'unknown']) {
       .eq('enrichment_status', status),
   )
   console.log(`INFO  enrichment_status=${status}: ${row.count}`)
+}
+
+// Accuracy band distribution (lib/enrichment/accuracy.ts). Pending and None
+// come from the status; only enriched rows are scored. A null confidence on an
+// enriched row counts as Low, matching getAccuracyBand.
+{
+  const enriched = () =>
+    service
+      .from('songs')
+      .select('id', { count: 'exact', head: true })
+      .eq('enrichment_status', 'enriched')
+  const [pending, none, lowScored, lowNull, medium, high] = await Promise.all([
+    headCount(
+      service
+        .from('songs')
+        .select('id', { count: 'exact', head: true })
+        .eq('enrichment_status', 'pending'),
+    ),
+    headCount(
+      service
+        .from('songs')
+        .select('id', { count: 'exact', head: true })
+        .eq('enrichment_status', 'unknown'),
+    ),
+    headCount(enriched().lte('ai_confidence', LOW_MAX_CONFIDENCE)),
+    headCount(enriched().is('ai_confidence', null)),
+    headCount(
+      enriched()
+        .gt('ai_confidence', LOW_MAX_CONFIDENCE)
+        .lte('ai_confidence', MEDIUM_MAX_CONFIDENCE),
+    ),
+    headCount(enriched().gt('ai_confidence', MEDIUM_MAX_CONFIDENCE)),
+  ])
+  console.log(
+    `INFO  accuracy bands: pending=${pending.count} none=${none.count} ` +
+      `low=${lowScored.count + lowNull.count} medium=${medium.count} high=${high.count}`,
+  )
 }
 
 for (const table of [

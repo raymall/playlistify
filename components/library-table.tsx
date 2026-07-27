@@ -1,6 +1,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 
+import { LibraryAccuracyInfo } from '@/components/library-accuracy-info'
 import {
   type LibraryTag,
   LibraryTagEditor,
@@ -16,6 +17,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  ACCURACY_BANDS,
+  type AccuracyBand,
+  getAccuracyBand,
+} from '@/lib/enrichment/accuracy'
 import { type SongAIAttributes } from '@/lib/enrichment/schema'
 import { cn } from '@/lib/utils'
 
@@ -46,17 +52,20 @@ interface LibraryPaginationProps {
   query: string
 }
 
-const statusVariant = (status: string): 'default' | 'secondary' | 'outline' =>
-  status === 'enriched'
-    ? 'default'
-    : status === 'pending'
-      ? 'secondary'
-      : 'outline'
-
-const formatStatus = (status: string) =>
-  status.length > 0
-    ? status.charAt(0).toUpperCase() + status.slice(1)
-    : 'Unknown'
+/**
+ * Visual weight tracks band strength, but the badge always carries its label
+ * as text — the band is never conveyed by appearance alone.
+ */
+const accuracyVariant: Record<
+  AccuracyBand,
+  'default' | 'secondary' | 'outline' | 'ghost'
+> = {
+  pending: 'ghost',
+  none: 'outline',
+  low: 'outline',
+  medium: 'secondary',
+  high: 'default',
+}
 
 const buildHref = (targetPage: number, query: string) => {
   const params = new URLSearchParams()
@@ -178,7 +187,10 @@ export const LibraryTable = ({
               Tags
             </TableHead>
             <TableHead className='w-32 text-right' scope='col'>
-              Status
+              <span className='inline-flex items-center gap-1'>
+                Accuracy
+                <LibraryAccuracyInfo />
+              </span>
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -189,6 +201,10 @@ export const LibraryTable = ({
               song.artists !== null && song.artists.length > 0
                 ? song.artists.join(', ')
                 : '—'
+            const accuracyBand = getAccuracyBand(
+              song.enrichmentStatus,
+              song.aiConfidence,
+            )
             return (
               <TableRow key={song.id}>
                 <TableCell>
@@ -236,17 +252,9 @@ export const LibraryTable = ({
                   </div>
                 </TableCell>
                 <TableCell className='text-right'>
-                  <div className='flex flex-col items-end gap-1'>
-                    <Badge variant={statusVariant(song.enrichmentStatus)}>
-                      {formatStatus(song.enrichmentStatus)}
-                    </Badge>
-                    {song.enrichmentStatus === 'enriched' &&
-                      song.aiConfidence !== null && (
-                        <span className='text-xs text-muted-foreground tabular-nums'>
-                          {song.aiConfidence.toFixed(2)}
-                        </span>
-                      )}
-                  </div>
+                  <Badge variant={accuracyVariant[accuracyBand]}>
+                    {ACCURACY_BANDS[accuracyBand].label}
+                  </Badge>
                 </TableCell>
               </TableRow>
             )
