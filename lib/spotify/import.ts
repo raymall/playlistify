@@ -30,7 +30,11 @@ export type ImportBatchResponse =
  */
 const PAGES_PER_BATCH = 2
 
-/** The nine Spotify-sourced metadata columns every song row always sets. */
+/**
+ * The nine Spotify-sourced metadata columns every song row always sets — the
+ * mirror image of `EnrichmentWrite` in `lib/enrichment/engine.ts`. Between the
+ * two, neither writer can reach the other's columns without a compile error.
+ */
 type SongMetadata = Pick<
   TablesInsert<'songs'>,
   | 'spotify_track_id'
@@ -242,11 +246,11 @@ export const importLikedSongsBatch = async (
   }
 
   // Invariant: song payloads carry ONLY the nine metadata keys (+ spotify_genres
-  // for the needsGenres group). They never include enrichment_status,
-  // ai_confidence, ai_attributes, enrichment_model, enriched_at, apple_music_id,
-  // or id. Omitted columns are untouched on conflict-update and take their
-  // defaults on insert — so new songs land 'pending' and a re-sync can never
-  // reset an already-enriched song.
+  // for the needsGenres group), which `SongMetadata` enforces at compile time.
+  // They never include any of the eight enrichment columns (`EnrichmentWrite`
+  // in lib/enrichment/engine.ts), nor apple_music_id or id. Omitted columns are
+  // untouched on conflict-update and take their defaults on insert — so new
+  // songs land 'pending' and a re-sync can never reset an already-enriched song.
   const songIdByTrackId = new Map<string, string>()
   const upsertSongs = async (
     payload: TablesInsert<'songs'>[],

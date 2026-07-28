@@ -3,7 +3,7 @@ import { generateText, Output } from 'ai'
 import { type LlmModel, toEnrichmentModelString } from '@/lib/ai/models'
 import { resolveLanguageModel } from '@/lib/ai/providers'
 import { IMPROVABLE_SONGS_FILTER } from '@/lib/enrichment/accuracy'
-import { MAX_ENRICHMENT_ATTEMPTS } from '@/lib/enrichment/rank'
+import { MAX_ENRICHMENT_ATTEMPTS, NO_RANK } from '@/lib/enrichment/rank'
 import {
   CONFIDENCE_THRESHOLD,
   type EnrichedSong,
@@ -11,7 +11,7 @@ import {
   type SongAIAttributes,
 } from '@/lib/enrichment/schema'
 import { createAdminClient } from '@/lib/supabase/admin'
-import type { Tables, TablesInsert } from '@/lib/supabase/types'
+import type { Tables, TablesInsert, TablesUpdate } from '@/lib/supabase/types'
 import {
   isValidTagName,
   matchApprovedVocabulary,
@@ -193,6 +193,28 @@ const logUnmatchedTags = async (
 }
 
 /**
+ * The only columns enrichment may write on `songs` — the mirror image of
+ * `SongMetadata` in `lib/spotify/import.ts`, which pins the import side to the
+ * Spotify metadata columns. Between the two, the disjointness that keeps a
+ * re-sync from clobbering paid enrichment (and a batch from corrupting
+ * metadata) is a compile error in both directions rather than a convention.
+ *
+ * Every enrichment write below is typed through this alias; widening it is the
+ * deliberate act of changing what enrichment owns.
+ */
+type EnrichmentWrite = Pick<
+  TablesUpdate<'songs'>,
+  | 'ai_attributes'
+  | 'ai_confidence'
+  | 'enriched_at'
+  | 'enrichment_attempts'
+  | 'enrichment_model'
+  | 'enrichment_rank'
+  | 'enrichment_skipped_rank'
+  | 'enrichment_status'
+>
+
+/**
  * Counts one omission against each song the model left out of its response.
  * At `MAX_ENRICHMENT_ATTEMPTS` the song is set aside at this model's rank and
  * the counter resets, so the selector stops sending it until a strictly
@@ -212,7 +234,7 @@ const recordOmissions = async (
   const results = await Promise.all(
     songs.map((song) => {
       const attempts = song.enrichment_attempts + 1
-      const update =
+      const update: EnrichmentWrite =
         attempts >= MAX_ENRICHMENT_ATTEMPTS
           ? { enrichment_attempts: 0, enrichment_skipped_rank: modelRank }
           : { enrichment_attempts: attempts }
@@ -228,11 +250,10 @@ const recordOmissions = async (
 
 /**
  * Enrich one batch of the user's pending songs with one structured-output
- * call. Stateless per call — resumable by construction. Writes go through
- * the service-role client and touch only the enrichment columns
- * (`ai_confidence`, `ai_attributes`, `enrichment_status`,
- * `enrichment_model`, `enrichment_rank`, `enriched_at`) plus the AI tag link
- * tables.
+ * call. Stateless per call — resumable by construction. Writes go through the
+ * service-role client and touch only the enrichment columns — the eight in
+ * `EnrichmentWrite`, which every write below is typed against — plus the AI
+ * tag link tables.
  */
 export const enrichLibraryBatch = async (
   userId: string,
@@ -578,35 +599,31 @@ export const enrichLibraryBatch = async (
       instrumentation: write.entry.instrumentation,
       descriptors: write.entry.descriptors,
     }
-    return admin
-      .from('songs')
-      .update({
-        ai_confidence: write.confidence,
-        ai_attributes: attributes,
-        enrichment_status: 'enriched',
-        enrichment_model: modelString,
-        enrichment_rank: model.enrichment_rank,
-        enrichment_attempts: 0,
-        enrichment_skipped_rank: 0,
-        enriched_at: enrichedAt,
-      })
-      .eq('id', write.songId)
+    const update: EnrichmentWrite = {
+      ai_confidence: write.confidence,
+      ai_attributes: attributes,
+      enrichment_status: 'enriched',
+      enrichment_model: modelString,
+      enrichment_rank: model.enrichment_rank,
+      enrichment_attempts: 0,
+      enrichment_skipped_rank: NO_RANK,
+      enriched_at: enrichedAt,
+    }
+    return admin.from('songs').update(update).eq('id', write.songId)
   })
-  const unknownUpdates = unknownWrites.map((write) =>
-    admin
-      .from('songs')
-      .update({
-        ai_confidence: write.confidence,
-        ai_attributes: null,
-        enrichment_status: 'unknown',
-        enrichment_model: modelString,
-        enrichment_rank: model.enrichment_rank,
-        enrichment_attempts: 0,
-        enrichment_skipped_rank: 0,
-        enriched_at: enrichedAt,
-      })
-      .eq('id', write.songId),
-  )
+  const unknownUpdates = unknownWrites.map((write) => {
+    const update: EnrichmentWrite = {
+      ai_confidence: write.confidence,
+      ai_attributes: null,
+      enrichment_status: 'unknown',
+      enrichment_model: modelString,
+      enrichment_rank: model.enrichment_rank,
+      enrichment_attempts: 0,
+      enrichment_skipped_rank: NO_RANK,
+      enriched_at: enrichedAt,
+    }
+    return admin.from('songs').update(update).eq('id', write.songId)
+  })
   const [enrichedResults, unknownResults] = await Promise.all([
     Promise.all(enrichedUpdates),
     Promise.all(unknownUpdates),
