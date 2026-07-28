@@ -24,8 +24,8 @@ the same commit (rule in `AGENTS.md`).
   `resolveProviderModel` non-throwing + `resolveLanguageModel` throwing
   wrapper), `chat-model.ts` (resolves the chat model from the `CHAT_MODEL`
   env var, not the catalog).
-- `lib/api/` — `route-helpers.ts`: shared JSON error response for the API
-  routes (server-only).
+- `lib/api/` — `route-helpers.ts`: shared JSON error response + `requireUser`,
+  the auth gate every `/api/*` handler uses (server-only).
 - `lib/auth/` — `spotify.ts` (browser-side OAuth kick-off; scopes live here),
   `metadata.ts` (user_metadata narrowing).
 - `lib/chat/` — chat playlist assistant: `library-search.ts` (server-only
@@ -43,9 +43,11 @@ the same commit (rule in `AGENTS.md`).
 - `lib/spotify/` — `api.ts` (typed Web API client), `import.ts` (Liked Songs
   batch import), `token.ts` (Spotify access-token refresh).
 - `lib/supabase/` — client factories + plumbing: `client.ts` (browser anon),
-  `server.ts` (request-scoped RLS), `admin.ts` (service role), `session.ts`
-  (proxy session refresh), `fetch.ts` (network-retry fetch), `env.ts` (public
-  connection env guard), `types.ts` (generated — regenerate with
+  `server.ts` (request-scoped RLS), `admin.ts` (service role — importing it is
+  lint-restricted to an allowlist in `eslint.config.mjs`), `session.ts`
+  (proxy session refresh), `auth.ts` (`isSessionDead`: tells a real logout
+  apart from a token-rotation blip), `fetch.ts` (network-retry fetch), `env.ts`
+  (public connection env guard), `types.ts` (generated — regenerate with
   `npm run gen:types`, never edit).
 - `lib/tags.ts` / `lib/vocabulary.ts` — personal-tag mutations / shared
   genre-mood vocabulary (normalize, validate, fuzzy-snap, name→id). Three
@@ -100,8 +102,10 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 - Chrome: `app/layout.tsx` — fonts, `ThemeProvider`, `SiteHeader` (nav,
   theme toggle, account menu with sign-out).
 
-Route handlers — `/api/*` is not behind proxy protection; every handler
-gates on `getUser()` itself:
+Route handlers — `/api/*` is not behind proxy protection; every handler gates
+on `getUser()` itself, through the shared `requireUser` helper
+(`lib/api/route-helpers.ts`). It answers 401 only for a provably dead session;
+an auth service that merely blinked is a 503 the client may retry for free:
 
 - `GET /auth/callback` — exchanges the OAuth code, upserts `profiles`,
   captures Spotify provider tokens into `spotify_tokens`
@@ -134,10 +138,14 @@ against Spotify near expiry; `invalid_grant` deletes the row so callers
 surface the "reconnect Spotify" state.
 
 **Import** — `components/library-import-panel.tsx` loops `POST /api/import`
-until done. `lib/spotify/import.ts` fetches up to 2 pages of `/me/tracks`
+until done, riding out `safeToRetry` failures (`MAX_SAFE_RETRIES`) instead of
+pausing. `lib/spotify/import.ts` fetches up to 2 pages of `/me/tracks`
 through `lib/spotify/api.ts`, upserts metadata into `songs` (by
 `spotify_track_id`; enrichment columns never touched, so re-sync can't reset
-them) + `user_songs`. Artist-genre lookup degrades to `[]` on failure — the
+them) + `user_songs`. The `SongMetadata` alias pins that payload to the nine
+Spotify columns, and `EnrichmentWrite` (`lib/enrichment/engine.ts`) pins the
+other side — the two writers cannot reach each other's columns without a
+compile error. Artist-genre lookup degrades to `[]` on failure — the
 batch `/artists` endpoint 403s for this app (divergence: MVP-PLAN assumes it
 works).
 
@@ -219,7 +227,9 @@ and reports `partial`; a DB write failure after Spotify success reports
 - Component → `components/<kebab-case>.tsx` (`'use client'` as low as
   possible); shadcn primitives → `components/ui/` via the CLI.
 - Server/shared logic → `lib/<domain>/`; pick the Supabase client per its
-  header (`server.ts` RLS vs `admin.ts` service role).
+  header (`server.ts` RLS vs `admin.ts` service role). Default to `server.ts`:
+  `admin.ts` bypasses RLS, so importing it is lint-restricted to an allowlist
+  and every query it runs must carry its own `user_id` scope.
 - New table / schema change → new file in `supabase/migrations/` +
   regenerated `lib/supabase/types.ts`, via the full sequence in
   `.claude/rules/database.md` (migration → push → gen:types → advisors →
