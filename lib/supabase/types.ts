@@ -258,8 +258,10 @@ export type Database = {
           artists_search: string | null
           duration_ms: number | null
           enriched_at: string | null
+          enrichment_attempts: number
           enrichment_model: string | null
           enrichment_rank: number
+          enrichment_skipped_rank: number
           enrichment_status: string
           explicit: boolean | null
           id: string
@@ -279,8 +281,10 @@ export type Database = {
           artists_search?: string | null
           duration_ms?: number | null
           enriched_at?: string | null
+          enrichment_attempts?: number
           enrichment_model?: string | null
           enrichment_rank?: number
+          enrichment_skipped_rank?: number
           enrichment_status?: string
           explicit?: boolean | null
           id?: string
@@ -300,8 +304,10 @@ export type Database = {
           artists_search?: string | null
           duration_ms?: number | null
           enriched_at?: string | null
+          enrichment_attempts?: number
           enrichment_model?: string | null
           enrichment_rank?: number
+          enrichment_skipped_rank?: number
           enrichment_status?: string
           explicit?: boolean | null
           id?: string
