@@ -13,3 +13,13 @@ export const NO_RANK = 0
  */
 export const outranks = (modelRank: number, rowRank: number) =>
   modelRank > rowRank
+
+/**
+ * How many times a model may leave a song out of its batch response before the
+ * engine gives up on it at that rank. Omitted songs are never written, so
+ * without this they are re-selected — and re-billed as prompt tokens — on every
+ * batch forever. Giving up records the rank in `songs.enrichment_skipped_rank`
+ * and resets the counter, so a strictly stronger model starts over with a full
+ * allowance rather than inheriting an exhausted one.
+ */
+export const MAX_ENRICHMENT_ATTEMPTS = 3

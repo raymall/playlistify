@@ -21,6 +21,9 @@ const anon = createClient(url, anonKey)
 const LOW_MAX_CONFIDENCE = 0.5
 const MEDIUM_MAX_CONFIDENCE = 0.75
 
+// Mirrored from lib/enrichment/rank.ts, same reason.
+const MAX_ENRICHMENT_ATTEMPTS = 3
+
 let failed = false
 
 const headCount = async (query) => {
@@ -180,6 +183,35 @@ hard(
   `count=${badModelString.count}`,
 )
 
+// Hard: the omission counter never rests at or above the cap — reaching it is
+// what sets enrichment_skipped_rank and resets the counter to 0.
+const overCapAttempts = await headCount(
+  service
+    .from('songs')
+    .select('id', { count: 'exact', head: true })
+    .gte('enrichment_attempts', MAX_ENRICHMENT_ATTEMPTS),
+)
+hard(
+  `rows with enrichment_attempts >= ${MAX_ENRICHMENT_ATTEMPTS} = 0`,
+  overCapAttempts.count === 0,
+  `count=${overCapAttempts.count}`,
+)
+
+// Hard: the two columns agree — a song given up on starts a stronger model's
+// allowance from zero.
+const skippedWithAttempts = await headCount(
+  service
+    .from('songs')
+    .select('id', { count: 'exact', head: true })
+    .gt('enrichment_skipped_rank', 0)
+    .gt('enrichment_attempts', 0),
+)
+hard(
+  'given-up rows with a non-zero attempt counter = 0',
+  skippedWithAttempts.count === 0,
+  `count=${skippedWithAttempts.count}`,
+)
+
 // Hard: every vocabulary name is normalized (lowercase, trimmed, single
 // spaces). Counts only — tag values never printed.
 for (const table of ['genres', 'moods']) {
@@ -218,6 +250,28 @@ for (const status of ['pending', 'enriched', 'unknown']) {
       .eq('enrichment_status', status),
   )
   console.log(`INFO  enrichment_status=${status}: ${row.count}`)
+}
+
+// Songs the selector has stopped sending, and those partway to it. A growing
+// skipped count means a model is repeatedly dropping songs from its response.
+{
+  const [skipped, counting] = await Promise.all([
+    headCount(
+      service
+        .from('songs')
+        .select('id', { count: 'exact', head: true })
+        .gt('enrichment_skipped_rank', 0),
+    ),
+    headCount(
+      service
+        .from('songs')
+        .select('id', { count: 'exact', head: true })
+        .gt('enrichment_attempts', 0),
+    ),
+  ])
+  console.log(
+    `INFO  omissions: given up=${skipped.count} mid-count=${counting.count}`,
+  )
 }
 
 // Accuracy band distribution (lib/enrichment/accuracy.ts). Pending and None

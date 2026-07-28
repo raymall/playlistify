@@ -35,6 +35,10 @@ interface LibraryEnrichmentPanelProps {
    */
   improvableCount: number
   models: EnrichmentModelOption[]
+  /**
+   * Never-analyzed songs. Model-independent for the same reason: the page
+   * can't know which ones the selected model has already given up on.
+   */
   pendingCount: number
   totalCount: number
 }
@@ -61,9 +65,11 @@ type EnrichmentState =
   | { phase: 'done'; counts: EnrichmentCounts }
 
 /**
- * Consecutive zero-progress batches before the loop stops. Songs the model
- * omits stay pending and are re-selected first, so without this brake a
- * refused song would loop (and bill) forever.
+ * Consecutive zero-progress batches before the loop stops. Belt-and-braces:
+ * the primary brake is server-side now — a song the model keeps omitting is
+ * counted against `MAX_ENRICHMENT_ATTEMPTS` and then set aside at that model's
+ * rank, so the selector stops sending it no matter what the client does. This
+ * guard only shortens the wait when a whole batch comes back empty.
  *
  * Re-enrichment doesn't weaken it. The counters below count *writes*, not
  * status changes, so a None row a better model still can't place counts as
@@ -125,10 +131,19 @@ const parseResponse = (value: unknown): EnrichBatchResponse | null => {
     const batchProcessed = readNumber(value.batchProcessed)
     const batchEnriched = readNumber(value.batchEnriched)
     const batchUnknown = readNumber(value.batchUnknown)
+    const batchOmitted = readNumber(value.batchOmitted)
     const counts = readCounts(value)
     if (batchProcessed === null || batchEnriched === null) return null
-    if (batchUnknown === null || counts === null) return null
-    return { status, batchProcessed, batchEnriched, batchUnknown, ...counts }
+    if (batchUnknown === null || batchOmitted === null) return null
+    if (counts === null) return null
+    return {
+      status,
+      batchProcessed,
+      batchEnriched,
+      batchUnknown,
+      batchOmitted,
+      ...counts,
+    }
   }
   if (status === 'done' || status === 'cap_reached') {
     const counts = readCounts(value)
@@ -320,16 +335,17 @@ export const LibraryEnrichmentPanel = ({
 
       if (parsed.status === 'done') {
         const finalCounts = toCounts(parsed)
-        // Done on the very first batch, with weak rows in the library that
-        // this model simply doesn't outrank — that isn't "complete", it's the
-        // wrong model.
+        // Done on the very first batch, with work in the library this model
+        // simply can't take on — weak rows it doesn't outrank, or songs it
+        // already gave up on. That isn't "complete", it's the wrong model.
         if (
           processedThisRun === 0 &&
           finalCounts.improvable === 0 &&
-          improvableCount > 0
+          finalCounts.pending === 0 &&
+          (improvableCount > 0 || pendingCount > 0)
         ) {
           setState({ phase: 'modelTooWeak', counts: finalCounts })
-          setAnnouncement('No songs can be improved by this model.')
+          setAnnouncement('This model has nothing left to do.')
           router.refresh()
           return
         }
@@ -518,9 +534,10 @@ export const LibraryEnrichmentPanel = ({
 
       {state.phase === 'modelTooWeak' && (
         <p className='max-w-prose text-sm text-muted-foreground'>
-          No songs can be improved by this model. Redoing a None or Low song
-          needs a model that ranks above the one that wrote it — pick a stronger
-          one.
+          This model has nothing left to do. Redoing a None or Low song needs a
+          model that ranks above the one that wrote it, and songs it repeatedly
+          failed to return are set aside until a stronger model asks — pick a
+          stronger one.
         </p>
       )}
 
