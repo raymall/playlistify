@@ -30,10 +30,11 @@ model occasionally answers about nineteen, silently dropping one. That song
 hasn't failed and hasn't been recognized — nothing happened to it at all, so it
 stays first in line for the next batch. Left alone, one stubborn song would be
 re-sent forever, costing a little money every time and never producing an
-answer. So the app keeps count: after three misses it sets that song aside and
-stops asking. Choosing a stronger model brings it back into the queue with a
-clean slate, because a better model is a genuinely new question rather than the
-same one repeated.
+answer. So the app keeps count: after three misses in a row it sets that song
+aside and stops asking. Any answer at all resets the count, so a one-off drop
+costs a song nothing — it takes a pattern. Choosing a stronger model brings it
+back into the queue with a clean slate too, because a better model is a
+genuinely new question rather than the same one repeated.
 
 **The results are shared by everyone.** Enrichment is stored against the song
 itself, keyed by its Spotify track id — not against the person who happened to
