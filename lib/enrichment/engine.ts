@@ -3,6 +3,7 @@ import { generateText, Output } from 'ai'
 import { type LlmModel, toEnrichmentModelString } from '@/lib/ai/models'
 import { resolveLanguageModel } from '@/lib/ai/providers'
 import { IMPROVABLE_SONGS_FILTER } from '@/lib/enrichment/accuracy'
+import { MAX_ENRICHMENT_ATTEMPTS } from '@/lib/enrichment/rank'
 import {
   CONFIDENCE_THRESHOLD,
   type EnrichedSong,
@@ -24,10 +25,12 @@ export interface EnrichBatchPayload {
 }
 
 /**
- * Library-wide counts for the requesting user. `total` is the sum of
- * pending + enriched + unknown. `improvable` overlaps those: it counts the
- * None and Low rows the *selected model* is allowed to redo (rank strictly
- * below the model's), so it changes with the chosen model.
+ * Library-wide counts for the requesting user. `total` is every song, and the
+ * other four are all relative to the *selected model*, so they change with the
+ * chosen model and need not add up to `total`: `pending` counts only the
+ * never-analyzed rows this model may still send (songs it gave up on after
+ * repeated omissions drop out), and `improvable` overlaps `enriched`/`unknown`
+ * with the None and Low rows it is allowed to redo.
  */
 export interface EnrichmentCounts {
   total: number
@@ -49,6 +52,8 @@ export type EnrichBatchResponse =
       batchProcessed: number
       batchEnriched: number
       batchUnknown: number
+      /** Selected but left out of the model's response — see recordOmissions. */
+      batchOmitted: number
     } & EnrichmentCounts)
   | ({ status: 'done' } & EnrichmentCounts)
   | ({ status: 'cap_reached' } & EnrichmentCounts)
@@ -114,10 +119,11 @@ type BatchSong = Pick<
   | 'release_date'
   | 'enrichment_status'
   | 'enrichment_rank'
+  | 'enrichment_attempts'
 >
 
 const BATCH_SONG_COLUMNS =
-  'songs!inner(id, spotify_track_id, title, artists, album, release_date, enrichment_status, enrichment_rank)'
+  'songs!inner(id, spotify_track_id, title, artists, album, release_date, enrichment_status, enrichment_rank, enrichment_attempts)'
 
 const describeSong = (song: BatchSong, index: number): string => {
   const title = song.title ?? 'unknown title'
@@ -187,6 +193,40 @@ const logUnmatchedTags = async (
 }
 
 /**
+ * Counts one omission against each song the model left out of its response.
+ * At `MAX_ENRICHMENT_ATTEMPTS` the song is set aside at this model's rank and
+ * the counter resets, so the selector stops sending it until a strictly
+ * stronger model is chosen.
+ *
+ * Best-effort, like the unmatched-tag log: the batch has already been billed
+ * and written by the time this runs, so a bookkeeping failure must not turn a
+ * successful batch into an error the client retries and pays for again. A lost
+ * increment only delays giving up.
+ */
+const recordOmissions = async (
+  admin: ReturnType<typeof createAdminClient>,
+  songs: BatchSong[],
+  modelRank: number,
+) => {
+  if (songs.length === 0) return
+  const results = await Promise.all(
+    songs.map((song) => {
+      const attempts = song.enrichment_attempts + 1
+      const update =
+        attempts >= MAX_ENRICHMENT_ATTEMPTS
+          ? { enrichment_attempts: 0, enrichment_skipped_rank: modelRank }
+          : { enrichment_attempts: attempts }
+      return admin.from('songs').update(update).eq('id', song.id)
+    }),
+  )
+  for (const result of results) {
+    if (result.error !== null) {
+      console.error(`[enrich] omission write failed: ${result.error.message}`)
+    }
+  }
+}
+
+/**
  * Enrich one batch of the user's pending songs with one structured-output
  * call. Stateless per call — resumable by construction. Writes go through
  * the service-role client and touch only the enrichment columns
@@ -222,7 +262,16 @@ export const enrichLibraryBatch = async (
 
   const admin = createAdminClient()
 
-  const countByStatus = async (status: string) =>
+  // total counts every song in the library, so it stays whole even though the
+  // three buckets below are each filtered by what this model may still touch.
+  const countTotal = async () =>
+    admin
+      .from('user_songs')
+      .select('song_id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+
+  // Not async: the pending variant below chains one more filter onto it.
+  const countByStatus = (status: string) =>
     admin
       .from('user_songs')
       .select('song_id, songs!inner(enrichment_status)', {
@@ -232,9 +281,19 @@ export const enrichLibraryBatch = async (
       .eq('user_id', userId)
       .eq('songs.enrichment_status', status)
 
-  // None/Low rows this model is allowed to redo: eligible by band, and ranked
-  // strictly below it. Because songs.enrichment_rank is not null default 0,
-  // "never enriched" sorts below every real rank with no null branch.
+  // Pending rows this model may still send. Rows it already gave up on after
+  // repeated omissions are excluded, so the run reaches done instead of
+  // spinning on a batch the selector can no longer fill.
+  const countPending = () =>
+    countByStatus('pending').lt(
+      'songs.enrichment_skipped_rank',
+      model.enrichment_rank,
+    )
+
+  // None/Low rows this model is allowed to redo: eligible by band, ranked
+  // strictly below it, and not given up on. Because songs.enrichment_rank is
+  // not null default 0, "never enriched" sorts below every real rank with no
+  // null branch.
   const countImprovable = async () =>
     admin
       .from('user_songs')
@@ -245,15 +304,23 @@ export const enrichLibraryBatch = async (
       .eq('user_id', userId)
       .or(IMPROVABLE_SONGS_FILTER, { referencedTable: 'songs' })
       .lt('songs.enrichment_rank', model.enrichment_rank)
+      .lt('songs.enrichment_skipped_rank', model.enrichment_rank)
 
-  const [pendingResult, enrichedResult, unknownResult, improvableResult] =
-    await Promise.all([
-      countByStatus('pending'),
-      countByStatus('enriched'),
-      countByStatus('unknown'),
-      countImprovable(),
-    ])
+  const [
+    totalResult,
+    pendingResult,
+    enrichedResult,
+    unknownResult,
+    improvableResult,
+  ] = await Promise.all([
+    countTotal(),
+    countPending(),
+    countByStatus('enriched'),
+    countByStatus('unknown'),
+    countImprovable(),
+  ])
   for (const result of [
+    totalResult,
     pendingResult,
     enrichedResult,
     unknownResult,
@@ -266,7 +333,7 @@ export const enrichLibraryBatch = async (
   const unknown = unknownResult.count ?? 0
   const improvable = improvableResult.count ?? 0
   const counts: EnrichmentCounts = {
-    total: pending + enriched + unknown,
+    total: totalResult.count ?? 0,
     enriched,
     unknown,
     pending,
@@ -292,10 +359,9 @@ export const enrichLibraryBatch = async (
       .order('song_id', { ascending: true })
       .limit(limit)
 
-  const pendingBatch = await selectSongs(batchLimit).eq(
-    'songs.enrichment_status',
-    'pending',
-  )
+  const pendingBatch = await selectSongs(batchLimit)
+    .eq('songs.enrichment_status', 'pending')
+    .lt('songs.enrichment_skipped_rank', model.enrichment_rank)
   if (pendingBatch.error) {
     return fail('batch select', pendingBatch.error.message, true)
   }
@@ -308,6 +374,7 @@ export const enrichLibraryBatch = async (
     const improvableBatch = await selectSongs(batchLimit - batchSongs.length)
       .or(IMPROVABLE_SONGS_FILTER, { referencedTable: 'songs' })
       .lt('songs.enrichment_rank', model.enrichment_rank)
+      .lt('songs.enrichment_skipped_rank', model.enrichment_rank)
     if (improvableBatch.error) {
       return fail('improvable select', improvableBatch.error.message, true)
     }
@@ -360,7 +427,8 @@ export const enrichLibraryBatch = async (
   }
 
   // Match results back by the echoed id; drop ids we didn't ask about and
-  // duplicates. Songs the model omitted stay pending.
+  // duplicates. Songs the model omitted keep their current status and get no
+  // write — they are counted against MAX_ENRICHMENT_ATTEMPTS further down.
   const songsById = new Map(
     batchSongs.map((song) => [song.spotify_track_id, song]),
   )
@@ -518,6 +586,8 @@ export const enrichLibraryBatch = async (
         enrichment_status: 'enriched',
         enrichment_model: modelString,
         enrichment_rank: model.enrichment_rank,
+        enrichment_attempts: 0,
+        enrichment_skipped_rank: 0,
         enriched_at: enrichedAt,
       })
       .eq('id', write.songId)
@@ -531,6 +601,8 @@ export const enrichLibraryBatch = async (
         enrichment_status: 'unknown',
         enrichment_model: modelString,
         enrichment_rank: model.enrichment_rank,
+        enrichment_attempts: 0,
+        enrichment_skipped_rank: 0,
         enriched_at: enrichedAt,
       })
       .eq('id', write.songId),
@@ -545,6 +617,14 @@ export const enrichLibraryBatch = async (
   for (const result of unknownResults) {
     if (result.error) return fail('unknown write', result.error.message)
   }
+
+  // Only now that every write has landed: an earlier failure returns before
+  // this point, so a batch that half-committed under-counts its omissions
+  // rather than giving up on songs it never really got an answer about.
+  const omittedSongs = batchSongs.filter(
+    (song) => !resultsByTrackId.has(song.spotify_track_id),
+  )
+  await recordOmissions(admin, omittedSongs, model.enrichment_rank)
 
   const batchEnriched = enrichedWrites.length
   const batchUnknown = unknownWrites.length
@@ -568,8 +648,9 @@ export const enrichLibraryBatch = async (
   }
 
   // Every write raises the row to this model's rank, so an improvable song
-  // that was written is no longer improvable *by this model*. Songs the model
-  // omitted were never written and stay eligible.
+  // that was written is no longer improvable *by this model*. Omitted songs
+  // stay eligible until their attempts run out, which the next batch's recount
+  // picks up.
   const improvableWritten = [...enrichedWrites, ...unknownWrites].filter(
     (write) => improvableSongIds.has(write.songId),
   ).length
@@ -579,6 +660,7 @@ export const enrichLibraryBatch = async (
     batchProcessed: batchSongs.length,
     batchEnriched,
     batchUnknown,
+    batchOmitted: omittedSongs.length,
     total: counts.total,
     enriched: counts.enriched + statusDelta.enriched,
     unknown: counts.unknown + statusDelta.unknown,

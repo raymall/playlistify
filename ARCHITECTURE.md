@@ -71,7 +71,9 @@ the same commit (rule in `AGENTS.md`).
   OR personally tagged) (column detail:
   `MVP-PLAN.md` § Database Schema). `llm_models.enrichment_rank` orders models
   by music-metadata recall; `songs.enrichment_rank` snapshots the rank that
-  wrote the row (0 = never enriched).
+  wrote the row (0 = never enriched). `songs.enrichment_attempts` /
+  `songs.enrichment_skipped_rank` track songs a model leaves out of its batch
+  response — a write it never made, so they need their own pair of columns.
 - `proxy.ts` — runs on every request: session refresh + route protection.
 - Root: `MVP-PLAN.md` (product spec), `HOW-IT-WORKS.md` (plain-language
   product reasoning: enrichment, Accuracy bands, re-enrichment policy, chat →
@@ -148,9 +150,21 @@ newest-liked first (env caps `ENRICHMENT_BATCH_SIZE` /
 isn't full — _improvable_ ones, meaning None/Low rows
 (`IMPROVABLE_SONGS_FILTER` in `lib/enrichment/accuracy.ts`) whose
 `enrichment_rank` is strictly below the selected model's. Medium and High are
-finished; same-or-weaker model refuses. That rank gate is also what makes the
+finished; same-or-weaker model refuses. That rank gate is half of what makes the
 run terminate: every write raises the row to the model's rank, so a song is
-picked at most once per run. It then makes one structured-output call (AI SDK v7
+picked at most once per run.
+
+The other half covers songs the model **omits** from its response. Those get no
+write at all, so rank can't retire them; instead `recordOmissions` counts each
+one in `songs.enrichment_attempts`, and at `MAX_ENRICHMENT_ATTEMPTS`
+(`lib/enrichment/rank.ts`) stamps `songs.enrichment_skipped_rank` with the
+model's rank and resets the counter. Both selector passes and the pending count
+carry `enrichment_skipped_rank < model rank`, so the song stops being sent until
+a strictly stronger model asks — and a fresh allowance starts when one does. Any
+successful write clears both columns. The bookkeeping is best-effort
+(`console.error`, never fails the batch), because the batch is already billed by
+the time it runs; the panel's `MAX_STALLED_BATCHES` guard stays as a client-side
+backstop. It then makes one structured-output call (AI SDK v7
 `generateText` + `Output.object`; divergence: MVP-PLAN says SDK 5 /
 `generateObject`). The vocabulary is **closed**: the prompt carries only
 `is_approved` `genres`/`moods` rows and output resolves through
