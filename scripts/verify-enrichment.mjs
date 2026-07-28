@@ -78,8 +78,15 @@ hard(
   `count=${unknownWithAttributes.count}`,
 )
 
-// Hard: pending rows carry no enrichment output.
-for (const column of ['enriched_at', 'ai_attributes']) {
+// Hard: pending rows carry no enrichment output. Covers all four nullable
+// enrichment columns, so a writer that resets a song to 'pending' without
+// clearing everything it owns fails here instead of silently.
+for (const column of [
+  'enriched_at',
+  'ai_attributes',
+  'ai_confidence',
+  'enrichment_model',
+]) {
   const row = await headCount(
     service
       .from('songs')
@@ -93,6 +100,26 @@ for (const column of ['enriched_at', 'ai_attributes']) {
     `count=${row.count}`,
   )
 }
+
+// Hard: a pending row has never been successfully written, so it must sit at
+// rank 0 — the column's "never enriched" value. A non-zero rank here means a
+// reset cleared the visible columns but left the rank behind.
+//
+// enrichment_attempts and enrichment_skipped_rank are deliberately NOT
+// asserted: both are legitimately non-zero on a pending row. That is the
+// omission counter doing its job on a song the model keeps leaving out.
+const pendingWithRank = await headCount(
+  service
+    .from('songs')
+    .select('id', { count: 'exact', head: true })
+    .eq('enrichment_status', 'pending')
+    .neq('enrichment_rank', 0),
+)
+hard(
+  'pending rows with a non-zero enrichment_rank = 0',
+  pendingWithRank.count === 0,
+  `count=${pendingWithRank.count}`,
+)
 
 // Hard: AI tag links exist only on enriched songs.
 for (const table of ['song_genres', 'song_moods']) {
