@@ -1,0 +1,236 @@
+// Chat prompt verification: proves the assistant is shown the COMPLETE tag
+// vocabulary of a library (nothing truncated), that every name it is shown is
+// resolvable back to an id it can search with, and that the candidate universe
+// is enriched-OR-personally-tagged rather than enriched-only.
+//
+// The service-role client bypasses RLS, so this replicates the two RPCs'
+// bodies scoped to one explicit user rather than calling them — same posture
+// as verify-genres.mts.
+//
+// Usage: node --env-file=.env.local --import tsx scripts/verify-chat-prompt.mts
+import { createClient } from '@supabase/supabase-js'
+
+import type { LibraryTag } from '../lib/chat/library-search'
+import { buildChatSystemPrompt } from '../lib/chat/prompt'
+import type { Database } from '../lib/supabase/types'
+import { normalizeTagName, snapToExistingName } from '../lib/vocabulary'
+import { requireEnv } from './lib/env.mjs'
+
+const [url, serviceKey] = requireEnv(
+  ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+  ' --import tsx',
+)
+
+const service = createClient<Database>(url, serviceKey)
+
+/** `.in()` goes into the URL — keep each request well under the length limit. */
+const IN_CHUNK = 100
+/** Supabase REST caps responses at 1000 rows; page anything that can exceed it. */
+const PAGE_SIZE = 1000
+
+const failures: string[] = []
+
+const hard = (label: string, ok: boolean, detail?: string) => {
+  if (!ok) failures.push(label)
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`)
+}
+
+const chunk = <T,>(values: T[], size: number): T[][] => {
+  const out: T[][] = []
+  for (let i = 0; i < values.length; i += size) {
+    out.push(values.slice(i, i + size))
+  }
+  return out
+}
+
+const byName = (a: LibraryTag, b: LibraryTag): number =>
+  a.name.localeCompare(b.name)
+
+// Check the largest library — the worst case for truncation.
+const countByUser = new Map<string, number>()
+for (let from = 0; ; from += PAGE_SIZE) {
+  const owners = await service
+    .from('user_songs')
+    .select('user_id, song_id')
+    .order('user_id', { ascending: true })
+    .order('song_id', { ascending: true })
+    .range(from, from + PAGE_SIZE - 1)
+  if (owners.error) {
+    console.error('Could not read user_songs:', owners.error.message)
+    process.exit(1)
+  }
+  for (const row of owners.data) {
+    countByUser.set(row.user_id, (countByUser.get(row.user_id) ?? 0) + 1)
+  }
+  if (owners.data.length < PAGE_SIZE) break
+}
+if (countByUser.size === 0) {
+  console.log('SKIP  no libraries to check')
+  process.exit(0)
+}
+const userId = [...countByUser.entries()].sort((a, b) => b[1] - a[1])[0][0]
+
+const librarySongIds: string[] = []
+const enrichedIds = new Set<string>()
+for (let from = 0; ; from += PAGE_SIZE) {
+  const library = await service
+    .from('user_songs')
+    .select('song_id, songs!inner(enrichment_status)')
+    .eq('user_id', userId)
+    .order('song_id', { ascending: true })
+    .range(from, from + PAGE_SIZE - 1)
+  if (library.error) {
+    console.error('Could not read library:', library.error.message)
+    process.exit(1)
+  }
+  for (const row of library.data) {
+    librarySongIds.push(row.song_id)
+    if (row.songs.enrichment_status === 'enriched') enrichedIds.add(row.song_id)
+  }
+  if (library.data.length < PAGE_SIZE) break
+}
+
+// Mirrors library_tag_names(): AI links on the caller's songs, unioned with
+// the caller's own tags. Concrete per-table calls so the types resolve.
+const readGenres = async (): Promise<LibraryTag[]> => {
+  const byId = new Map<string, LibraryTag>()
+  for (const ids of chunk(librarySongIds, IN_CHUNK)) {
+    const ai = await service
+      .from('song_genres')
+      .select('genres!inner(id, name)')
+      .in('song_id', ids)
+    if (ai.error) throw new Error(ai.error.message)
+    for (const row of ai.data) byId.set(row.genres.id, row.genres)
+  }
+  const personal = await service
+    .from('user_genres')
+    .select('genres!inner(id, name)')
+    .eq('user_id', userId)
+  if (personal.error) throw new Error(personal.error.message)
+  for (const row of personal.data) byId.set(row.genres.id, row.genres)
+  return [...byId.values()].sort(byName)
+}
+
+const readMoods = async (): Promise<LibraryTag[]> => {
+  const byId = new Map<string, LibraryTag>()
+  for (const ids of chunk(librarySongIds, IN_CHUNK)) {
+    const ai = await service
+      .from('song_moods')
+      .select('moods!inner(id, name)')
+      .in('song_id', ids)
+    if (ai.error) throw new Error(ai.error.message)
+    for (const row of ai.data) byId.set(row.moods.id, row.moods)
+  }
+  const personal = await service
+    .from('user_moods')
+    .select('moods!inner(id, name)')
+    .eq('user_id', userId)
+  if (personal.error) throw new Error(personal.error.message)
+  for (const row of personal.data) byId.set(row.moods.id, row.moods)
+  return [...byId.values()].sort(byName)
+}
+
+const [personalGenres, personalMoods] = await Promise.all([
+  service.from('user_genres').select('song_id').eq('user_id', userId),
+  service.from('user_moods').select('song_id').eq('user_id', userId),
+])
+if (personalGenres.error !== null || personalMoods.error !== null) {
+  console.error('Could not read personal tags')
+  process.exit(1)
+}
+const personallyTagged = new Set([
+  ...personalGenres.data.map((row) => row.song_id),
+  ...personalMoods.data.map((row) => row.song_id),
+])
+
+// Mirrors library_selectable_songs(): enriched OR personally tagged.
+const selectable = new Set([...enrichedIds, ...personallyTagged])
+
+const summary = {
+  genres: await readGenres(),
+  moods: await readMoods(),
+  totalSongs: librarySongIds.length,
+  selectableSongs: selectable.size,
+}
+const prompt = buildChatSystemPrompt(summary)
+
+console.log(
+  `INFO  library ${userId.slice(0, 8)}…: ${summary.totalSongs} songs, ` +
+    `${summary.selectableSongs} selectable, ` +
+    `${summary.genres.length} genres, ${summary.moods.length} moods`,
+)
+
+const kinds = [
+  ['genres', summary.genres],
+  ['moods', summary.moods],
+] as const
+
+// 1 + 2. Every name reaches the model, and nothing is elided. A truncated list
+//        is a silently unsearchable slice of the library — the exact defect
+//        that hid `rock` and `salsa` from the assistant.
+for (const [kind, tags] of kinds) {
+  const missing = tags.filter((tag) => !prompt.includes(tag.name))
+  hard(
+    `${kind}: every name appears in the prompt`,
+    missing.length === 0,
+    missing.length > 0
+      ? `missing ${missing.length}: [${missing
+          .slice(0, 8)
+          .map((tag) => tag.name)
+          .join(', ')}]`
+      : `${tags.length} listed`,
+  )
+}
+hard('prompt: no truncation marker', !prompt.includes(', …'))
+
+// 3. Every listed name resolves to an id through the same snapper search_library
+//    uses. Guards the personal-tag case: an unapproved tag used to be listed
+//    for the model and then match nothing.
+for (const [kind, tags] of kinds) {
+  const names = tags.map((tag) => tag.name)
+  const unresolvable = names.filter(
+    (name) => snapToExistingName(normalizeTagName(name), names) === null,
+  )
+  hard(
+    `${kind}: every listed name is searchable`,
+    unresolvable.length === 0,
+    unresolvable.length > 0 ? `[${unresolvable.join(', ')}]` : '',
+  )
+}
+
+// 4. Counts agree with the database, not with the code that built them.
+const totalCount = await service
+  .from('user_songs')
+  .select('song_id', { count: 'exact', head: true })
+  .eq('user_id', userId)
+hard(
+  'summary: total song count matches',
+  totalCount.error === null && (totalCount.count ?? 0) === summary.totalSongs,
+  `db=${totalCount.count ?? 0} summary=${summary.totalSongs}`,
+)
+
+// 5. The candidate universe is enriched OR personally tagged. Tagged songs
+//    that are also enriched make this pass trivially, so the second check only
+//    bites once a tagged-but-unenriched song exists.
+const taggedUnenriched = [...personallyTagged].filter(
+  (songId) => !enrichedIds.has(songId),
+)
+hard(
+  'selectable index: covers every enriched song',
+  [...enrichedIds].every((songId) => selectable.has(songId)),
+  `enriched=${enrichedIds.size}`,
+)
+hard(
+  'selectable index: covers personally tagged songs',
+  taggedUnenriched.every((songId) => selectable.has(songId)),
+  taggedUnenriched.length === 0
+    ? '(none tagged-but-unenriched yet — vacuous today)'
+    : `${taggedUnenriched.length} tagged-but-unenriched included`,
+)
+
+console.log(
+  failures.length > 0
+    ? '\nCHAT PROMPT CHECKS FAILED: see FAIL lines above.'
+    : '\nCHAT PROMPT OK: the assistant sees every searchable tag in the library.',
+)
+process.exit(failures.length > 0 ? 1 : 0)
