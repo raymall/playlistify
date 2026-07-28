@@ -283,24 +283,26 @@ export const enrichLibraryBatch = async (
 
   const admin = createAdminClient()
 
+  // Every read below goes through here. The admin client bypasses RLS, so this
+  // one `.eq('user_id', userId)` is the ONLY thing keeping a run inside the
+  // requesting user's library — written once so it cannot go missing from one
+  // call site while the others keep it.
+  const userSongs = <Columns extends string>(
+    columns: Columns,
+    options?: { count: 'exact'; head: true },
+  ) => admin.from('user_songs').select(columns, options).eq('user_id', userId)
+
   // total counts every song in the library, so it stays whole even though the
   // three buckets below are each filtered by what this model may still touch.
   const countTotal = async () =>
-    admin
-      .from('user_songs')
-      .select('song_id', { count: 'exact', head: true })
-      .eq('user_id', userId)
+    userSongs('song_id', { count: 'exact', head: true })
 
   // Not async: the pending variant below chains one more filter onto it.
   const countByStatus = (status: string) =>
-    admin
-      .from('user_songs')
-      .select('song_id, songs!inner(enrichment_status)', {
-        count: 'exact',
-        head: true,
-      })
-      .eq('user_id', userId)
-      .eq('songs.enrichment_status', status)
+    userSongs('song_id, songs!inner(enrichment_status)', {
+      count: 'exact',
+      head: true,
+    }).eq('songs.enrichment_status', status)
 
   // Pending rows this model may still send. Rows it already gave up on after
   // repeated omissions are excluded, so the run reaches done instead of
@@ -316,13 +318,10 @@ export const enrichLibraryBatch = async (
   // not null default 0, "never enriched" sorts below every real rank with no
   // null branch.
   const countImprovable = async () =>
-    admin
-      .from('user_songs')
-      .select('song_id, songs!inner(enrichment_status, ai_confidence)', {
-        count: 'exact',
-        head: true,
-      })
-      .eq('user_id', userId)
+    userSongs('song_id, songs!inner(enrichment_status, ai_confidence)', {
+      count: 'exact',
+      head: true,
+    })
       .or(IMPROVABLE_SONGS_FILTER, { referencedTable: 'songs' })
       .lt('songs.enrichment_rank', model.enrichment_rank)
       .lt('songs.enrichment_skipped_rank', model.enrichment_rank)
@@ -372,10 +371,7 @@ export const enrichLibraryBatch = async (
   // deterministic — that is what lets the zero-progress guard re-pick the same
   // songs on each strike.
   const selectSongs = (limit: number) =>
-    admin
-      .from('user_songs')
-      .select(BATCH_SONG_COLUMNS)
-      .eq('user_id', userId)
+    userSongs(BATCH_SONG_COLUMNS)
       .order('liked_at', { ascending: false })
       .order('song_id', { ascending: true })
       .limit(limit)
