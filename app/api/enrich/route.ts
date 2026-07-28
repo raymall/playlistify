@@ -1,13 +1,8 @@
-import {
-  type AuthError,
-  isAuthApiError,
-  isAuthSessionMissingError,
-} from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 import { findEnabledModel, getEnabledModels } from '@/lib/ai/models'
 import { hasMappedProvider } from '@/lib/ai/providers'
-import { errorResponse } from '@/lib/api/route-helpers'
+import { errorResponse, requireUser } from '@/lib/api/route-helpers'
 import {
   type EnrichBatchPayload,
   enrichLibraryBatch,
@@ -16,18 +11,6 @@ import { isRecord, readJson } from '@/lib/json'
 import { createClient } from '@/lib/supabase/server'
 
 export const maxDuration = 300
-
-/**
- * Only a provably absent or rejected session is "signed out": no error at
- * all, no session, or the auth server itself refusing the token. Everything
- * else (socket failures, rate limits, HTML from a broken proxy) is the auth
- * service misbehaving — not the user's session dying.
- */
-const INVALID_SESSION_STATUSES = [400, 401, 403]
-const isSessionDead = (error: AuthError | null) =>
-  error === null ||
-  isAuthSessionMissingError(error) ||
-  (isAuthApiError(error) && INVALID_SESSION_STATUSES.includes(error.status))
 
 const readPayload = (value: unknown): EnrichBatchPayload | null => {
   if (!isRecord(value)) return null
@@ -54,19 +37,8 @@ const readPayload = (value: unknown): EnrichBatchPayload | null => {
  */
 export async function POST(request: Request) {
   const supabase = await createClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (!user) {
-    // A network-level or auth-service getUser() failure is not a signed-out
-    // user — report it as transient (and billing-free) so the client retries
-    // instead of claiming the session expired.
-    if (!isSessionDead(authError)) {
-      return errorResponse('Could not reach the auth service', 503, true)
-    }
-    return errorResponse('Not signed in', 401)
-  }
+  const { user, response } = await requireUser(supabase)
+  if (user === null) return response
 
   const payload = readPayload(await readJson(request))
   if (payload === null) return errorResponse('Invalid request body', 400)

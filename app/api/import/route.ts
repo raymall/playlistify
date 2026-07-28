@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { errorResponse } from '@/lib/api/route-helpers'
+import { errorResponse, requireUser } from '@/lib/api/route-helpers'
 import { isRecord, readJson } from '@/lib/json'
 import { importLikedSongsBatch } from '@/lib/spotify/import'
 import { createClient } from '@/lib/supabase/server'
@@ -24,10 +24,8 @@ const readOffset = (value: unknown): number | null => {
  */
 export async function POST(request: Request) {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return errorResponse('Not signed in', 401)
+  const { user, response } = await requireUser(supabase)
+  if (user === null) return response
 
   const offset = readOffset(await readJson(request))
   if (offset === null) return errorResponse('Invalid request body', 400)
