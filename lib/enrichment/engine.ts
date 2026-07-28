@@ -317,17 +317,11 @@ export const enrichLibraryBatch = async (
     }
   }
 
-  // Another run may have drained the queue between the count and the select;
-  // the next invocation recounts and returns done with fresh numbers.
-  if (batchSongs.length === 0) {
-    return {
-      status: 'progress',
-      batchProcessed: 0,
-      batchEnriched: 0,
-      batchUnknown: 0,
-      ...counts,
-    }
-  }
+  // Another run may have drained the queue between the count and the select.
+  // Report that as done, not as a zero-work progress step: the counts above
+  // are already stale, and a zero-write progress response is what the client's
+  // stall guard counts as a strike.
+  if (batchSongs.length === 0) return { status: 'done', ...counts }
 
   const [genreVocabResult, moodVocabResult] = await Promise.all([
     admin.from('genres').select('name').eq('is_approved', true).order('name'),
