@@ -16,21 +16,18 @@ export default async function ChatPage() {
   // the proxy's.
   const supabase = await createClient()
 
-  const [totalResult, enrichedResult] = await Promise.all([
+  const [totalResult, selectableResult] = await Promise.all([
     supabase
       .from('user_songs')
       .select('song_id', { count: 'exact', head: true }),
-    supabase
-      .from('user_songs')
-      .select('song_id, songs!inner(enrichment_status)', {
-        count: 'exact',
-        head: true,
-      })
-      .eq('songs.enrichment_status', 'enriched'),
+    supabase.rpc('library_selectable_songs', undefined, {
+      count: 'exact',
+      head: true,
+    }),
   ])
 
   const totalSongs = totalResult.count ?? 0
-  const enrichedSongs = enrichedResult.count ?? 0
+  const selectableSongs = selectableResult.count ?? 0
 
   return (
     <PageSection>
@@ -51,12 +48,12 @@ export default async function ChatPage() {
             Go to your library
           </Link>
         </div>
-      ) : enrichedSongs === 0 ? (
+      ) : selectableSongs === 0 ? (
         <div className='mt-8 flex flex-col items-start gap-4'>
           <p className='max-w-prose text-sm text-muted-foreground'>
             None of your {totalSongs.toLocaleString()} songs are enriched yet.
-            Enrich them on the Library page so I can match on genre, mood, and
-            energy.
+            Enrich them on the Library page — or tag a few yourself — so I can
+            match on genre, mood, and energy.
           </p>
           <Link className={buttonVariants()} href='/library'>
             Enrich your library
