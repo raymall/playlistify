@@ -499,6 +499,21 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      library_selectable_songs: {
+        Args: never
+        Returns: {
+          liked_at: string
+          song_id: string
+        }[]
+      }
+      library_tag_names: {
+        Args: never
+        Returns: {
+          id: string
+          kind: string
+          name: string
+        }[]
+      }
       log_unmatched_tags: {
         Args: { p_kind: string; p_names: string[] }
         Returns: undefined
