@@ -12,13 +12,15 @@ import { z } from 'zod'
 import type { ProposalTrack, SearchResultContract } from '@/lib/chat/contract'
 import {
   type CandidateRow,
-  type EnrichedIndexEntry,
   fetchCandidateRows,
   fetchLinkedSongIds,
-  getEnrichedLibraryIndex,
+  getSelectableLibraryIndex,
+  type LibraryTag,
+  type LibraryTagSummary,
+  type SelectableIndexEntry,
 } from '@/lib/chat/library-search'
 import type { Database } from '@/lib/supabase/types'
-import { matchApprovedVocabulary, normalizeTagName } from '@/lib/vocabulary'
+import { normalizeTagName, snapToExistingName } from '@/lib/vocabulary'
 
 type Client = SupabaseClient<Database>
 
@@ -78,6 +80,31 @@ const normalizeNames = (raw: string[]): string[] => {
     if (name.length > 0) seen.add(name)
   }
   return [...seen]
+}
+
+/**
+ * Resolve requested tag names against the vocabulary the model was shown, with
+ * the same snapping order as the enrichment path (exact → space-insensitive →
+ * trigram) via `snapToExistingName`. Deliberately NOT `matchApprovedVocabulary`:
+ * the library's vocabulary includes the user's own tags, which may be
+ * unapproved, and every name the prompt lists has to be searchable. An
+ * unapproved id simply finds nothing in song_genres/song_moods, which is right.
+ */
+const resolveTags = (
+  names: string[],
+  vocabulary: LibraryTag[],
+): { ids: string[]; unmatched: string[] } => {
+  const idByName = new Map(vocabulary.map((tag) => [tag.name, tag.id]))
+  const existingNames = vocabulary.map((tag) => tag.name)
+  const ids = new Set<string>()
+  const unmatched: string[] = []
+  for (const name of names) {
+    const canonical = snapToExistingName(name, existingNames)
+    const id = canonical === null ? undefined : idByName.get(canonical)
+    if (id === undefined) unmatched.push(name)
+    else ids.add(id)
+  }
+  return { ids: [...ids], unmatched }
 }
 
 const union = (a: Set<string>, b: Set<string>): Set<string> => {
@@ -157,7 +184,8 @@ const toCandidate = (row: CandidateRow) => ({
 
 const searchLibrary = async (
   supabase: Client,
-  getIndex: () => Promise<EnrichedIndexEntry[]>,
+  getIndex: () => Promise<SelectableIndexEntry[]>,
+  vocabulary: LibraryTagSummary,
   input: SearchLibraryInput,
 ) => {
   const index = await getIndex()
@@ -171,7 +199,7 @@ const searchLibrary = async (
         truncated: false,
         unmatchedTags: [],
         candidates: [],
-        hint: 'Your enriched library is empty — enrich songs on the Library page first.',
+        hint: 'No songs are selectable yet — analyze songs on the Library page, or tag some yourself.',
       } satisfies SearchResultContract,
       matchIds: [],
     }
@@ -180,18 +208,12 @@ const searchLibrary = async (
   const genreNames = normalizeNames(input.genres)
   const moodNames = normalizeNames(input.moods)
 
-  const genreMatch = await matchApprovedVocabulary(
-    supabase,
-    'genres',
-    genreNames,
-  )
-  if (genreMatch.status === 'error') throw new Error(genreMatch.message)
-  const moodMatch = await matchApprovedVocabulary(supabase, 'moods', moodNames)
-  if (moodMatch.status === 'error') throw new Error(moodMatch.message)
+  const genreMatch = resolveTags(genreNames, vocabulary.genres)
+  const moodMatch = resolveTags(moodNames, vocabulary.moods)
   const unmatchedTags = [...genreMatch.unmatched, ...moodMatch.unmatched]
 
-  const genreIds = [...new Set(genreMatch.idsByName.values())]
-  const moodIds = [...new Set(moodMatch.idsByName.values())]
+  const genreIds = genreMatch.ids
+  const moodIds = moodMatch.ids
 
   // AI-linked OR user-linked within a kind; AND across kinds. null = no tag
   // filter (the whole enriched index qualifies).
@@ -248,7 +270,7 @@ const searchLibrary = async (
   if (matchIds.length === 0) {
     hint =
       unmatchedTags.length > 0
-        ? 'No songs matched. Some tags are not in the vocabulary — try broader or different tags.'
+        ? `No songs matched. These tags are not in the library's vocabulary: ${unmatchedTags.join(', ')}. Re-search using only names from the genre and mood lists in your instructions.`
         : 'No songs matched these filters. Relax the energy range, eras, or tags and search again.'
   } else if (sample.length < matchIds.length) {
     hint = `Showing ${sample.length} of ${matchIds.length} matches as a sample. Propose with includeAllMatches: true to use all ${matchIds.length}.`
@@ -362,14 +384,18 @@ const proposePlaylist = async (
 }
 
 /**
- * Build the chat tool set bound to the request's RLS client. The enriched-
+ * Build the chat tool set bound to the request's RLS client. The selectable-
  * library index is fetched once and shared across every search_library call in
- * the request.
+ * the request. `vocabulary` is the same summary the system prompt was built
+ * from, so the assistant can search exactly the names it was shown.
  */
-export const createChatTools = (supabase: Client) => {
-  let indexPromise: Promise<EnrichedIndexEntry[]> | null = null
+export const createChatTools = (
+  supabase: Client,
+  vocabulary: LibraryTagSummary,
+) => {
+  let indexPromise: Promise<SelectableIndexEntry[]> | null = null
   const getIndex = () => {
-    indexPromise ??= getEnrichedLibraryIndex(supabase)
+    indexPromise ??= getSelectableLibraryIndex(supabase)
     return indexPromise
   }
 
@@ -386,6 +412,7 @@ export const createChatTools = (supabase: Client) => {
         const { result, matchIds } = await searchLibrary(
           supabase,
           getIndex,
+          vocabulary,
           input,
         )
         lastMatchIds = matchIds

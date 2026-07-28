@@ -9,7 +9,10 @@ import {
 
 import { resolveChatModel } from '@/lib/ai/chat-model'
 import { errorResponse } from '@/lib/api/route-helpers'
-import { getLibraryTagSummary } from '@/lib/chat/library-search'
+import {
+  getLibraryTagSummary,
+  type LibraryTagSummary,
+} from '@/lib/chat/library-search'
 import { buildChatSystemPrompt } from '@/lib/chat/prompt'
 import { createChatTools } from '@/lib/chat/tools'
 import { isRecord, readJson } from '@/lib/json'
@@ -57,9 +60,11 @@ export async function POST(request: Request) {
     return errorResponse(modelResult.message, 503)
   }
 
-  let instructions: string
+  // The same summary grounds the prompt and bounds what search_library may
+  // resolve, so the assistant can search exactly the tags it was shown.
+  let summary: LibraryTagSummary
   try {
-    instructions = buildChatSystemPrompt(await getLibraryTagSummary(supabase))
+    summary = await getLibraryTagSummary(supabase)
   } catch (error) {
     console.error('[chat] library summary failed:', error)
     return errorResponse('Could not read your library', 500)
@@ -68,9 +73,9 @@ export async function POST(request: Request) {
   const modelMessages = await convertToModelMessages(uiMessages)
   const result = streamText({
     model: modelResult.model,
-    instructions,
+    instructions: buildChatSystemPrompt(summary),
     messages: modelMessages,
-    tools: createChatTools(supabase),
+    tools: createChatTools(supabase, summary),
     stopWhen: stepCountIs(MAX_STEPS),
   })
 

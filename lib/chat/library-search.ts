@@ -2,7 +2,10 @@
 // responses at 1000 rows, so scans that can exceed that page with `.range()`.
 // Every query runs on the request's RLS client, so results are user-scoped by
 // construction; AI link tables (song_genres/song_moods) are shared, but the
-// enriched-index intersection re-scopes them to the requester's own songs.
+// selectable-index intersection re-scopes them to the requester's own songs.
+// The tag menu and the candidate universe both come from security-invoker
+// RPCs (library_tag_names / library_selectable_songs) rather than app-side
+// scans, so neither is bounded by how many rows the app is willing to page.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -16,15 +19,25 @@ type Client = SupabaseClient<Database>
 
 const PAGE_SIZE = 1000
 
-/** Distinct genre/mood names present in the library, plus head counts. */
-export interface LibraryTagSummary {
-  genres: string[]
-  moods: string[]
-  totalSongs: number
-  enrichedSongs: number
+/** One vocabulary row present in the library. */
+export interface LibraryTag {
+  id: string
+  name: string
 }
 
-export interface EnrichedIndexEntry {
+/**
+ * The complete genre/mood vocabulary present in the library, plus head counts.
+ * This is both what the assistant is shown and what it may search, so ids ride
+ * along with the names — see `createChatTools`.
+ */
+export interface LibraryTagSummary {
+  genres: LibraryTag[]
+  moods: LibraryTag[]
+  totalSongs: number
+  selectableSongs: number
+}
+
+export interface SelectableIndexEntry {
   songId: string
   likedAt: string | null
 }
@@ -40,103 +53,68 @@ export interface CandidateRow {
   moods: string[]
 }
 
-/** Cap on distinct tag names surfaced to the prompt per kind. */
-const TAG_SUMMARY_CAP = 150
-/** Rows scanned when sampling library tag names (bounded, recent-first). */
-const TAG_SUMMARY_MAX_ROWS = 2000
-
 const dedupe = (names: Iterable<string>): string[] => [...new Set(names)]
 
+const byName = (a: LibraryTag, b: LibraryTag): number =>
+  a.name.localeCompare(b.name)
+
 /**
- * Head counts + a representative distinct set of the tag names actually
- * present in the user's enriched library (grounds the system prompt's example
- * filter values). The name scan is bounded to the most recent rows — the model
- * relies on search_library's fuzzy snapping for exact matching, so a
- * representative sample is enough here.
+ * Head counts + the complete genre/mood vocabulary present in the user's
+ * library, AI-linked or personally tagged. Nothing is sampled or capped: the
+ * assistant may only search names it has been shown, so a truncated list is a
+ * silently unreachable slice of the library.
  */
 export const getLibraryTagSummary = async (
   supabase: Client,
 ): Promise<LibraryTagSummary> => {
-  const [totalResult, enrichedResult] = await Promise.all([
+  const [totalResult, selectableResult] = await Promise.all([
     supabase
       .from('user_songs')
       .select('song_id', { count: 'exact', head: true }),
-    supabase
-      .from('user_songs')
-      .select('song_id, songs!inner(enrichment_status)', {
-        count: 'exact',
-        head: true,
-      })
-      .eq('songs.enrichment_status', 'enriched'),
+    supabase.rpc('library_selectable_songs', undefined, {
+      count: 'exact',
+      head: true,
+    }),
   ])
 
-  const totalSongs = totalResult.count ?? 0
-  const enrichedSongs = enrichedResult.count ?? 0
-
-  const genres = new Set<string>()
-  const moods = new Set<string>()
-
-  for (let from = 0; from < TAG_SUMMARY_MAX_ROWS; from += PAGE_SIZE) {
+  const genres: LibraryTag[] = []
+  const moods: LibraryTag[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
-      .from('user_songs')
-      .select(
-        'songs!inner(enrichment_status, song_genres(genres(name)), song_moods(moods(name)))',
-      )
-      .eq('songs.enrichment_status', 'enriched')
-      .order('liked_at', { ascending: false, nullsFirst: false })
+      .rpc('library_tag_names')
+      .order('kind', { ascending: true })
+      .order('name', { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
     for (const row of data) {
-      for (const link of row.songs.song_genres) {
-        if (genres.size < TAG_SUMMARY_CAP) genres.add(link.genres.name)
-      }
-      for (const link of row.songs.song_moods) {
-        if (moods.size < TAG_SUMMARY_CAP) moods.add(link.moods.name)
-      }
+      const tag = { id: row.id, name: row.name }
+      if (row.kind === 'genre') genres.push(tag)
+      else moods.push(tag)
     }
     if (data.length < PAGE_SIZE) break
   }
 
-  // The user's own manual tags are RLS-scoped and small — fold them in too.
-  const [userGenres, userMoods] = await Promise.all([
-    supabase.from('user_genres').select('genres(name)'),
-    supabase.from('user_moods').select('moods(name)'),
-  ])
-  if (!userGenres.error) {
-    for (const row of userGenres.data) {
-      if (genres.size < TAG_SUMMARY_CAP) genres.add(row.genres.name)
-    }
-  }
-  if (!userMoods.error) {
-    for (const row of userMoods.data) {
-      if (moods.size < TAG_SUMMARY_CAP) moods.add(row.moods.name)
-    }
-  }
-
   return {
-    genres: [...genres].sort(),
-    moods: [...moods].sort(),
-    totalSongs,
-    enrichedSongs,
+    genres: genres.sort(byName),
+    moods: moods.sort(byName),
+    totalSongs: totalResult.count ?? 0,
+    selectableSongs: selectableResult.count ?? 0,
   }
 }
 
 /**
- * All enriched songs in the user's library, most-recently-liked first. This is
- * the candidate universe every search intersects against; a stable secondary
- * order on song_id keeps `.range()` pagination from skipping/duplicating rows.
+ * The candidate universe every search intersects against, most-recently-liked
+ * first: songs the AI enriched OR songs the user tagged by hand. The RPC does
+ * the ordering (recency, song_id tiebreak) so `.range()` pagination can't skip
+ * or duplicate rows.
  */
-export const getEnrichedLibraryIndex = async (
+export const getSelectableLibraryIndex = async (
   supabase: Client,
-): Promise<EnrichedIndexEntry[]> => {
-  const entries: EnrichedIndexEntry[] = []
+): Promise<SelectableIndexEntry[]> => {
+  const entries: SelectableIndexEntry[] = []
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
-      .from('user_songs')
-      .select('song_id, liked_at, songs!inner(enrichment_status)')
-      .eq('songs.enrichment_status', 'enriched')
-      .order('liked_at', { ascending: false, nullsFirst: false })
-      .order('song_id', { ascending: true })
+      .rpc('library_selectable_songs')
       .range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
     for (const row of data) {

@@ -1,23 +1,38 @@
 // System prompt for the chat/playlist assistant. Grounded in the user's own
 // library facts so the model filters against tags that actually exist.
 
-import type { LibraryTagSummary } from '@/lib/chat/library-search'
+import type { LibraryTag, LibraryTagSummary } from '@/lib/chat/library-search'
 
-const formatList = (names: string[], limit: number): string => {
-  if (names.length === 0) return '(none yet)'
-  const shown = names.slice(0, limit)
-  const suffix = names.length > limit ? ', …' : ''
-  return shown.join(', ') + suffix
+/**
+ * Safety valve only — the lists are meant to be complete. AI tags come from
+ * the closed approved vocabulary (~520 rows across both kinds), so this never
+ * bites in practice; it exists so an unbounded personal-tag vocabulary cannot
+ * crowd out the instructions.
+ */
+const TAG_LIST_MAX = 600
+
+const formatList = (tags: LibraryTag[]): string => {
+  if (tags.length === 0) return '(none yet)'
+  const names = tags.slice(0, TAG_LIST_MAX).map((tag) => tag.name)
+  const suffix = tags.length > TAG_LIST_MAX ? ', …' : ''
+  return names.join(', ') + suffix
 }
 
 export const buildChatSystemPrompt = (summary: LibraryTagSummary): string =>
   [
-    "You are Playlistify's playlist assistant. You build playlists from the user's OWN enriched music library and nothing else. You never add songs that are not in their library, never invent songs, and never edit their library. If asked to do something off-topic, briefly steer back to building a playlist.",
+    "You are Playlistify's playlist assistant. You build playlists from the user's OWN music library and nothing else. You never add songs that are not in their library, never invent songs, and never edit their library. If asked to do something off-topic, briefly steer back to building a playlist.",
     '',
     'Library facts:',
-    `- ${summary.totalSongs} songs total, ${summary.enrichedSongs} enriched (only enriched songs are selectable).`,
-    `- Genres present: ${formatList(summary.genres, 80)}`,
-    `- Moods present: ${formatList(summary.moods, 80)}`,
+    `- ${summary.totalSongs} songs total, ${summary.selectableSongs} selectable (a song is selectable once the AI has analyzed it, or once the user has tagged it themselves).`,
+    "- Songs that are selectable only through the user's own tags carry no energy, era or tempo, so they cannot satisfy those conditions.",
+    `- Genres present: ${formatList(summary.genres)}`,
+    `- Moods present: ${formatList(summary.moods)}`,
+    '',
+    'Tag mapping:',
+    '- The two lists above are COMPLETE and are the only genre and mood names that can be searched. They already include the tags the user added themselves.',
+    '- The user writes in free text. Before searching, translate their wording into the closest names on those lists — e.g. "melancholic" is the listed mood `sad`, "chill" is `calm`, "hype" is `energetic`.',
+    '- Never pass a genre or mood that is not on the lists; an off-list name matches nothing and wastes a turn.',
+    '- If part of a request has no close match on the lists, search on the part that does and say plainly what you could not cover. Do not substitute something unrelated.',
     '',
     'Workflow:',
     '1. If the request is ambiguous, ask AT MOST one short clarifying question. Otherwise go straight to searching.',
