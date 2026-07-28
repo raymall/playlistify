@@ -16,15 +16,6 @@ Keeping it current is part of every change: any change that adds, moves, renames
 
 Path-scoped rule files live in `.claude/rules/` and auto-load each session.
 
-- `typescript.md` — TS/JS — applies to `**/*.{ts,tsx,js,jsx}`
-- `react.md` — React + Next.js (App Router) — applies to `**/*.{tsx,jsx}`
-- `styles.md` — SCSS + Tailwind — applies to `**/*.{scss,css}`
-- `browser.md` — Vanilla browser JS — applies to `public/**/*.js`
-- `accessibility.md` — WCAG conformance (2.2, Level AA minimum) — applies to `**/*.{tsx,jsx,html,liquid,css,scss}`, `public/**/*.js`
-- `database.md` — Supabase schema/RLS/migration workflow — applies to `supabase/**`, `lib/supabase/**`, `scripts/**`
-- `commits.md` — Commit message format — always applies
-- `pull-requests.md` — PR format — always applies
-
 When a file matches multiple rule files, follow all of them; more specific rules win on conflict. Match existing patterns in a file or project over these defaults when they diverge.
 
 # Database changes
