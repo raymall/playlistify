@@ -194,6 +194,12 @@ const CANDIDATE_FETCH_CHUNK = 100
  * Fetch full candidate rows for the given song ids (chunked ≤100), scoped to
  * the requester's library. `genres`/`moods` merge the AI and user tag names.
  * Returns rows keyed for the caller to reorder — order here is not meaningful.
+ *
+ * The `user_genres`/`user_moods` embeds below return only the requester's rows
+ * because `supabase` is the RLS client — RLS is the only scoping. `Client` is
+ * plain `SupabaseClient<Database>`, so the service-role client is assignable
+ * here too and would return every user's personal tags; passing one is blocked
+ * by the admin-import allowlist in `eslint.config.mjs`, not by this signature.
  */
 export const fetchCandidateRows = async (
   supabase: Client,

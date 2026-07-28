@@ -115,6 +115,43 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  // The service-role client bypasses RLS entirely. Queries that look correctly
+  // scoped — /library's user_genres/user_moods embeds, chat's candidate fetch —
+  // return only the requester's rows ONLY because they run on the RLS client.
+  // The same query on the admin client returns every user's rows, and since
+  // both clients are typed SupabaseClient<Database>, nothing warns you.
+  // Reaching for it is therefore an allowlisted decision, not a default.
+  {
+    files: ['**/*.ts', '**/*.tsx', '**/*.mts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/lib/supabase/admin', '**/lib/supabase/admin'],
+              message:
+                'createAdminClient() bypasses RLS. Use @/lib/supabase/server instead. If this file genuinely needs the service role, add it to the allowlist in eslint.config.mjs and scope every query by user_id yourself.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Files that legitimately need the service role. Each scopes its own
+    // queries by hand — there is no RLS underneath them.
+    files: [
+      'app/auth/callback/route.ts',
+      'components/account-menu.tsx',
+      'lib/enrichment/engine.ts',
+      'lib/spotify/import.ts',
+      'lib/spotify/token.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': 'off',
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
