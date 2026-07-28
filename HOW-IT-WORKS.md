@@ -119,6 +119,17 @@ three unrelated buckets and nothing would ever match. Dropped names are still
 counted, so genuine gaps in the approved list can be spotted and filled
 deliberately.
 
+**The assistant is shown the whole list, and translates onto it.** Before it
+searches anything, the assistant is handed every genre and mood that actually
+appears in _your_ library — the complete set, never a sample — including the
+tags you added yourself. Its job is then to map your wording onto that list:
+ask for something "melancholic" and it looks for the closest thing you own,
+which is `sad`. This is why the list has to be complete. A tag the assistant
+isn't shown may as well not exist, however many of your songs carry it.
+
+If nothing on the list is close to what you asked for, it tells you so rather
+than quietly substituting something else.
+
 **Your own tags count as much as the AI's.** Every song has two independent
 sets of labels: what the model inferred, and what you added yourself. Personal
 tags are private to you and never become part of the shared record. When the
@@ -126,11 +137,17 @@ chat searches for a genre or mood, it looks in **both** — a song matches if
 either the AI or you labelled it that way. So correcting or supplementing the
 AI directly improves the playlists you get.
 
+This holds even for songs the AI never recognized. A song sitting at **None**
+has no tags of its own, so normally there is nothing to match on and it is
+skipped — but the moment you tag it yourself, it becomes eligible like any
+other. Your label is real information, and the app treats it that way. The one
+limit is that such a song still has no energy, era or tempo, since only the AI
+supplies those; ask for "high energy salsa" and a song you tagged `salsa` by
+hand won't qualify, because nothing knows how energetic it is.
+
 **Multiple criteria narrow rather than widen.** Ask for a genre _and_ a mood
 and you get songs carrying both, not songs carrying either. Attribute
 conditions — energy level, era, things to exclude — are applied on top of that.
-Songs the app never recognized are skipped: with no tags, there is nothing to
-match on.
 
 What comes back is a proposal, not an action. You see the tracks first, can
 rename the playlist, drop anything you don't want, and only then does anything

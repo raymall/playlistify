@@ -29,10 +29,12 @@ the same commit (rule in `AGENTS.md`).
 - `lib/auth/` — `spotify.ts` (browser-side OAuth kick-off; scopes live here),
   `metadata.ts` (user_metadata narrowing).
 - `lib/chat/` — chat playlist assistant: `library-search.ts` (server-only
-  RLS query layer — tag summary, enriched index, link-table + candidate
-  fetches), `tools.ts` (`createChatTools`: `search_library` + `propose_playlist`
-  bound to the RLS client), `prompt.ts` (`buildChatSystemPrompt`),
-  `contract.ts` (client-safe proposal + create-response parsers).
+  RLS query layer — tag summary and selectable index over the
+  `library_tag_names` / `library_selectable_songs` RPCs, link-table +
+  candidate fetches), `tools.ts` (`createChatTools`: `search_library` +
+  `propose_playlist` bound to the RLS client and the library vocabulary),
+  `prompt.ts` (`buildChatSystemPrompt`), `contract.ts` (client-safe proposal +
+  create-response parsers).
 - `lib/enrichment/` — `engine.ts` (batch enrichment: LLM call + all DB
   writes), `schema.ts` (zod output schema, confidence threshold,
   `ai_attributes` parser), `rank.ts` (the strictly-outranks comparison that
@@ -46,9 +48,12 @@ the same commit (rule in `AGENTS.md`).
   connection env guard), `types.ts` (generated — regenerate with
   `npm run gen:types`, never edit).
 - `lib/tags.ts` / `lib/vocabulary.ts` — personal-tag mutations / shared
-  genre-mood vocabulary (normalize, validate, fuzzy-snap, name→id). Two match
-  paths: `matchApprovedVocabulary` (closed, `is_approved` rows only —
-  enrichment) and `ensureVocabularyIds` (open, inserts — personal tags).
+  genre-mood vocabulary (normalize, validate, fuzzy-snap, name→id). Three
+  match paths: `matchApprovedVocabulary` (closed, `is_approved` rows only —
+  enrichment), `ensureVocabularyIds` (open, inserts — personal tags), and
+  chat's `resolveTags` (`lib/chat/tools.ts`), which snaps via
+  `snapToExistingName` against the library's own tags — approved or not — so
+  the assistant can search every name the prompt showed it.
 - `lib/json.ts` / `lib/sleep.ts` — shared JSON narrowing guards / abort-aware
   sleep (importable from server and client code).
 - `scripts/` — Node ops + verification scripts (`npm run verify:*`,
@@ -59,7 +64,11 @@ the same commit (rule in `AGENTS.md`).
   seeded, closed enrichment vocabulary), `song_genres`, `song_moods`,
   `user_genres`, `user_moods`, `user_songs`, `playlists`, `playlist_songs`,
   `llm_models`, `unmatched_tags` (review log of off-list enrichment tags,
-  written via the `log_unmatched_tags` service-role RPC) (column detail:
+  written via the `log_unmatched_tags` service-role RPC). Chat reads through
+  two security-invoker RPCs granted to `authenticated`: `library_tag_names()`
+  (every genre/mood present in the caller's library, AI-linked or personally
+  tagged) and `library_selectable_songs()` (the candidate universe — enriched
+  OR personally tagged) (column detail:
   `MVP-PLAN.md` § Database Schema). `llm_models.enrichment_rank` orders models
   by music-metadata recall; `songs.enrichment_rank` snapshots the rank that
   wrote the row (0 = never enriched).
@@ -156,20 +165,25 @@ also deletes any links a crashed earlier attempt left on that song.
 `lib/tags.ts` on the RLS client: ownership check against `user_songs`,
 vocabulary upsert via `lib/vocabulary.ts` (`ensureVocabularyIds` — the open
 path; personal tags are not gated by `is_approved`), link rows in
-`user_genres`/`user_moods`.
+`user_genres`/`user_moods`. A personal tag also makes its song selectable in
+chat even when enrichment never recognized it (`library_selectable_songs`),
+though such a song carries no `ai_attributes` and so fails energy/era filters.
 
 **Chat / selection** — `components/chat-screen.tsx` (`useChat` +
-`DefaultChatTransport`) streams to `POST /api/chat`. The route builds a
-library-grounded system prompt (`lib/chat/prompt.ts` over
-`getLibraryTagSummary`) and runs `streamText` with a `stepCountIs(8)` tool
-loop. `search_library` (`lib/chat/tools.ts`) resolves requested tags against
-the approved vocabulary (`matchApprovedVocabulary`), unions AI + user link
-tables per kind and intersects across kinds, intersects with the enriched
-index (recency), scans ≤500, TS-post-filters by energy/era/exclude, and
-returns ≤120 candidates. `propose_playlist` verifies ownership and returns the
-preview payload. The proposal renders ONLY in
-`components/playlist-preview-panel.tsx`, never as chat text (prompt- and
-renderer-enforced).
+`DefaultChatTransport`) streams to `POST /api/chat`. The route fetches one
+`getLibraryTagSummary` and uses it twice: to build the library-grounded system
+prompt (`lib/chat/prompt.ts`) and to bound what `search_library` may resolve,
+so the assistant searches exactly the vocabulary it was shown. The tag lists
+in the prompt are **complete, never sampled** — a truncated list is a silently
+unsearchable slice of the library. Then `streamText` with a `stepCountIs(8)`
+tool loop. `search_library` (`lib/chat/tools.ts`) resolves requested tags
+against that vocabulary (`resolveTags`, fuzzy-snapping via
+`snapToExistingName`), unions AI + user link tables per kind and intersects
+across kinds, intersects with the selectable index (recency), scans ≤1000,
+TS-post-filters by energy/era/exclude, and returns ≤80 candidates.
+`propose_playlist` verifies ownership and returns the preview payload. The
+proposal renders ONLY in `components/playlist-preview-panel.tsx`, never as
+chat text (prompt- and renderer-enforced).
 
 **Playlist creation** — the preview panel POSTs a curated proposal to
 `/api/playlists` → `lib/playlists/create.ts` (`createPlaylistForUser`, RLS
