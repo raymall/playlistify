@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { errorResponse } from '@/lib/api/route-helpers'
+import { errorResponse, requireUser } from '@/lib/api/route-helpers'
 import { isRecord, readJson } from '@/lib/json'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -61,10 +61,8 @@ const handleTagMutation = async <Payload>(
   ) => Promise<TagAddResponse | TagRemoveResponse>,
 ) => {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return errorResponse('Not signed in', 401)
+  const { user, response } = await requireUser(supabase)
+  if (user === null) return response
 
   const payload = parsePayload(await readJson(request))
   if (payload === null) return errorResponse('Invalid request body', 400)
