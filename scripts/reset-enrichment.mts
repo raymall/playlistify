@@ -15,6 +15,7 @@
 // Usage: node --env-file=.env.local --import tsx scripts/reset-enrichment.mts [--apply]
 import { createClient } from '@supabase/supabase-js'
 
+import { NO_RANK } from '../lib/enrichment/rank'
 import { fetchWithRetries } from '../lib/supabase/fetch'
 import type { Database } from '../lib/supabase/types'
 import { snapToExistingName } from '../lib/vocabulary'
@@ -281,7 +282,11 @@ for (const [table, staleIds] of [
   console.log(`DONE  ${table} cleared`)
 }
 
-// 2. Enriched songs back to pending with every enrichment column cleared.
+// 2. Enriched songs back to pending with every enrichment column cleared —
+// all eight, not just the visible five. A row left at a non-zero
+// enrichment_rank contradicts the column's "0 = never enriched" meaning, and a
+// stale enrichment_skipped_rank would silently keep the selector from ever
+// sending this supposedly-fresh song to a weaker model again.
 const reset = await service
   .from('songs')
   .update({
@@ -289,6 +294,9 @@ const reset = await service
     ai_attributes: null,
     enrichment_status: 'pending',
     enrichment_model: null,
+    enrichment_rank: NO_RANK,
+    enrichment_attempts: 0,
+    enrichment_skipped_rank: NO_RANK,
     enriched_at: null,
   })
   .eq('enrichment_status', 'enriched')
