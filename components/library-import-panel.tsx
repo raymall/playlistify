@@ -26,6 +26,7 @@ type ImportState =
       phase: 'waiting'
       offset: number
       secondsLeft: number
+      reason: 'rate_limit' | 'transient'
       total: number | null
       imported: number
     }
@@ -41,6 +42,19 @@ type ImportState =
 
 /** router.refresh() cadence so the table fills in live behind the panel. */
 const REFRESH_EVERY_N_BATCHES = 5
+
+/**
+ * Failures the server marks `safeToRetry` happened before the batch wrote
+ * anything — most often the Supabase token-rotation blip, where getUser()
+ * momentarily reports null on a perfectly live session. A batch is idempotent
+ * by offset, so re-POSTing the same offset costs nothing but a round trip.
+ * Ten attempts at the delays below rides out roughly two minutes.
+ */
+const MAX_SAFE_RETRIES = 10
+
+/** 1s → 2s → 4s → 8s → 15s (capped) between consecutive failed attempts. */
+const transientDelaySeconds = (failures: number) =>
+  Math.min(15, 2 ** (failures - 1))
 
 /** Parse the route's JSON body into the response contract, or null if malformed. */
 const parseResponse = (value: unknown): ImportBatchResponse | null => {
@@ -112,6 +126,8 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
     let batchesSinceRefresh = 0
     let lastDecile = -1
     let hasAnnouncedWaiting = false
+    let safeRetries = 0
+    let hasAnnouncedRetrying = false
 
     setAnnouncement('Import started.')
 
@@ -172,6 +188,32 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         return
       }
       if (parsed.status === 'error') {
+        // Billing-free, pre-write failures ride it out rather than dropping the
+        // user into a manual Retry — an auth blip is not an import problem.
+        const isSafeToRetry = isRecord(payload) && payload.safeToRetry === true
+        if (isSafeToRetry && safeRetries < MAX_SAFE_RETRIES) {
+          safeRetries += 1
+          if (!hasAnnouncedRetrying) {
+            hasAnnouncedRetrying = true
+            setAnnouncement(
+              'Connection problem; the import will resume automatically.',
+            )
+          }
+          let secondsLeft = transientDelaySeconds(safeRetries)
+          while (secondsLeft > 0 && !isStopped()) {
+            setState({
+              phase: 'waiting',
+              offset,
+              secondsLeft,
+              reason: 'transient',
+              total,
+              imported,
+            })
+            await wait(1000, signal)
+            secondsLeft -= 1
+          }
+          continue
+        }
         setState({
           phase: 'error',
           offset,
@@ -195,6 +237,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
             phase: 'waiting',
             offset,
             secondsLeft,
+            reason: 'rate_limit',
             total,
             imported,
           })
@@ -204,6 +247,9 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         continue
       }
 
+      // A batch that lands clears the transient budget: the next outage gets a
+      // full allowance rather than inheriting an exhausted one.
+      safeRetries = 0
       imported += parsed.importedCount
       total = parsed.total
 
@@ -273,7 +319,9 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         )}
         {state.phase === 'waiting' && (
           <span className='text-sm text-muted-foreground tabular-nums'>
-            Rate limited — resuming in {state.secondsLeft}s
+            {state.reason === 'rate_limit'
+              ? `Rate limited — resuming in ${state.secondsLeft}s`
+              : `Connection problem — retrying in ${state.secondsLeft}s`}
           </span>
         )}
       </div>
