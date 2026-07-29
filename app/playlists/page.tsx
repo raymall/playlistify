@@ -19,8 +19,7 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 
 export default async function PlaylistsPage() {
   // Route protection lives in proxy.ts; RLS scopes every query to the signed-in
-  // user. As on /library we deliberately skip getUser() here to avoid a second
-  // token refresh racing the proxy's.
+  // user. As on /library we skip getUser() here — the proxy owns the refresh.
   const supabase = await createClient()
 
   const { data } = await supabase

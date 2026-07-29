@@ -30,10 +30,10 @@ export default async function LibraryPage({
   searchParams: Promise<{ q?: string | string[]; page?: string | string[] }>
 }) {
   // Route protection lives in proxy.ts; RLS scopes every query below to the
-  // signed-in user. We deliberately don't call getUser() here — doing so in a
-  // server component triggers a second token refresh that races the one the
-  // proxy just performed, and a consumed refresh token bounces a valid session.
-  // The cookie the proxy forwards is enough to authenticate the RLS queries.
+  // signed-in user. No getUser() here: the proxy is the only place allowed to
+  // refresh the token, because a server component can't persist the rotated
+  // cookie and would consume the refresh token for nothing. The cookie the
+  // proxy forwards is enough to authenticate the RLS queries.
   const supabase = await createClient()
 
   const params = await searchParams

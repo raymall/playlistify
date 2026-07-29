@@ -27,7 +27,8 @@ the same commit (rule in `AGENTS.md`).
 - `lib/api/` — `route-helpers.ts`: shared JSON error response + `requireUser`,
   the auth gate every `/api/*` handler uses (server-only).
 - `lib/auth/` — `spotify.ts` (browser-side OAuth kick-off; scopes live here),
-  `metadata.ts` (user_metadata narrowing).
+  `metadata.ts` (user_metadata narrowing), `identity.ts` (the proxy-owned
+  `x-auth-state` / `x-user-id` / `x-user-name` request headers + `hasAuthCookie`).
 - `lib/chat/` — chat playlist assistant: `library-search.ts` (server-only
   RLS query layer — tag summary and selectable index over the
   `library_tag_names` / `library_selectable_songs` RPCs, link-table +
@@ -45,8 +46,9 @@ the same commit (rule in `AGENTS.md`).
 - `lib/supabase/` — client factories + plumbing: `client.ts` (browser anon),
   `server.ts` (request-scoped RLS), `admin.ts` (service role — importing it is
   lint-restricted to an allowlist in `eslint.config.mjs`), `session.ts`
-  (proxy session refresh), `auth.ts` (`isSessionDead`: tells a real logout
-  apart from a token-rotation blip), `fetch.ts` (network-retry fetch), `env.ts`
+  (proxy session refresh + identity headers), `auth.ts` (`isSessionDead` /
+  `classifyNullUser`: tells a real logout apart from a token-rotation or
+  network blip, and logs which), `fetch.ts` (network-retry fetch), `env.ts`
   (public connection env guard), `types.ts` (generated — regenerate with
   `npm run gen:types`, never edit).
 - `lib/tags.ts` / `lib/vocabulary.ts` — personal-tag mutations / shared
@@ -102,7 +104,9 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 - `/playlists` — created-playlist history: name, track count, date, prompt,
   "Open in Spotify" link (`app/playlists/page.tsx`). Read-only, minimal.
 - Chrome: `app/layout.tsx` — fonts, `ThemeProvider`, `SiteHeader` (nav,
-  theme toggle, account menu with sign-out).
+  theme toggle, account menu with sign-out). `AccountMenu` renders on every
+  page, so it reads the identity the proxy already resolved off `x-auth-state`
+  rather than calling `getUser()` a second time.
 
 Route handlers — `/api/*` is not behind proxy protection; every handler gates
 on `getUser()` itself, through the shared `requireUser` helper
@@ -133,7 +137,9 @@ processedSoFar}`, `maxDuration` 300
 `lib/auth/spotify.ts` (browser OAuth start) → `app/auth/callback/route.ts`
 (session exchange; writes `profiles` + `spotify_tokens` — the only place
 provider tokens are captured). Every request thereafter: `proxy.ts` →
-`lib/supabase/session.ts` refreshes the Supabase session cookie. Spotify
+`lib/supabase/session.ts` refreshes the Supabase session cookie and forwards
+the resolved caller to the render on `x-auth-state` (+ `x-user-id` /
+`x-user-name` when signed in), so no page or layout re-derives it. Spotify
 access tokens refresh on demand in `lib/spotify/token.ts`
 (`getValidSpotifyToken`): service-role read of `spotify_tokens`, refresh
 against Spotify near expiry; `invalid_grant` deletes the row so callers
@@ -275,6 +281,17 @@ or runs die mid-batch on those deploys.
 **zod must stay a direct `^4` dependency.** It also exists transitively via
 shadcn with a `^3` range; if the explicit `^4` pin in `package.json` is dropped,
 an install could resolve v3 at the root and break schema typing subtly.
+
+**Only the proxy may refresh the session token.** `getUser()` rotates the token
+whenever it is within 90s of expiry (auth-js `EXPIRY_MARGIN_MS`), and
+`lib/supabase/server.ts` swallows cookie writes in server components — so a
+`getUser()` in a page or layout consumes a refresh token whose replacement is
+then thrown away. The proxy resolves the caller once and publishes it on
+`lib/auth/identity.ts` headers; pages and `AccountMenu` read those. The headers
+are proxy-owned: every path through `proxy.ts`, the prefetch early-return
+included, must strip the inbound copy or a forged `x-user-id` reaches the render.
+`/api/*` is the deliberate exception — it re-verifies through `requireUser`,
+and route handlers _can_ persist a rotated cookie.
 
 **The proxy deliberately has no fetch retries.** `lib/supabase/fetch.ts` is
 wired into `admin.ts` and `server.ts` but **not** `lib/supabase/session.ts`.

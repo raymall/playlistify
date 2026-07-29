@@ -12,8 +12,7 @@ export const metadata: Metadata = {
 
 export default async function ChatPage() {
   // Route protection lives in proxy.ts; RLS scopes the counts to the signed-in
-  // user. As on /library we skip getUser() here to avoid a token refresh racing
-  // the proxy's.
+  // user. As on /library we skip getUser() here — the proxy owns the refresh.
   const supabase = await createClient()
 
   const [totalResult, selectableResult] = await Promise.all([

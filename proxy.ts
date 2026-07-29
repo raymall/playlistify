@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { hasAuthCookie, withoutIdentityHeaders } from '@/lib/auth/identity'
 import { updateSession } from '@/lib/supabase/session'
 
 const PROTECTED_PREFIXES = ['/library', '/chat', '/playlists']
@@ -26,27 +27,20 @@ function isPrefetch(request: NextRequest) {
 }
 
 /**
- * True when the request carries a Supabase auth cookie (`sb-<ref>-auth-token`,
- * possibly chunked `.0`/`.1`). A null getUser() *with* this cookie present is
- * the refresh/chunked-cookie race, not a real logout — a signed-out user has no
- * such cookie at all.
- */
-function hasAuthCookie(request: NextRequest) {
-  return request.cookies
-    .getAll()
-    .some((cookie) => /^sb-.+-auth-token(\.\d+)?$/.test(cookie.name))
-}
-
-/**
  * Runs on every matched request (Next's middleware equivalent): refreshes
- * the Supabase session cookie, bounces signed-out users off protected pages,
- * and lands signed-in users on /chat instead of /. `/api/*` is matched (so
- * sessions refresh) but never redirected — API routes gate on getUser().
+ * the Supabase session cookie, publishes the resolved identity to the render,
+ * bounces signed-out users off protected pages, and lands signed-in users on
+ * /chat instead of /. `/api/*` is matched (so sessions refresh) but never
+ * redirected — API routes gate on getUser() themselves.
  */
 export async function proxy(request: NextRequest) {
   // Never refresh tokens or redirect on prefetches — see isPrefetch above.
+  // Still strip the identity headers: this path vouches for nobody, so an
+  // inbound copy must not survive into the render.
   if (isPrefetch(request)) {
-    return NextResponse.next({ request })
+    return NextResponse.next({
+      request: { headers: withoutIdentityHeaders(request) },
+    })
   }
 
   const { response, user } = await updateSession(request)
