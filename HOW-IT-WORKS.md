@@ -22,8 +22,10 @@ Asking about twenty songs in one request is far cheaper and faster than twenty
 separate requests, and a batch is small enough to finish well inside a request
 timeout. The app keeps firing batches until the library is done, and each batch
 saves its results before the next one starts. That means enrichment is
-resumable: close the tab halfway through and nothing is lost, because the songs
-already written are already written.
+resumable: pause it in the panel or close the tab halfway through and nothing
+is lost, because the songs already written are already written. Pausing lets a
+batch already underway finish so its result is kept, then stops before another
+batch begins.
 
 **Sometimes a song just doesn't come back.** Ask about twenty songs and the
 model occasionally answers about nineteen, silently dropping one. That song

@@ -53,6 +53,18 @@ type EnrichmentState =
        * server's error detail ('' when it sent none). */
       retryDetail: string | null
     }
+  | {
+      phase: 'pausing'
+      processedThisRun: number
+      counts: EnrichmentCounts | null
+      retryDetail: string | null
+    }
+  | {
+      phase: 'paused'
+      processedThisRun: number
+      counts: EnrichmentCounts | null
+      retryDetail: string | null
+    }
   | { phase: 'capReached'; counts: EnrichmentCounts }
   /** Nothing pending, and the chosen model outranks none of the weak rows. */
   | { phase: 'modelTooWeak'; counts: EnrichmentCounts }
@@ -97,9 +109,9 @@ const MAX_BILLED_FAILURES = 2
 
 /**
  * Errors marked `safeToRetry: true` cost nothing to redo, so they ride out
- * long outages (a sleep-wake or dropped uplink can run the better part of an
- * hour). At the 15s delay cap plus request time this is roughly an hour of
- * riding before the loop gives up and asks for a manual retry.
+ * long outages. The 120 capped waits total 29m15s; failed request time is
+ * additional, so the wall-clock limit depends on how quickly each attempt
+ * fails.
  */
 const MAX_SAFE_RETRIES = 120
 
@@ -192,19 +204,24 @@ export const LibraryEnrichmentPanel = ({
     defaultModelId ?? models.at(0)?.id ?? null,
   )
   const abortRef = useRef<AbortController | null>(null)
+  const isRequestInFlightRef = useRef(false)
+  const isPauseRequestedRef = useRef(false)
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  const runEnrichment = async (startProcessed: number) => {
+  const runEnrichment = async (startProcessed: number, isResuming = false) => {
     if (modelId === null) return
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
+    isRequestInFlightRef.current = false
+    isPauseRequestedRef.current = false
     const { signal } = controller
 
     // Unmount/abort can flip signal.aborted mid-await; funnelling through a
     // call keeps each check live against TypeScript's flow narrowing.
     const isStopped = () => signal.aborted
+    const isPauseRequested = () => isPauseRequestedRef.current
 
     let processedThisRun = startProcessed
     let counts: EnrichmentCounts | null = null
@@ -223,12 +240,23 @@ export const LibraryEnrichmentPanel = ({
       setAnnouncement(note)
     }
 
-    setAnnouncement('Enrichment started.')
+    const pauseRun = () => {
+      setState({
+        phase: 'paused',
+        processedThisRun,
+        counts,
+        retryDetail,
+      })
+      setAnnouncement('Enrichment paused.')
+    }
+
+    setAnnouncement(isResuming ? 'Enrichment resumed.' : 'Enrichment started.')
 
     while (!isStopped()) {
       setState({ phase: 'running', processedThisRun, counts, retryDetail })
 
       let response: Response | null
+      isRequestInFlightRef.current = true
       try {
         response = await fetch('/api/enrich', {
           method: 'POST',
@@ -239,6 +267,7 @@ export const LibraryEnrichmentPanel = ({
       } catch {
         response = null
       }
+      if (response === null) isRequestInFlightRef.current = false
       if (isStopped()) return
 
       // Transient trouble is retried in place with backoff instead of
@@ -264,15 +293,20 @@ export const LibraryEnrichmentPanel = ({
             detail = null
           }
         }
+        isRequestInFlightRef.current = false
         if (isStopped()) return
 
         // The server marks failures that happened before the billable model
         // call as safe to retry. Redoing those costs nothing, so ride them
-        // out — a laptop wake or dropped uplink can run the better part of
-        // an hour. Navigating away still aborts the loop.
+        // out through a laptop wake or dropped uplink. Navigating away still
+        // aborts the loop.
         if (isSafeToRetry && safeRetries < MAX_SAFE_RETRIES) {
           safeRetries += 1
           retryDetail = detail ?? ''
+          if (isPauseRequested()) {
+            pauseRun()
+            return
+          }
           setState({ phase: 'running', processedThisRun, counts, retryDetail })
           setAnnouncement('Connection problem — retrying automatically.')
           await wait(transientDelayMs(safeRetries), signal)
@@ -286,6 +320,11 @@ export const LibraryEnrichmentPanel = ({
           transientFailures < MAX_TRANSIENT_FAILURES &&
           billedFailures < MAX_BILLED_FAILURES
         ) {
+          if (isPauseRequested()) {
+            retryDetail = detail
+            pauseRun()
+            return
+          }
           // An expired Supabase session surfaces as 401; rotating the
           // cookie here lets the retried call authenticate.
           if (status === 401) await createClient().auth.refreshSession()
@@ -313,6 +352,7 @@ export const LibraryEnrichmentPanel = ({
       } catch {
         payload = null
       }
+      isRequestInFlightRef.current = false
       if (isStopped()) return
 
       const parsed = parseResponse(payload)
@@ -394,15 +434,39 @@ export const LibraryEnrichmentPanel = ({
       // Refresh every batch: batches land tens of seconds apart, and this is
       // what makes attributes appear in the table as they land.
       router.refresh()
+
+      if (isPauseRequested()) {
+        pauseRun()
+        return
+      }
     }
   }
 
   const handleStart = () => {
     if (state.phase === 'error') {
       void runEnrichment(state.processedThisRun)
+    } else if (state.phase === 'paused') {
+      void runEnrichment(state.processedThisRun, true)
     } else {
       void runEnrichment(0)
     }
+  }
+
+  const handlePause = () => {
+    if (state.phase !== 'running') return
+    isPauseRequestedRef.current = true
+
+    if (isRequestInFlightRef.current) {
+      setState({ ...state, phase: 'pausing' })
+      setAnnouncement(
+        'Pause requested. The current enrichment attempt will finish first.',
+      )
+      return
+    }
+
+    abortRef.current?.abort()
+    setState({ ...state, phase: 'paused' })
+    setAnnouncement('Enrichment paused.')
   }
 
   // Invisible only when there is nothing to do at all — a fully-enriched
@@ -423,6 +487,9 @@ export const LibraryEnrichmentPanel = ({
   }
 
   const isRunning = state.phase === 'running'
+  const isPausing = state.phase === 'pausing'
+  const isActive = isRunning || isPausing
+  const isModelLocked = isActive || state.phase === 'paused'
   const songWord = (count: number) => (count === 1 ? 'song' : 'songs')
   const idleLabel =
     pendingCount === 0
@@ -435,9 +502,11 @@ export const LibraryEnrichmentPanel = ({
       ? 'Retry'
       : state.phase === 'capReached'
         ? 'Continue enriching'
-        : isRunning
-          ? 'Enriching…'
-          : idleLabel
+        : state.phase === 'paused'
+          ? 'Resume enrichment'
+          : isActive
+            ? 'Enriching…'
+            : idleLabel
 
   const counts = state.phase === 'idle' ? null : state.counts
 
@@ -454,7 +523,7 @@ export const LibraryEnrichmentPanel = ({
             Model
           </span>
           <Select
-            disabled={isRunning}
+            disabled={isModelLocked}
             items={models.map((model) => ({
               value: model.id,
               label: model.label,
@@ -480,9 +549,14 @@ export const LibraryEnrichmentPanel = ({
             </SelectContent>
           </Select>
         </div>
-        <Button disabled={isRunning || modelId === null} onClick={handleStart}>
+        <Button disabled={isActive || modelId === null} onClick={handleStart}>
           {primaryLabel}
         </Button>
+        {isActive && (
+          <Button disabled={isPausing} variant='outline' onClick={handlePause}>
+            {isPausing ? 'Pausing…' : 'Pause'}
+          </Button>
+        )}
       </div>
 
       {state.phase === 'idle' && totalCount > pendingCount && (
@@ -495,7 +569,7 @@ export const LibraryEnrichmentPanel = ({
         </p>
       )}
 
-      {(state.phase === 'running' || state.phase === 'error') && (
+      {(isActive || state.phase === 'paused' || state.phase === 'error') && (
         <div className='flex flex-col gap-2'>
           <Progress
             aria-label='Library enrichment progress'
@@ -512,7 +586,12 @@ export const LibraryEnrichmentPanel = ({
                     : ''
                 }`}
           </p>
-          {state.phase === 'running' && state.retryDetail !== null && (
+          {isPausing && (
+            <p className='text-sm text-muted-foreground'>
+              Finishing the current attempt before pausing…
+            </p>
+          )}
+          {isRunning && state.retryDetail !== null && (
             <p className='text-sm text-muted-foreground'>
               Connection problem — retrying automatically…
               {state.retryDetail === '' ? '' : ` (${state.retryDetail})`}
@@ -523,6 +602,21 @@ export const LibraryEnrichmentPanel = ({
 
       {state.phase === 'error' && (
         <p className='text-sm text-destructive'>{state.message}</p>
+      )}
+
+      {state.phase === 'paused' && (
+        <div className='flex flex-col gap-1'>
+          <p className='text-sm text-muted-foreground'>
+            Enrichment paused — resume when you’re ready.
+          </p>
+          {state.retryDetail !== null && (
+            <p className='text-sm text-muted-foreground'>
+              {state.retryDetail === ''
+                ? 'The last attempt hit a connection problem.'
+                : `The last attempt hit a connection problem: ${state.retryDetail}`}
+            </p>
+          )}
+        </div>
       )}
 
       {state.phase === 'capReached' && (
