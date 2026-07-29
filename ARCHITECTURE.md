@@ -92,7 +92,8 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   to `/chat` (`app/page.tsx`, `components/spotify-sign-in-button.tsx`).
 - `/library` — import panel, enrichment panel (model dropdown), searchable
   paginated table with an Accuracy band per song and a per-song tag editor
-  (`app/library/page.tsx` +
+  (`app/library/page.tsx`, `app/library/loading.tsx` (instant skeleton
+  streamed while the page's queries run) +
   `components/library-{import-panel,enrichment-panel,table,tag-editor,accuracy-info}.tsx`).
 - `/chat` — describe a playlist; conversation streams beside a live preview
   panel (rename, edit, drop tracks, create). Server-rendered empty states for
