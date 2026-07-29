@@ -80,8 +80,9 @@ the same commit (rule in `AGENTS.md`).
 - Root: `MVP-PLAN.md` (product spec), `HOW-IT-WORKS.md` (plain-language
   product reasoning: enrichment, Accuracy bands, re-enrichment policy, chat →
   playlist), `IMPROVEMENTS.md` (gitignored debt log), `README.md` (setup),
-  `.env.example` (every env var, commented), `next.config.ts` (album-art image
-  host allowlist).
+  `.nvmrc` + `package.json#engines` (Node 24 runtime contract), `.env.example`
+  (every env var, commented), `next.config.ts` (album-art image host
+  allowlist).
 
 ## Route inventory
 

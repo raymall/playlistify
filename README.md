@@ -9,15 +9,17 @@ Supabase (Postgres + Auth, Spotify OAuth) · Vercel AI SDK · Vercel hosting.
 
 ## Setup
 
-1. `npm install`
-2. `cp .env.example .env.local` and fill in every value (see the comments in
+1. Install and select the project's Node.js version: `nvm install` then
+   `nvm use`.
+2. `npm install`
+3. `cp .env.example .env.local` and fill in every value (see the comments in
    the file for where each one comes from).
-3. Supabase dashboard: enable the Spotify provider (Authentication →
+4. Supabase dashboard: enable the Spotify provider (Authentication →
    Sign In / Providers) with your Spotify app's client id/secret, and set
    Site URL to `http://localhost:3000` (Authentication → URL Configuration).
-4. Spotify app (developer.spotify.com): add
+5. Spotify app (developer.spotify.com): add
    `https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback` as a Redirect URI.
-5. Apply database migrations: `npx supabase link --project-ref YOUR-REF`
+6. Apply database migrations: `npx supabase link --project-ref YOUR-REF`
    then `npx supabase db push`.
 
 ## Develop
