@@ -111,6 +111,15 @@ once per genuine step up in model capability, not once per attempt and not once
 per user. And because the record is shared, the first person to upgrade a song
 upgrades it for everybody.
 
+**There is deliberately no "redo my whole library" button.** A sweep like that
+would cost more every month, because its price scales with the entire
+collection rather than with the part that needs help — and most of what it
+re-bought would be answers the app already owns. Improvement is meant to arrive
+the other way round: song by song, only where the current answer is weak, and
+only when something genuinely better is available to ask. If a future model
+ever proves clearly better on songs already scored Medium or High, that would be
+a deliberate one-off backfill run by an operator, not a button in the app.
+
 This is why the enrichment panel sometimes says a model has nothing left to do.
 It isn't that the library is finished — it's that the model you picked isn't
 better than the one that already tried, or that the songs still waiting are ones

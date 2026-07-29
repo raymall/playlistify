@@ -218,6 +218,76 @@ error/reconnect/rate-limited); an add-tracks failure keeps the Spotify playlist
 and reports `partial`; a DB write failure after Spotify success reports
 `created` with `persisted: false`. `/playlists` lists the persisted rows.
 
+## Constraints and invariants
+
+Load-bearing rules the code already satisfies. Each is enforced somewhere and
+would break quietly if undone — they are not open work.
+
+**The model id is re-validated server-side.** The client sends only an
+`llm_models` row uuid; `lib/ai/models.ts` resolves it against `enabled = true`
+rows and the `lib/ai/providers.ts` map before any billable call. Trusting a
+client-supplied model string is unbounded cost exposure. `providers.ts` stays
+server-only — importing it into a client component ships AI SDK code to the
+browser bundle; the panel receives plain `{ id, label }` rows.
+
+**`ensureVocabularyIds` is the only legal vocabulary write path.**
+`.upsert(..., { onConflict: 'name' })` _without_ `ignoreDuplicates` compiles to
+`ON CONFLICT DO UPDATE`, which fails under the RLS client — `genres`/`moods`
+have INSERT but no UPDATE policy. `lib/vocabulary.ts` uses
+insert-ignore-duplicates → select. Any write that bypasses it breaks `/api/tags`
+at runtime with an RLS error.
+
+**Confidence is rounded before it is thresholded.** `songs.ai_confidence` is
+`numeric(3,2)`, so Postgres rounds to 2dp on write. Thresholding the raw value
+(0.399 → unknown) and then storing it would persist 0.40, contradicting the
+`< 0.4 → unknown` rule. The engine rounds + clamps, _then_ thresholds, then
+writes the rounded value — which keeps the cutoff auditable in SQL and
+`verify:enrichment` truthful.
+
+**The closed vocabulary is prompt-enforced, not schema-enforced.** The zod
+schema still types genres/moods as `z.array(z.string())`. A hard
+`z.enum(approvedNames)` would make off-list output impossible — but also
+invisible, so nothing would reach `unmatched_tags` and the signal for growing
+the approved lists would disappear. It also needs a per-request dynamic schema
+built with an `as` cast the TS rules discourage. Deliberate trade; flip only
+with eyes open.
+
+**The two `songs` writers are pinned by type, not by the table.**
+`SongMetadata` (`lib/spotify/import.ts`) and `EnrichmentWrite`
+(`lib/enrichment/engine.ts`) make it a compile error for either writer to touch
+the other's columns. Postgres cannot express this — there are no column-level
+grants and both writers use the service role — so a new call site doing
+`admin.from('songs').upsert({...})` directly still type-checks. Route any third
+writer through an alias rather than widening one.
+
+**gpt-5 models reject non-default `temperature`,** and a small
+`maxOutputTokens` starves reasoning tokens (they count against the cap),
+truncating the JSON. The engine sets neither; `reasoningEffort` via
+`providerOptions.openai` is the intended cost/quality knob.
+
+**`maxDuration` is a ceiling, not a target.** `/api/enrich` exports
+`maxDuration = 300` (Vercel Fluid ceiling on Hobby), but legacy non-Fluid
+projects cap at 60s — so `ENRICHMENT_BATCH_SIZE` must keep one call under ~60s
+or runs die mid-batch on those deploys.
+
+**zod must stay a direct `^4` dependency.** It also exists transitively via
+shadcn with a `^3` range; if the explicit `^4` pin in `package.json` is dropped,
+an install could resolve v3 at the root and break schema typing subtly.
+
+**The proxy deliberately has no fetch retries.** `lib/supabase/fetch.ts` is
+wired into `admin.ts` and `server.ts` but **not** `lib/supabase/session.ts`.
+During an outage, navigations fail `getUser()` fast and fall back to the
+`hasAuthCookie` pass-through instead of hanging every page load ~7s per attempt.
+If a proxy-level hard auth gate is ever added, it needs the retryable-vs-real
+distinction that `/api/*` gets from `requireUser`.
+
+**`llm_models` row content is operational data.** The initial catalog was
+seeded once (`supabase/migrations/20260722211849_add_llm_models.sql`); models,
+the default flag, ordering and `enrichment_rank` are edited in Supabase Studio
+thereafter. Do not add further seed migrations — they would fight Studio edits
+and resurrect deleted models. An empty or fully-unmapped catalog is the designed
+"enrichment unavailable" panel state, not an error.
+
 ## Where does new code go
 
 - Page → `app/<route>/page.tsx`; signed-in-only pages also add their prefix
