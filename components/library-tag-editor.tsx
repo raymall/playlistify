@@ -14,6 +14,9 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
+  ComboboxPopup,
+  ComboboxPortal,
+  ComboboxPositioner,
 } from '@/components/ui/combobox'
 import {
   Popover,
@@ -130,13 +133,9 @@ interface TagKindEditorProps {
 }
 
 /**
- * One combobox over one vocabulary table. Renders `inline` with `open` set
- * unconditionally and no onOpenChange, per the Base UI inline contract —
- * forwarding the combobox's internal close requests would dismiss the whole
- * popover mid-interaction. There is no nested floating popup, and the
- * popover unmounting on close resets all transient state. Free entry works
- * by injecting the normalized query as the first item when it isn't in the
- * vocabulary yet.
+ * One independently floating combobox over one vocabulary table. Free entry
+ * works by injecting the normalized query as the first item when it isn't in
+ * the vocabulary yet.
  */
 const TagKindEditor = ({
   kind,
@@ -159,9 +158,7 @@ const TagKindEditor = ({
 
   return (
     <Combobox
-      inline
       multiple
-      open
       filter={null}
       items={items}
       value={selectedNames}
@@ -190,17 +187,24 @@ const TagKindEditor = ({
           <p className='px-1.5 text-xs text-muted-foreground'>
             Loading suggestions…
           </p>
-        ) : (
-          <ComboboxList>
-            {(item: string) => (
-              <ComboboxItem key={item} value={item}>
-                {isCreatable && item === query ? `Create "${item}"` : item}
-              </ComboboxItem>
-            )}
-          </ComboboxList>
-        )}
-        <ComboboxEmpty>Type to add your own {kind}.</ComboboxEmpty>
+        ) : null}
       </div>
+      {vocabulary !== null && (
+        <ComboboxPortal>
+          <ComboboxPositioner>
+            <ComboboxPopup>
+              <ComboboxList className='border-0'>
+                {(item: string) => (
+                  <ComboboxItem key={item} value={item}>
+                    {isCreatable && item === query ? `Create "${item}"` : item}
+                  </ComboboxItem>
+                )}
+              </ComboboxList>
+              <ComboboxEmpty>Type to add your own {kind}.</ComboboxEmpty>
+            </ComboboxPopup>
+          </ComboboxPositioner>
+        </ComboboxPortal>
+      )}
     </Combobox>
   )
 }
