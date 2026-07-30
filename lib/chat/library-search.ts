@@ -20,7 +20,7 @@ type Client = SupabaseClient<Database>
 const PAGE_SIZE = 1000
 
 /** One vocabulary row present in the library. */
-export interface LibraryTag {
+export type LibraryTag = {
   id: string
   name: string
 }
@@ -30,19 +30,19 @@ export interface LibraryTag {
  * This is both what the assistant is shown and what it may search, so ids ride
  * along with the names — see `createChatTools`.
  */
-export interface LibraryTagSummary {
+export type LibraryTagSummary = {
   genres: LibraryTag[]
   moods: LibraryTag[]
   totalSongs: number
   selectableSongs: number
 }
 
-export interface SelectableIndexEntry {
+export type SelectableIndexEntry = {
   songId: string
   likedAt: string | null
 }
 
-export interface CandidateRow {
+export type CandidateRow = {
   songId: string
   title: string | null
   artists: string[]
@@ -125,62 +125,21 @@ export const getSelectableLibraryIndex = async (
   return entries
 }
 
-export type LinkTable =
-  'song_genres' | 'song_moods' | 'user_genres' | 'user_moods'
-
-const pageLinkTable = (
+/** Effective AI-minus-suppression plus personal matches, paged by the RPC. */
+export const fetchEffectiveTaggedSongIds = async (
   supabase: Client,
-  table: LinkTable,
-  vocabIds: string[],
-  from: number,
-  to: number,
-) => {
-  // Concrete per-table calls so the union type resolves cleanly (each link
-  // table names its vocabulary column genre_id or mood_id).
-  switch (table) {
-    case 'song_genres':
-      return supabase
-        .from('song_genres')
-        .select('song_id')
-        .in('genre_id', vocabIds)
-        .range(from, to)
-    case 'song_moods':
-      return supabase
-        .from('song_moods')
-        .select('song_id')
-        .in('mood_id', vocabIds)
-        .range(from, to)
-    case 'user_genres':
-      return supabase
-        .from('user_genres')
-        .select('song_id')
-        .in('genre_id', vocabIds)
-        .range(from, to)
-    case 'user_moods':
-      return supabase
-        .from('user_moods')
-        .select('song_id')
-        .in('mood_id', vocabIds)
-        .range(from, to)
-  }
-}
-
-/** Song ids linked to any of `vocabIds` in the given link table (paged). */
-export const fetchLinkedSongIds = async (
-  supabase: Client,
-  table: LinkTable,
+  kind: 'genre' | 'mood',
   vocabIds: string[],
 ): Promise<Set<string>> => {
   const ids = new Set<string>()
   if (vocabIds.length === 0) return ids
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await pageLinkTable(
-      supabase,
-      table,
-      vocabIds,
-      from,
-      from + PAGE_SIZE - 1,
-    )
+    const { data, error } = await supabase
+      .rpc('library_effective_tagged_songs', {
+        p_kind: kind,
+        p_tag_ids: vocabIds,
+      })
+      .range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
     for (const row of data) ids.add(row.song_id)
     if (data.length < PAGE_SIZE) break
@@ -192,8 +151,10 @@ const CANDIDATE_FETCH_CHUNK = 100
 
 /**
  * Fetch full candidate rows for the given song ids (chunked ≤100), scoped to
- * the requester's library. `genres`/`moods` merge the AI and user tag names.
- * Returns rows keyed for the caller to reorder — order here is not meaningful.
+ * the requester's library. AI tags are included only for Medium/High songs and
+ * are filtered through this user's suppressions before personal tags are
+ * unioned.
+ * Returns rows keyed for the caller to reorder.
  *
  * The `user_genres`/`user_moods` embeds below return only the requester's rows
  * because `supabase` is the RLS client — RLS is the only scoping. `Client` is
@@ -213,22 +174,43 @@ export const fetchCandidateRows = async (
       .select(
         `song_id, songs!inner(
           id, title, artists, album_art_url, duration_ms, ai_attributes,
-          song_genres(genres(name)),
-          song_moods(moods(name)),
+          enrichment_status, ai_confidence,
+          song_genres(genre_id, genres(name)),
+          song_moods(mood_id, moods(name)),
           user_genres(genres(name)),
-          user_moods(moods(name))
+          user_moods(moods(name)),
+          user_genre_suppressions(genre_id),
+          user_mood_suppressions(mood_id)
         )`,
       )
       .in('song_id', chunk)
     if (error) throw new Error(error.message)
     for (const row of data) {
       const song = row.songs
+      const hasUsableAiConfidence =
+        song.enrichment_status === 'enriched' &&
+        song.ai_confidence !== null &&
+        song.ai_confidence > 0.5
+      const hiddenGenreIds = new Set(
+        song.user_genre_suppressions.map((link) => link.genre_id),
+      )
+      const hiddenMoodIds = new Set(
+        song.user_mood_suppressions.map((link) => link.mood_id),
+      )
       const genres = dedupe([
-        ...song.song_genres.map((link) => link.genres.name),
+        ...(hasUsableAiConfidence
+          ? song.song_genres
+              .filter((link) => !hiddenGenreIds.has(link.genre_id))
+              .map((link) => link.genres.name)
+          : []),
         ...song.user_genres.map((link) => link.genres.name),
       ])
       const moods = dedupe([
-        ...song.song_moods.map((link) => link.moods.name),
+        ...(hasUsableAiConfidence
+          ? song.song_moods
+              .filter((link) => !hiddenMoodIds.has(link.mood_id))
+              .map((link) => link.moods.name)
+          : []),
         ...song.user_moods.map((link) => link.moods.name),
       ])
       rows.push({

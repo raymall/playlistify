@@ -34,14 +34,18 @@ export default function LibraryLoading() {
         <div className='mt-8 flex flex-col gap-4'>
           <Skeleton className='h-9 w-44' />
           <div className='mt-6 flex flex-col gap-4 border-t border-border pt-6'>
-            <div className='flex flex-wrap items-end gap-3'>
-              <div className='flex flex-col gap-1.5'>
-                <Skeleton className='h-4 w-12' />
-                <Skeleton className='h-9 w-56' />
-              </div>
-              <Skeleton className='h-9 w-36' />
+            <div className='flex flex-col gap-1.5'>
+              <Skeleton className='h-4 w-20' />
+              <Skeleton className='h-4 w-full max-w-prose' />
             </div>
-            <Skeleton className='h-4 w-full max-w-prose' />
+            <div className='flex flex-wrap gap-3'>
+              <Skeleton className='h-14 w-28' />
+              <Skeleton className='h-14 w-28' />
+              <Skeleton className='h-14 w-28' />
+              <Skeleton className='h-14 w-28' />
+              <Skeleton className='h-14 w-28' />
+            </div>
+            <Skeleton className='h-8 w-44' />
           </div>
         </div>
 
@@ -63,7 +67,7 @@ export default function LibraryLoading() {
                   Tags
                 </TableHead>
                 <TableHead className='w-32 text-right' scope='col'>
-                  Accuracy
+                  Confidence
                 </TableHead>
               </TableRow>
             </TableHeader>

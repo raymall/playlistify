@@ -13,7 +13,7 @@ import type { ProposalTrack, SearchResultContract } from '@/lib/chat/contract'
 import {
   type CandidateRow,
   fetchCandidateRows,
-  fetchLinkedSongIds,
+  fetchEffectiveTaggedSongIds,
   getSelectableLibraryIndex,
   type LibraryTag,
   type LibraryTagSummary,
@@ -105,12 +105,6 @@ const resolveTags = (
     else ids.add(id)
   }
   return { ids: [...ids], unmatched }
-}
-
-const union = (a: Set<string>, b: Set<string>): Set<string> => {
-  const out = new Set(a)
-  for (const value of b) out.add(value)
-  return out
 }
 
 const intersect = (a: Set<string>, b: Set<string>): Set<string> => {
@@ -215,22 +209,14 @@ const searchLibrary = async (
   const genreIds = genreMatch.ids
   const moodIds = moodMatch.ids
 
-  // AI-linked OR user-linked within a kind; AND across kinds. null = no tag
-  // filter (the whole enriched index qualifies).
+  // Effective AI-minus-suppression plus personal tags within a kind; AND
+  // across kinds. null = no tag filter (the whole selectable index qualifies).
   let matchedIds: Set<string> | null = null
   if (genreNames.length > 0) {
-    const [ai, user] = await Promise.all([
-      fetchLinkedSongIds(supabase, 'song_genres', genreIds),
-      fetchLinkedSongIds(supabase, 'user_genres', genreIds),
-    ])
-    matchedIds = union(ai, user)
+    matchedIds = await fetchEffectiveTaggedSongIds(supabase, 'genre', genreIds)
   }
   if (moodNames.length > 0) {
-    const [ai, user] = await Promise.all([
-      fetchLinkedSongIds(supabase, 'song_moods', moodIds),
-      fetchLinkedSongIds(supabase, 'user_moods', moodIds),
-    ])
-    const moodSet = union(ai, user)
+    const moodSet = await fetchEffectiveTaggedSongIds(supabase, 'mood', moodIds)
     matchedIds = matchedIds === null ? moodSet : intersect(matchedIds, moodSet)
   }
 

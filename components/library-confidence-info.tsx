@@ -9,18 +9,16 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { ACCURACY_BAND_ORDER, ACCURACY_BANDS } from '@/lib/enrichment/accuracy'
+import {
+  CONFIDENCE_BAND_ORDER,
+  CONFIDENCE_BANDS,
+} from '@/lib/enrichment/confidence'
 import { cn } from '@/lib/utils'
 
-/**
- * Explains the Accuracy column. Click-triggered rather than hover, so WCAG
- * 1.4.13 (dismissible / hoverable / persistent) holds by construction; the
- * icon-xs trigger is 24x24, the AA target-size floor.
- */
-export const LibraryAccuracyInfo = () => (
+export const LibraryConfidenceInfo = () => (
   <Popover>
     <PopoverTrigger
-      aria-label='What Accuracy means'
+      aria-label='What Confidence means'
       className={cn(
         buttonVariants({ size: 'icon-xs', variant: 'ghost' }),
         'text-muted-foreground',
@@ -31,20 +29,20 @@ export const LibraryAccuracyInfo = () => (
     <PopoverContent align='end'>
       <div className='flex flex-col gap-3 text-left'>
         <div className='flex flex-col gap-1'>
-          <PopoverTitle>Accuracy</PopoverTitle>
+          <PopoverTitle>Confidence</PopoverTitle>
           <p className='text-xs text-muted-foreground'>
-            How sure the model was that it knew this exact recording. Songs it
-            doesn’t recognize get no tags rather than guessed ones.
+            The model&apos;s confidence that it recognized the exact recording.
+            This is not measured accuracy.
           </p>
         </div>
         <dl className='flex flex-col gap-1.5 text-xs'>
-          {ACCURACY_BAND_ORDER.map((band) => (
+          {CONFIDENCE_BAND_ORDER.map((band) => (
             <div key={band} className='flex flex-col'>
               <dt className='font-medium text-foreground'>
-                {ACCURACY_BANDS[band].label}
+                {CONFIDENCE_BANDS[band].label}
               </dt>
               <dd className='text-muted-foreground'>
-                {ACCURACY_BANDS[band].description}
+                {CONFIDENCE_BANDS[band].description}
               </dd>
             </div>
           ))}

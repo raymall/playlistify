@@ -12,14 +12,29 @@ import {
 
 export type TagKind = 'genre' | 'mood'
 
-/** Client → route request bodies. */
-export interface TagAddPayload {
+export type TagAddPayload = {
+  operation: 'add'
   songId: string
   kind: TagKind
   name: string
 }
 
-export interface TagRemovePayload {
+export type TagRemovePayload = {
+  operation: 'remove'
+  songId: string
+  kind: TagKind
+  tagId: string
+}
+
+export type TagHidePayload = {
+  operation: 'hide'
+  songId: string
+  kind: TagKind
+  tagId: string
+}
+
+export type TagShowPayload = {
+  operation: 'show'
   songId: string
   kind: TagKind
   tagId: string
@@ -31,6 +46,28 @@ export type TagAddResponse =
 
 export type TagRemoveResponse =
   { status: 'ok' } | { status: 'error'; message: string }
+
+export type TagSuppressionResponse =
+  { status: 'ok' } | { status: 'error'; message: string }
+
+const ownsSong = async (
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  songId: string,
+) => {
+  const owned = await supabase
+    .from('user_songs')
+    .select('song_id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('song_id', songId)
+  if (owned.error !== null) {
+    return { status: 'error' as const, message: owned.error.message }
+  }
+  return {
+    status: 'ok' as const,
+    isOwned: (owned.count ?? 0) > 0,
+  }
+}
 
 /**
  * Personal tags run entirely on the RLS client: the vocabulary tables allow
@@ -49,13 +86,9 @@ export const addUserTag = async (
 
   // The link-table RLS only checks user_id, so guard that the song is
   // actually in the caller's library before writing anything.
-  const owned = await supabase
-    .from('user_songs')
-    .select('song_id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .eq('song_id', songId)
-  if (owned.error) return { status: 'error', message: owned.error.message }
-  if ((owned.count ?? 0) === 0) {
+  const ownership = await ownsSong(supabase, userId, songId)
+  if (ownership.status === 'error') return ownership
+  if (!ownership.isOwned) {
     return { status: 'error', message: 'Song is not in your library' }
   }
 
@@ -110,5 +143,91 @@ export const removeUserTag = async (
           .eq('mood_id', tagId)
   if (result.error) return { status: 'error', message: result.error.message }
 
+  return { status: 'ok' }
+}
+
+export const hideAiTag = async (
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  { songId, kind, tagId }: TagHidePayload,
+): Promise<TagSuppressionResponse> => {
+  const ownership = await ownsSong(supabase, userId, songId)
+  if (ownership.status === 'error') return ownership
+  if (!ownership.isOwned) {
+    return { status: 'error', message: 'Song is not in your library' }
+  }
+
+  const canonical =
+    kind === 'genre'
+      ? await supabase
+          .from('song_genres')
+          .select('song_id', { count: 'exact', head: true })
+          .eq('song_id', songId)
+          .eq('genre_id', tagId)
+      : await supabase
+          .from('song_moods')
+          .select('song_id', { count: 'exact', head: true })
+          .eq('song_id', songId)
+          .eq('mood_id', tagId)
+  if (canonical.error !== null) {
+    return { status: 'error', message: canonical.error.message }
+  }
+  if ((canonical.count ?? 0) === 0) {
+    return {
+      status: 'error',
+      message: 'Tag is not part of the shared analysis',
+    }
+  }
+
+  const result =
+    kind === 'genre'
+      ? await supabase.from('user_genre_suppressions').upsert(
+          { user_id: userId, song_id: songId, genre_id: tagId },
+          {
+            onConflict: 'user_id,song_id,genre_id',
+            ignoreDuplicates: true,
+          },
+        )
+      : await supabase.from('user_mood_suppressions').upsert(
+          { user_id: userId, song_id: songId, mood_id: tagId },
+          {
+            onConflict: 'user_id,song_id,mood_id',
+            ignoreDuplicates: true,
+          },
+        )
+  if (result.error !== null) {
+    return { status: 'error', message: result.error.message }
+  }
+  return { status: 'ok' }
+}
+
+export const showAiTag = async (
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  { songId, kind, tagId }: TagShowPayload,
+): Promise<TagSuppressionResponse> => {
+  const ownership = await ownsSong(supabase, userId, songId)
+  if (ownership.status === 'error') return ownership
+  if (!ownership.isOwned) {
+    return { status: 'error', message: 'Song is not in your library' }
+  }
+
+  const result =
+    kind === 'genre'
+      ? await supabase
+          .from('user_genre_suppressions')
+          .delete()
+          .eq('user_id', userId)
+          .eq('song_id', songId)
+          .eq('genre_id', tagId)
+      : await supabase
+          .from('user_mood_suppressions')
+          .delete()
+          .eq('user_id', userId)
+          .eq('song_id', songId)
+          .eq('mood_id', tagId)
+  if (result.error !== null) {
+    return { status: 'error', message: result.error.message }
+  }
   return { status: 'ok' }
 }

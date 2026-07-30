@@ -11,13 +11,27 @@ const sleep = (ms: number) =>
     setTimeout(resolve, ms)
   })
 
+const readNetworkErrorCode = (error: unknown): string | null => {
+  if (!(error instanceof Error)) return null
+  const { cause } = error
+  if (
+    typeof cause !== 'object' ||
+    cause === null ||
+    !('code' in cause) ||
+    typeof cause.code !== 'string'
+  ) {
+    return null
+  }
+  return cause.code
+}
+
 /**
  * Server-side fetch that retries network-level failures. undici surfaces dead
  * keep-alive sockets, sleep-wake transitions, and DNS blips as a rejected
  * fetch (`TypeError: fetch failed`); retrying opens a fresh connection, which
  * is usually all it takes. HTTP error responses resolve normally and are never
- * retried here, and aborts rethrow immediately. Safe to re-send: supabase-js
- * passes string bodies, and every write in this app is idempotent.
+ * retried here, and aborts rethrow immediately. Mutating callers must make
+ * replay safe; enrichment claims do that with a caller-issued lease token.
  */
 export const fetchWithRetries: typeof fetch = async (input, init) => {
   const method = init?.method?.toUpperCase() ?? 'GET'
@@ -32,12 +46,21 @@ export const fetchWithRetries: typeof fetch = async (input, init) => {
       const isAborted =
         init?.signal?.aborted === true ||
         (error instanceof Error && error.name === 'AbortError')
-      if (isAborted || attempt >= delays.length) throw error
-      console.error(
-        `[supabase] network failure, retrying (attempt ${attempt + 1}):`,
-        error,
+      if (isAborted) throw error
+      const errorCode = readNetworkErrorCode(error)
+      const context = `${method}${errorCode === null ? '' : ` ${errorCode}`}`
+      if (attempt >= delays.length) {
+        console.error(
+          `[supabase] network failure after ${attempt + 1} attempts (${context}):`,
+          error,
+        )
+        throw error
+      }
+      const delay = delays[attempt]
+      console.warn(
+        `[supabase] transient network failure; retry ${attempt + 1}/${delays.length} in ${delay}ms (${context})`,
       )
-      await sleep(delays[attempt])
+      await sleep(delay)
     }
   }
 }

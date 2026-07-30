@@ -6,7 +6,10 @@
     "node": "24.x"
   },
   "scripts": {
+    "check:node": "node scripts/check-node-version.mjs",
+    "predev": "npm run check:node",
     "dev": "next dev",
+    "prebuild": "npm run check:node",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -19,6 +22,7 @@
     "verify:rls": "node --env-file=.env.local scripts/verify-rls.mjs",
     "verify:import": "node --env-file=.env.local scripts/verify-import.mjs",
     "verify:enrichment": "node --env-file=.env.local scripts/verify-enrichment.mjs",
+    "verify:re-enrichment": "node --env-file=.env.local --import tsx scripts/verify-re-enrichment.mts",
     "verify:genres": "node --env-file=.env.local --import tsx scripts/verify-genres.mts",
     "verify:chat-prompt": "node --env-file=.env.local --import tsx scripts/verify-chat-prompt.mts",
     "reset:enrichment": "node --env-file=.env.local --import tsx scripts/reset-enrichment.mts",

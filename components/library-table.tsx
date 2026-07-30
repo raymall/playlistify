@@ -1,7 +1,8 @@
 import Image from 'next/image'
 import Link from 'next/link'
 
-import { LibraryAccuracyInfo } from '@/components/library-accuracy-info'
+import { LibraryConfidenceInfo } from '@/components/library-confidence-info'
+import { LibraryRecheckAction } from '@/components/library-recheck-action'
 import {
   type LibraryTag,
   LibraryTagEditor,
@@ -18,14 +19,15 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import {
-  ACCURACY_BANDS,
-  type AccuracyBand,
-  getAccuracyBand,
-} from '@/lib/enrichment/accuracy'
+  CONFIDENCE_BANDS,
+  type ConfidenceBand,
+  getConfidenceBand,
+} from '@/lib/enrichment/confidence'
+import { type RecheckState } from '@/lib/enrichment/recheck'
 import { type SongAIAttributes } from '@/lib/enrichment/schema'
 import { cn } from '@/lib/utils'
 
-export interface LibrarySong {
+export type LibrarySong = {
   id: string
   title: string | null
   artists: string[] | null
@@ -33,20 +35,23 @@ export interface LibrarySong {
   enrichmentStatus: string
   aiConfidence: number | null
   aiAttributes: SongAIAttributes | null
-  aiGenres: string[]
-  aiMoods: string[]
+  aiGenres: LibraryTag[]
+  aiMoods: LibraryTag[]
+  hiddenGenres: LibraryTag[]
+  hiddenMoods: LibraryTag[]
   userGenres: LibraryTag[]
   userMoods: LibraryTag[]
+  recheckState: RecheckState | null
 }
 
-interface LibraryTableProps {
+type LibraryTableProps = {
   page: number
   pageCount: number
   query: string
   songs: LibrarySong[]
 }
 
-interface LibraryPaginationProps {
+type LibraryPaginationProps = {
   page: number
   pageCount: number
   query: string
@@ -56,8 +61,8 @@ interface LibraryPaginationProps {
  * Visual weight tracks band strength, but the badge always carries its label
  * as text — the band is never conveyed by appearance alone.
  */
-const accuracyVariant: Record<
-  AccuracyBand,
+const confidenceVariant: Record<
+  ConfidenceBand,
   'default' | 'secondary' | 'outline' | 'ghost'
 > = {
   pending: 'ghost',
@@ -115,7 +120,7 @@ const LibraryPagination = ({
   )
 }
 
-interface LibraryTagChipsProps {
+type LibraryTagChipsProps = {
   song: LibrarySong
 }
 
@@ -124,9 +129,13 @@ interface LibraryTagChipsProps {
  * distinction, never hue, per the monochrome theme.
  */
 const LibraryTagChips = ({ song }: LibraryTagChipsProps) => {
+  const hiddenGenreIds = new Set(song.hiddenGenres.map((tag) => tag.id))
+  const hiddenMoodIds = new Set(song.hiddenMoods.map((tag) => tag.id))
+  const aiGenres = song.aiGenres.filter((tag) => !hiddenGenreIds.has(tag.id))
+  const aiMoods = song.aiMoods.filter((tag) => !hiddenMoodIds.has(tag.id))
   const hasTags =
-    song.aiGenres.length > 0 ||
-    song.aiMoods.length > 0 ||
+    aiGenres.length > 0 ||
+    aiMoods.length > 0 ||
     song.userGenres.length > 0 ||
     song.userMoods.length > 0
 
@@ -136,16 +145,16 @@ const LibraryTagChips = ({ song }: LibraryTagChipsProps) => {
 
   return (
     <div className='flex flex-wrap items-center gap-1'>
-      {song.aiGenres.map((name) => (
-        <Badge key={`ai-genre-${name}`} variant='secondary'>
+      {aiGenres.map((tag) => (
+        <Badge key={`ai-genre-${tag.id}`} variant='secondary'>
           <span className='sr-only'>AI genre: </span>
-          {name}
+          {tag.name}
         </Badge>
       ))}
-      {song.aiMoods.map((name) => (
-        <Badge key={`ai-mood-${name}`} variant='secondary'>
+      {aiMoods.map((tag) => (
+        <Badge key={`ai-mood-${tag.id}`} variant='secondary'>
           <span className='sr-only'>AI mood: </span>
-          {name}
+          {tag.name}
         </Badge>
       ))}
       {song.userGenres.map((tag) => (
@@ -188,8 +197,8 @@ export const LibraryTable = ({
             </TableHead>
             <TableHead className='w-32 text-right' scope='col'>
               <span className='inline-flex items-center gap-1'>
-                Accuracy
-                <LibraryAccuracyInfo />
+                Confidence
+                <LibraryConfidenceInfo />
               </span>
             </TableHead>
           </TableRow>
@@ -201,7 +210,7 @@ export const LibraryTable = ({
               song.artists !== null && song.artists.length > 0
                 ? song.artists.join(', ')
                 : '—'
-            const accuracyBand = getAccuracyBand(
+            const confidenceBand = getConfidenceBand(
               song.enrichmentStatus,
               song.aiConfidence,
             )
@@ -244,6 +253,10 @@ export const LibraryTable = ({
                     <LibraryTagEditor
                       aiAttributes={song.aiAttributes}
                       aiConfidence={song.aiConfidence}
+                      aiGenres={song.aiGenres}
+                      aiMoods={song.aiMoods}
+                      hiddenGenres={song.hiddenGenres}
+                      hiddenMoods={song.hiddenMoods}
                       songId={song.id}
                       songTitle={titleText}
                       userGenres={song.userGenres}
@@ -252,9 +265,16 @@ export const LibraryTable = ({
                   </div>
                 </TableCell>
                 <TableCell className='text-right'>
-                  <Badge variant={accuracyVariant[accuracyBand]}>
-                    {ACCURACY_BANDS[accuracyBand].label}
+                  <Badge variant={confidenceVariant[confidenceBand]}>
+                    {CONFIDENCE_BANDS[confidenceBand].label}
                   </Badge>
+                  {song.recheckState !== null && (
+                    <LibraryRecheckAction
+                      initialState={song.recheckState}
+                      songId={song.id}
+                      songTitle={titleText}
+                    />
+                  )}
                 </TableCell>
               </TableRow>
             )

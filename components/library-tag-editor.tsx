@@ -4,7 +4,7 @@ import { TagsIcon } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useId, useRef, useState } from 'react'
 
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   Combobox,
   ComboboxChip,
@@ -36,21 +36,25 @@ import { cn } from '@/lib/utils'
 import { isValidTagName, normalizeTagName } from '@/lib/vocabulary'
 
 /** One personal tag: the shared-vocabulary row id plus its normalized name. */
-export interface LibraryTag {
+export type LibraryTag = {
   id: string
   name: string
 }
 
-interface LibraryTagEditorProps {
+type LibraryTagEditorProps = {
   aiConfidence: number | null
   aiAttributes: SongAIAttributes | null
+  aiGenres: LibraryTag[]
+  aiMoods: LibraryTag[]
+  hiddenGenres: LibraryTag[]
+  hiddenMoods: LibraryTag[]
   songId: string
   songTitle: string
   userGenres: LibraryTag[]
   userMoods: LibraryTag[]
 }
 
-interface TagVocabulary {
+type TagVocabulary = {
   genres: string[]
   moods: string[]
 }
@@ -123,11 +127,12 @@ const formatAttributesLine = (
   return parts.join(' · ')
 }
 
-interface TagKindEditorProps {
+type TagKindEditorProps = {
   kind: TagKind
   label: string
   placeholder: string
   selected: LibraryTag[]
+  songTitle: string
   vocabulary: string[] | null
   onValueChange: (next: string[]) => void
 }
@@ -142,6 +147,7 @@ const TagKindEditor = ({
   label,
   placeholder,
   selected,
+  songTitle,
   vocabulary,
   onValueChange,
 }: TagKindEditorProps) => {
@@ -178,7 +184,9 @@ const TagKindEditor = ({
           {selected.map((tag) => (
             <ComboboxChip key={tag.id}>
               {tag.name}
-              <ComboboxChipRemove aria-label={`Remove ${kind} ${tag.name}`} />
+              <ComboboxChipRemove
+                aria-label={`Remove ${kind} ${tag.name} from ${songTitle}`}
+              />
             </ComboboxChip>
           ))}
           <ComboboxInput aria-labelledby={labelId} placeholder={placeholder} />
@@ -219,6 +227,10 @@ const TagKindEditor = ({
 export const LibraryTagEditor = ({
   aiConfidence,
   aiAttributes,
+  aiGenres,
+  aiMoods,
+  hiddenGenres,
+  hiddenMoods,
   songId,
   songTitle,
   userGenres,
@@ -229,8 +241,13 @@ export const LibraryTagEditor = ({
   const [vocabulary, setVocabulary] = useState<TagVocabulary | null>(null)
   const [genres, setGenres] = useState(userGenres)
   const [moods, setMoods] = useState(userMoods)
+  const [hiddenAiGenres, setHiddenAiGenres] = useState(hiddenGenres)
+  const [hiddenAiMoods, setHiddenAiMoods] = useState(hiddenMoods)
+  const [isShowingHidden, setIsShowingHidden] = useState(false)
   const [prevUserGenres, setPrevUserGenres] = useState(userGenres)
   const [prevUserMoods, setPrevUserMoods] = useState(userMoods)
+  const [prevHiddenGenres, setPrevHiddenGenres] = useState(hiddenGenres)
+  const [prevHiddenMoods, setPrevHiddenMoods] = useState(hiddenMoods)
   const [announcement, setAnnouncement] = useState('')
   const isActiveRef = useRef(true)
   const queueRef = useRef<Promise<void>>(Promise.resolve())
@@ -253,6 +270,14 @@ export const LibraryTagEditor = ({
   if (prevUserMoods !== userMoods) {
     setPrevUserMoods(userMoods)
     setMoods(userMoods)
+  }
+  if (prevHiddenGenres !== hiddenGenres) {
+    setPrevHiddenGenres(hiddenGenres)
+    setHiddenAiGenres(hiddenGenres)
+  }
+  if (prevHiddenMoods !== hiddenMoods) {
+    setPrevHiddenMoods(hiddenMoods)
+    setHiddenAiMoods(hiddenMoods)
   }
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -299,7 +324,12 @@ export const LibraryTagEditor = ({
 
   const addTag = (kind: TagKind, name: string) => {
     enqueue(async () => {
-      const payload = await requestJson('POST', { songId, kind, name })
+      const payload = await requestJson('POST', {
+        operation: 'add',
+        songId,
+        kind,
+        name,
+      })
       if (!isActiveRef.current) return
       const parsed = parseAddResponse(payload)
       if (parsed === null || parsed.status === 'error') {
@@ -330,6 +360,7 @@ export const LibraryTagEditor = ({
   const removeTag = (kind: TagKind, tag: LibraryTag) => {
     enqueue(async () => {
       const payload = await requestJson('DELETE', {
+        operation: 'remove',
         songId,
         kind,
         tagId: tag.id,
@@ -346,6 +377,54 @@ export const LibraryTagEditor = ({
       if (kind === 'genre') setGenres(drop)
       else setMoods(drop)
       setAnnouncement(`Removed ${kind} ${tag.name}.`)
+    })
+  }
+
+  const hideTag = (kind: TagKind, tag: LibraryTag) => {
+    enqueue(async () => {
+      const payload = await requestJson('POST', {
+        operation: 'hide',
+        songId,
+        kind,
+        tagId: tag.id,
+      })
+      if (!isActiveRef.current) return
+      const parsed = parseRemoveResponse(payload)
+      if (parsed === null || parsed.status === 'error') {
+        setAnnouncement(`The AI ${kind} could not be hidden.`)
+        return
+      }
+      hasChangedRef.current = true
+      const append = (current: LibraryTag[]) =>
+        current.some((existing) => existing.id === tag.id)
+          ? current
+          : [...current, tag]
+      if (kind === 'genre') setHiddenAiGenres(append)
+      else setHiddenAiMoods(append)
+      setAnnouncement(`Hidden AI ${kind} ${tag.name} for ${songTitle}.`)
+    })
+  }
+
+  const showTag = (kind: TagKind, tag: LibraryTag) => {
+    enqueue(async () => {
+      const payload = await requestJson('DELETE', {
+        operation: 'show',
+        songId,
+        kind,
+        tagId: tag.id,
+      })
+      if (!isActiveRef.current) return
+      const parsed = parseRemoveResponse(payload)
+      if (parsed === null || parsed.status === 'error') {
+        setAnnouncement(`The hidden AI ${kind} could not be restored.`)
+        return
+      }
+      hasChangedRef.current = true
+      const drop = (current: LibraryTag[]) =>
+        current.filter((existing) => existing.id !== tag.id)
+      if (kind === 'genre') setHiddenAiGenres(drop)
+      else setHiddenAiMoods(drop)
+      setAnnouncement(`Restored AI ${kind} ${tag.name} for ${songTitle}.`)
     })
   }
 
@@ -367,6 +446,14 @@ export const LibraryTagEditor = ({
   const handleMoodsChange = (next: string[]) => {
     applyKindChange('mood', next)
   }
+
+  const hiddenGenreIds = new Set(hiddenAiGenres.map((tag) => tag.id))
+  const hiddenMoodIds = new Set(hiddenAiMoods.map((tag) => tag.id))
+  const visibleAiGenres = aiGenres.filter((tag) => !hiddenGenreIds.has(tag.id))
+  const visibleAiMoods = aiMoods.filter((tag) => !hiddenMoodIds.has(tag.id))
+  const hasVisibleAiTags =
+    visibleAiGenres.length > 0 || visibleAiMoods.length > 0
+  const hasHiddenAiTags = hiddenAiGenres.length > 0 || hiddenAiMoods.length > 0
 
   return (
     <Popover open={isOpen} onOpenChange={handleOpenChange}>
@@ -397,11 +484,95 @@ export const LibraryTagEditor = ({
               <p className='text-xs text-muted-foreground'>No AI data yet.</p>
             )}
           </div>
+          {(hasVisibleAiTags || hasHiddenAiTags) && (
+            <div className='flex flex-col gap-2'>
+              <p className='text-xs font-medium text-muted-foreground'>
+                AI tags
+              </p>
+              {hasVisibleAiTags && (
+                <div className='flex flex-wrap gap-1.5'>
+                  {visibleAiGenres.map((tag) => (
+                    <Button
+                      key={`ai-genre-${tag.id}`}
+                      aria-label={`Hide AI genre ${tag.name} for ${songTitle}`}
+                      size='xs'
+                      variant='secondary'
+                      onClick={() => {
+                        hideTag('genre', tag)
+                      }}
+                    >
+                      {tag.name}
+                      <span aria-hidden='true'>×</span>
+                    </Button>
+                  ))}
+                  {visibleAiMoods.map((tag) => (
+                    <Button
+                      key={`ai-mood-${tag.id}`}
+                      aria-label={`Hide AI mood ${tag.name} for ${songTitle}`}
+                      size='xs'
+                      variant='secondary'
+                      onClick={() => {
+                        hideTag('mood', tag)
+                      }}
+                    >
+                      {tag.name}
+                      <span aria-hidden='true'>×</span>
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {hasHiddenAiTags && (
+                <div className='flex flex-col items-start gap-2'>
+                  <Button
+                    aria-expanded={isShowingHidden}
+                    size='xs'
+                    variant='ghost'
+                    onClick={() => {
+                      setIsShowingHidden((current) => !current)
+                    }}
+                  >
+                    {isShowingHidden ? 'Hide hidden tags' : 'Show hidden tags'}
+                  </Button>
+                  {isShowingHidden && (
+                    <div className='flex flex-wrap gap-1.5'>
+                      {hiddenAiGenres.map((tag) => (
+                        <Button
+                          key={`hidden-genre-${tag.id}`}
+                          aria-label={`Show AI genre ${tag.name} again for ${songTitle}`}
+                          size='xs'
+                          variant='outline'
+                          onClick={() => {
+                            showTag('genre', tag)
+                          }}
+                        >
+                          Undo {tag.name}
+                        </Button>
+                      ))}
+                      {hiddenAiMoods.map((tag) => (
+                        <Button
+                          key={`hidden-mood-${tag.id}`}
+                          aria-label={`Show AI mood ${tag.name} again for ${songTitle}`}
+                          size='xs'
+                          variant='outline'
+                          onClick={() => {
+                            showTag('mood', tag)
+                          }}
+                        >
+                          Undo {tag.name}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <TagKindEditor
             kind='genre'
             label='Your genres'
             placeholder='Add genre'
             selected={genres}
+            songTitle={songTitle}
             vocabulary={vocabulary?.genres ?? null}
             onValueChange={handleGenresChange}
           />
@@ -410,11 +581,12 @@ export const LibraryTagEditor = ({
             label='Your moods'
             placeholder='Add mood'
             selected={moods}
+            songTitle={songTitle}
             vocabulary={vocabulary?.moods ?? null}
             onValueChange={handleMoodsChange}
           />
         </div>
-        <div className='sr-only' role='status'>
+        <div aria-live='polite' className='sr-only' role='status'>
           {announcement}
         </div>
       </PopoverContent>

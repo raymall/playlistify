@@ -32,6 +32,12 @@ const TABLES = [
   'song_moods',
   'llm_models',
   'unmatched_tags',
+  'enrichment_recipes',
+  'song_enrichment_attempts',
+  'song_enrichment_jobs',
+  'enrichment_recheck_limits',
+  'user_genre_suppressions',
+  'user_mood_suppressions',
 ]
 
 let failed = false

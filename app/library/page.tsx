@@ -1,17 +1,12 @@
 import type { Metadata } from 'next'
 
-import {
-  type EnrichmentModelOption,
-  LibraryEnrichmentPanel,
-} from '@/components/library-enrichment-panel'
+import { LibraryEnrichmentPanel } from '@/components/library-enrichment-panel'
 import { LibraryImportPanel } from '@/components/library-import-panel'
 import { type LibrarySong, LibraryTable } from '@/components/library-table'
 import { PageSection } from '@/components/page-section'
 import { buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { getDefaultModel, getEnabledModels } from '@/lib/ai/models'
-import { filterMappedModels } from '@/lib/ai/providers'
-import { IMPROVABLE_SONGS_FILTER } from '@/lib/enrichment/accuracy'
+import { readRecheckState } from '@/lib/enrichment/recheck'
 import { readSongAIAttributes } from '@/lib/enrichment/schema'
 import { createClient } from '@/lib/supabase/server'
 
@@ -55,10 +50,12 @@ export default async function LibraryPage({
       `liked_at, songs!inner(
         id, title, artists, album_art_url, enrichment_status,
         ai_confidence, ai_attributes,
-        song_genres(genres(name)),
-        song_moods(moods(name)),
+        song_genres(genre_id, genres(name)),
+        song_moods(mood_id, moods(name)),
         user_genres(genre_id, genres(name)),
-        user_moods(mood_id, moods(name))
+        user_moods(mood_id, moods(name)),
+        user_genre_suppressions(genre_id, genres(name)),
+        user_mood_suppressions(mood_id, moods(name))
       )`,
       isSearching ? { count: 'exact' } : undefined,
     )
@@ -75,57 +72,24 @@ export default async function LibraryPage({
     )
   }
 
-  // One parallel batch — the whole page's data in a single round-trip stage.
-  // Folding the total count in here (rather than awaiting it first) removes a
-  // sequential round trip. These run for an empty library too, returning 0/[]
-  // that the totalSongs-gated JSX below simply doesn't render.
-  const [
-    libraryResult,
-    pendingResult,
-    improvableResult,
-    enabledModels,
-    rowsResult,
-  ] = await Promise.all([
-    // Total library size (unfiltered) drives the header + the panel's button
-    // label; RLS scopes it to this user.
-    supabase
-      .from('user_songs')
-      .select('song_id', { count: 'exact', head: true }),
-    supabase
-      .from('user_songs')
-      .select('song_id, songs!inner(enrichment_status)', {
-        count: 'exact',
-        head: true,
-      })
-      .eq('songs.enrichment_status', 'pending'),
-    // None/Low rows a strong enough model could redo. Deliberately not
-    // rank-filtered: the model isn't chosen until the client renders, so this
-    // is the model-independent ceiling. The engine narrows it to the selected
-    // model per batch.
-    supabase
-      .from('user_songs')
-      .select('song_id, songs!inner(enrichment_status, ai_confidence)', {
-        count: 'exact',
-        head: true,
-      })
-      .or(IMPROVABLE_SONGS_FILTER, { referencedTable: 'songs' }),
-    getEnabledModels(supabase),
+  // One parallel batch — the authoritative summary, row-level recheck states,
+  // and the visible page. The summary shares its eligibility calculation with
+  // the queue worker, so a terminal job cannot leave the button promising work
+  // that the database will refuse to claim.
+  const [countsResult, recheckStatesResult, rowsResult] = await Promise.all([
+    supabase.rpc('library_enrichment_counts'),
+    supabase.rpc('library_recheck_states'),
     request.range(from, from + LIBRARY_PAGE_SIZE - 1),
   ])
 
-  const totalSongs = libraryResult.count ?? 0
-  const pendingSongs = pendingResult.count ?? 0
-  const improvableSongs = improvableResult.count ?? 0
-
-  // Null = catalog query failed; render the "no models" state rather than
-  // crashing the page — the enrich route re-checks with its own error.
-  const mappedModels = filterMappedModels(enabledModels ?? [])
-  const modelOptions: EnrichmentModelOption[] = mappedModels.map((model) => ({
-    id: model.id,
-    label: model.label,
-  }))
-  const defaultModelId = getDefaultModel(mappedModels)?.id ?? null
-
+  const counts = countsResult.data?.at(0)
+  const totalSongs = counts?.total ?? 0
+  const recheckStateBySongId = new Map(
+    (recheckStatesResult.data ?? []).flatMap((row) => {
+      const state = readRecheckState(row.state)
+      return state === null ? [] : [[row.song_id, state]]
+    }),
+  )
   // No search → the rows query carries no exact count, so the library total is
   // the count.
   const filteredCount = isSearching ? (rowsResult.count ?? 0) : totalSongs
@@ -137,8 +101,22 @@ export default async function LibraryPage({
     enrichmentStatus: row.songs.enrichment_status,
     aiConfidence: row.songs.ai_confidence,
     aiAttributes: readSongAIAttributes(row.songs.ai_attributes),
-    aiGenres: row.songs.song_genres.map((link) => link.genres.name),
-    aiMoods: row.songs.song_moods.map((link) => link.moods.name),
+    aiGenres: row.songs.song_genres.map((link) => ({
+      id: link.genre_id,
+      name: link.genres.name,
+    })),
+    aiMoods: row.songs.song_moods.map((link) => ({
+      id: link.mood_id,
+      name: link.moods.name,
+    })),
+    hiddenGenres: row.songs.user_genre_suppressions.map((link) => ({
+      id: link.genre_id,
+      name: link.genres.name,
+    })),
+    hiddenMoods: row.songs.user_mood_suppressions.map((link) => ({
+      id: link.mood_id,
+      name: link.moods.name,
+    })),
     userGenres: row.songs.user_genres.map((link) => ({
       id: link.genre_id,
       name: link.genres.name,
@@ -147,6 +125,7 @@ export default async function LibraryPage({
       id: link.mood_id,
       name: link.moods.name,
     })),
+    recheckState: recheckStateBySongId.get(row.songs.id) ?? null,
   }))
 
   const pageCount = Math.max(1, Math.ceil(filteredCount / LIBRARY_PAGE_SIZE))
@@ -171,11 +150,17 @@ export default async function LibraryPage({
         )}
         {totalSongs > 0 && (
           <LibraryEnrichmentPanel
-            defaultModelId={defaultModelId}
-            improvableCount={improvableSongs}
-            models={modelOptions}
-            pendingCount={pendingSongs}
-            totalCount={totalSongs}
+            initialCounts={{
+              total: totalSongs,
+              pending: counts?.pending ?? 0,
+              none: counts?.none ?? 0,
+              low: counts?.low ?? 0,
+              medium: counts?.medium ?? 0,
+              high: counts?.high ?? 0,
+              queued: counts?.queued ?? 0,
+              ineligibleWeak: counts?.ineligible_weak ?? 0,
+              eligible: counts?.eligible ?? 0,
+            }}
           />
         )}
       </div>

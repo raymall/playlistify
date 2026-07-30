@@ -5,12 +5,17 @@ import { isRecord, readJson } from '@/lib/json'
 import { createClient } from '@/lib/supabase/server'
 import {
   addUserTag,
+  hideAiTag,
   removeUserTag,
+  showAiTag,
   type TagAddPayload,
   type TagAddResponse,
+  type TagHidePayload,
   type TagKind,
   type TagRemovePayload,
   type TagRemoveResponse,
+  type TagShowPayload,
+  type TagSuppressionResponse,
 } from '@/lib/tags'
 
 const UUID_PATTERN =
@@ -28,8 +33,9 @@ const readAddPayload = (value: unknown): TagAddPayload | null => {
   const kind = readKind(value.kind)
   const { name } = value
   if (songId === null || kind === null) return null
+  if (value.operation !== 'add') return null
   if (typeof name !== 'string' || name.length === 0) return null
-  return { songId, kind, name }
+  return { operation: 'add', songId, kind, name }
 }
 
 const readRemovePayload = (value: unknown): TagRemovePayload | null => {
@@ -38,45 +44,75 @@ const readRemovePayload = (value: unknown): TagRemovePayload | null => {
   const kind = readKind(value.kind)
   const tagId = readUuid(value.tagId)
   if (songId === null || kind === null || tagId === null) return null
-  return { songId, kind, tagId }
+  if (value.operation !== 'remove') return null
+  return { operation: 'remove', songId, kind, tagId }
 }
 
-type ServerClient = Awaited<ReturnType<typeof createClient>>
+const readHidePayload = (value: unknown): TagHidePayload | null => {
+  if (!isRecord(value)) return null
+  const songId = readUuid(value.songId)
+  const kind = readKind(value.kind)
+  const tagId = readUuid(value.tagId)
+  if (songId === null || kind === null || tagId === null) return null
+  if (value.operation !== 'hide') return null
+  return { operation: 'hide', songId, kind, tagId }
+}
 
-/**
- * Adds/removes one personal tag for the signed-in user. Not covered by
- * proxy.ts route protection, so it gates on getUser() itself; the user id
- * always comes from the session, and RLS enforces ownership on every write.
- *
- * CSRF posture: Supabase auth cookies are SameSite=Lax, acceptable for this
- * authenticated MVP endpoint.
- */
-const handleTagMutation = async <Payload>(
-  request: Request,
-  parsePayload: (value: unknown) => Payload | null,
-  run: (
-    supabase: ServerClient,
-    userId: string,
-    payload: Payload,
-  ) => Promise<TagAddResponse | TagRemoveResponse>,
-) => {
+const readShowPayload = (value: unknown): TagShowPayload | null => {
+  if (!isRecord(value)) return null
+  const songId = readUuid(value.songId)
+  const kind = readKind(value.kind)
+  const tagId = readUuid(value.tagId)
+  if (songId === null || kind === null || tagId === null) return null
+  if (value.operation !== 'show') return null
+  return { operation: 'show', songId, kind, tagId }
+}
+
+const requireTagUser = async () => {
   const supabase = await createClient()
   const { user, response } = await requireUser(supabase)
-  if (user === null) return response
-
-  const payload = parsePayload(await readJson(request))
-  if (payload === null) return errorResponse('Invalid request body', 400)
-
-  const result = await run(supabase, user.id, payload)
-  return NextResponse.json(result, {
-    status: result.status === 'error' ? 500 : 200,
-  })
+  return { supabase, user, response }
 }
 
+const mutationResponse = (
+  result: TagAddResponse | TagRemoveResponse | TagSuppressionResponse,
+) =>
+  NextResponse.json(result, {
+    status: result.status === 'error' ? 500 : 200,
+  })
+
 export async function POST(request: Request) {
-  return handleTagMutation(request, readAddPayload, addUserTag)
+  const { supabase, user, response } = await requireTagUser()
+  if (user === null) {
+    return response ?? errorResponse('Authentication unavailable', 503, true)
+  }
+  const body = await readJson(request)
+  const addPayload = readAddPayload(body)
+  if (addPayload !== null) {
+    return mutationResponse(await addUserTag(supabase, user.id, addPayload))
+  }
+  const hidePayload = readHidePayload(body)
+  if (hidePayload !== null) {
+    return mutationResponse(await hideAiTag(supabase, user.id, hidePayload))
+  }
+  return errorResponse('Invalid request body', 400)
 }
 
 export async function DELETE(request: Request) {
-  return handleTagMutation(request, readRemovePayload, removeUserTag)
+  const { supabase, user, response } = await requireTagUser()
+  if (user === null) {
+    return response ?? errorResponse('Authentication unavailable', 503, true)
+  }
+  const body = await readJson(request)
+  const removePayload = readRemovePayload(body)
+  if (removePayload !== null) {
+    return mutationResponse(
+      await removeUserTag(supabase, user.id, removePayload),
+    )
+  }
+  const showPayload = readShowPayload(body)
+  if (showPayload !== null) {
+    return mutationResponse(await showAiTag(supabase, user.id, showPayload))
+  }
+  return errorResponse('Invalid request body', 400)
 }

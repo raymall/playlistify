@@ -1,7 +1,7 @@
 // Chat prompt verification: proves the assistant is shown the COMPLETE tag
 // vocabulary of a library (nothing truncated), that every name it is shown is
 // resolvable back to an id it can search with, and that the candidate universe
-// is enriched-OR-personally-tagged rather than enriched-only.
+// is Medium/High-or-personally-tagged and honors private AI-tag suppressions.
 //
 // The service-role client bypasses RLS, so this replicates the two RPCs'
 // bodies scoped to one explicit user rather than calling them — same posture
@@ -71,11 +71,12 @@ if (countByUser.size === 0) {
 const userId = [...countByUser.entries()].sort((a, b) => b[1] - a[1])[0][0]
 
 const librarySongIds: string[] = []
-const enrichedIds = new Set<string>()
+const usableAiIds = new Set<string>()
+const lowConfidenceIds = new Set<string>()
 for (let from = 0; ; from += PAGE_SIZE) {
   const library = await service
     .from('user_songs')
-    .select('song_id, songs!inner(enrichment_status)')
+    .select('song_id, songs!inner(enrichment_status, ai_confidence)')
     .eq('user_id', userId)
     .order('song_id', { ascending: true })
     .range(from, from + PAGE_SIZE - 1)
@@ -85,22 +86,54 @@ for (let from = 0; ; from += PAGE_SIZE) {
   }
   for (const row of library.data) {
     librarySongIds.push(row.song_id)
-    if (row.songs.enrichment_status === 'enriched') enrichedIds.add(row.song_id)
+    if (
+      row.songs.enrichment_status === 'enriched' &&
+      row.songs.ai_confidence !== null &&
+      row.songs.ai_confidence > 0.5
+    ) {
+      usableAiIds.add(row.song_id)
+    } else if (row.songs.enrichment_status === 'enriched') {
+      lowConfidenceIds.add(row.song_id)
+    }
   }
   if (library.data.length < PAGE_SIZE) break
 }
 
-// Mirrors library_tag_names(): AI links on the caller's songs, unioned with
-// the caller's own tags. Concrete per-table calls so the types resolve.
+const [genreSuppressions, moodSuppressions] = await Promise.all([
+  service
+    .from('user_genre_suppressions')
+    .select('song_id, genre_id')
+    .eq('user_id', userId),
+  service
+    .from('user_mood_suppressions')
+    .select('song_id, mood_id')
+    .eq('user_id', userId),
+])
+if (genreSuppressions.error !== null || moodSuppressions.error !== null) {
+  console.error('Could not read private tag suppressions')
+  process.exit(1)
+}
+const hiddenGenres = new Set(
+  genreSuppressions.data.map((row) => `${row.song_id}:${row.genre_id}`),
+)
+const hiddenMoods = new Set(
+  moodSuppressions.data.map((row) => `${row.song_id}:${row.mood_id}`),
+)
+
+// Mirrors library_tag_names(): Medium/High AI links minus suppressions, unioned
+// with the caller's own tags. Concrete per-table calls keep the types precise.
 const readGenres = async (): Promise<LibraryTag[]> => {
   const byId = new Map<string, LibraryTag>()
-  for (const ids of chunk(librarySongIds, IN_CHUNK)) {
+  for (const ids of chunk([...usableAiIds], IN_CHUNK)) {
     const ai = await service
       .from('song_genres')
-      .select('genres!inner(id, name)')
+      .select('song_id, genre_id, genres!inner(id, name)')
       .in('song_id', ids)
     if (ai.error) throw new Error(ai.error.message)
-    for (const row of ai.data) byId.set(row.genres.id, row.genres)
+    for (const row of ai.data) {
+      if (hiddenGenres.has(`${row.song_id}:${row.genre_id}`)) continue
+      byId.set(row.genres.id, row.genres)
+    }
   }
   const personal = await service
     .from('user_genres')
@@ -113,13 +146,16 @@ const readGenres = async (): Promise<LibraryTag[]> => {
 
 const readMoods = async (): Promise<LibraryTag[]> => {
   const byId = new Map<string, LibraryTag>()
-  for (const ids of chunk(librarySongIds, IN_CHUNK)) {
+  for (const ids of chunk([...usableAiIds], IN_CHUNK)) {
     const ai = await service
       .from('song_moods')
-      .select('moods!inner(id, name)')
+      .select('song_id, mood_id, moods!inner(id, name)')
       .in('song_id', ids)
     if (ai.error) throw new Error(ai.error.message)
-    for (const row of ai.data) byId.set(row.moods.id, row.moods)
+    for (const row of ai.data) {
+      if (hiddenMoods.has(`${row.song_id}:${row.mood_id}`)) continue
+      byId.set(row.moods.id, row.moods)
+    }
   }
   const personal = await service
     .from('user_moods')
@@ -143,8 +179,8 @@ const personallyTagged = new Set([
   ...personalMoods.data.map((row) => row.song_id),
 ])
 
-// Mirrors library_selectable_songs(): enriched OR personally tagged.
-const selectable = new Set([...enrichedIds, ...personallyTagged])
+// Mirrors library_selectable_songs(): Medium/High OR personally tagged.
+const selectable = new Set([...usableAiIds, ...personallyTagged])
 
 const summary = {
   genres: await readGenres(),
@@ -209,23 +245,30 @@ hard(
   `db=${totalCount.count ?? 0} summary=${summary.totalSongs}`,
 )
 
-// 5. The candidate universe is enriched OR personally tagged. Tagged songs
-//    that are also enriched make this pass trivially, so the second check only
-//    bites once a tagged-but-unenriched song exists.
-const taggedUnenriched = [...personallyTagged].filter(
-  (songId) => !enrichedIds.has(songId),
+// 5. The candidate universe is Medium/High OR personally tagged. Low AI tags
+//    do not drive selection, but a personal tag still admits the song.
+const taggedBelowMedium = [...personallyTagged].filter(
+  (songId) => !usableAiIds.has(songId),
 )
 hard(
-  'selectable index: covers every enriched song',
-  [...enrichedIds].every((songId) => selectable.has(songId)),
-  `enriched=${enrichedIds.size}`,
+  'selectable index: covers every Medium/High song',
+  [...usableAiIds].every((songId) => selectable.has(songId)),
+  `medium-or-high=${usableAiIds.size}`,
 )
 hard(
-  'selectable index: covers personally tagged songs',
-  taggedUnenriched.every((songId) => selectable.has(songId)),
-  taggedUnenriched.length === 0
-    ? '(none tagged-but-unenriched yet — vacuous today)'
-    : `${taggedUnenriched.length} tagged-but-unenriched included`,
+  'selectable index: covers personally tagged Pending/None/Low songs',
+  taggedBelowMedium.every((songId) => selectable.has(songId)),
+  taggedBelowMedium.length === 0
+    ? '(none personally tagged yet — vacuous today)'
+    : `${taggedBelowMedium.length} tagged Pending/None/Low included`,
+)
+const lowWithoutPersonal = [...lowConfidenceIds].filter(
+  (songId) => !personallyTagged.has(songId),
+)
+hard(
+  'selectable index: excludes Low songs without personal tags',
+  lowWithoutPersonal.every((songId) => !selectable.has(songId)),
+  `low-without-personal=${lowWithoutPersonal.length}`,
 )
 
 console.log(

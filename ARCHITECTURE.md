@@ -10,8 +10,8 @@ the same commit (rule in `AGENTS.md`).
 
 - `app/` — App Router pages + route handlers; `app/globals.css` holds the
   theme tokens (light/dark CSS variables).
-- `app/api/` — JSON route handlers for the client-driven batch loops
-  (import, enrich, tags).
+- `app/api/` — JSON route handlers for the client-driven batch loops and
+  mutations (import, enrich, enrichment requests, tags).
 - `app/auth/` — OAuth callback + signout route handlers.
 - `components/` — React components (kebab-case, one primary per file);
   `library-*.tsx` are the `/library` client panels; `chat-screen.tsx`
@@ -19,8 +19,7 @@ the same commit (rule in `AGENTS.md`).
   `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI.
 - `components/ui/` — shadcn/ui primitives, built on `@base-ui/react` (not
   Radix). Touch only to restyle a primitive; add new ones via the shadcn CLI.
-- `lib/ai/` — `models.ts` (reads over the `llm_models` catalog),
-  `providers.ts` (server-only provider → AI SDK factory map;
+- `lib/ai/` — `providers.ts` (server-only provider → AI SDK factory map;
   `resolveProviderModel` non-throwing + `resolveLanguageModel` throwing
   wrapper), `chat-model.ts` (resolves the chat model from the `CHAT_MODEL`
   env var, not the catalog).
@@ -36,11 +35,14 @@ the same commit (rule in `AGENTS.md`).
   `propose_playlist` bound to the RLS client and the library vocabulary),
   `prompt.ts` (`buildChatSystemPrompt`), `contract.ts` (client-safe proposal +
   create-response parsers).
-- `lib/enrichment/` — `engine.ts` (batch enrichment: LLM call + all DB
-  writes), `schema.ts` (zod output schema, confidence threshold,
-  `ai_attributes` parser), `rank.ts` (the strictly-outranks comparison that
-  gates re-enrichment), `accuracy.ts` (client-safe: the five derived Accuracy
-  bands and their confidence cuts).
+- `lib/enrichment/` — `engine.ts` (enqueue/claim loop + structured-output
+  call), `recipes.ts` (system recipe, queue, lease, counts, and recheck RPC
+  contracts), `candidates.ts` (per-song normalization), `promotion.ts`
+  (attempt + atomic promotion calls), `policy.ts` (pure promotion matrix),
+  `requests.ts` (service-role recheck entry point), `confidence.ts` /
+  `recheck.ts` (client-safe confidence-band and recheck copy), `schema.ts` (zod output
+  schema, confidence threshold, `ai_attributes` parser), and `rank.ts`
+  (legacy reset-script rank constants).
 - `lib/spotify/` — `api.ts` (typed Web API client), `import.ts` (Liked Songs
   batch import), `token.ts` (Spotify access-token refresh).
 - `lib/supabase/` — client factories + plumbing: `client.ts` (browser anon),
@@ -62,29 +64,26 @@ the same commit (rule in `AGENTS.md`).
   sleep (importable from server and client code).
 - `scripts/` — Node ops + verification scripts (`npm run verify:*`,
   `gen:types`, `reset:enrichment`); each file's header comment says what it
-  proves. Shared env guard in `scripts/lib/env.mjs`.
-- `supabase/migrations/` — schema source of truth. Tables: `profiles`,
-  `spotify_tokens`, `songs`, `genres`, `moods` (both with `is_approved` — the
-  seeded, closed enrichment vocabulary), `song_genres`, `song_moods`,
-  `user_genres`, `user_moods`, `user_songs`, `playlists`, `playlist_songs`,
-  `llm_models`, `unmatched_tags` (review log of off-list enrichment tags,
-  written via the `log_unmatched_tags` service-role RPC). Chat reads through
-  two security-invoker RPCs granted to `authenticated`: `library_tag_names()`
-  (every genre/mood present in the caller's library, AI-linked or personally
-  tagged) and `library_selectable_songs()` (the candidate universe — enriched
-  OR personally tagged) (column detail:
-  `MVP-PLAN.md` § Database Schema). `llm_models.enrichment_rank` orders models
-  by music-metadata recall; `songs.enrichment_rank` snapshots the rank that
-  wrote the row (0 = never enriched). `songs.enrichment_attempts` /
-  `songs.enrichment_skipped_rank` track songs a model leaves out of its batch
-  response — a write it never made, so they need their own pair of columns.
+  proves. `check-node-version.mjs` enforces Node 24 before dev and build;
+  shared env guard lives in `scripts/lib/env.mjs`.
+- `supabase/migrations/` — schema source of truth. Core tables are `profiles`,
+  `spotify_tokens`, `songs`, `genres`, `moods`, AI and personal tag links,
+  `user_songs`, `playlists`, `playlist_songs`, `llm_models`, and
+  `unmatched_tags`. Guarded re-enrichment adds `enrichment_recipes`,
+  `song_enrichment_jobs`, immutable `song_enrichment_attempts`,
+  `enrichment_recheck_limits`, and private `user_{genre,mood}_suppressions`.
+  Service-role RPCs own job enqueue/claim/release, attempt recording, atomic
+  promotion, recheck requests, and outcome counts. Authenticated
+  security-invoker RPCs expose effective tag names, selectable songs, matching
+  song ids, and row-level recheck states. Column detail lives in
+  `MVP-PLAN.md` § Database Schema.
 - `proxy.ts` — runs on every request: session refresh + route protection.
 - Root: `MVP-PLAN.md` (product spec), `HOW-IT-WORKS.md` (plain-language
-  product reasoning: enrichment, Accuracy bands, re-enrichment policy, chat →
-  playlist), `IMPROVEMENTS.md` (gitignored debt log), `README.md` (setup),
-  `.nvmrc` + `package.json#engines` (Node 24 runtime contract), `.env.example`
-  (every env var, commented), `next.config.ts` (album-art image host
-  allowlist).
+  reasoning for behavior that has shipped), `RE-ENRICHMENT-PLAN.md` (guarded
+  re-enrichment design and rollout record), `IMPROVEMENTS.md` (gitignored debt log),
+  `README.md` (setup), `.nvmrc` + `package.json#engines` (Node 24 runtime
+  contract), `.env.example` (every env var, commented), `next.config.ts`
+  (album-art image host allowlist).
 
 ## Route inventory
 
@@ -92,11 +91,12 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 
 - `/` — landing + "Continue with Spotify"; proxy redirects signed-in users
   to `/chat` (`app/page.tsx`, `components/spotify-sign-in-button.tsx`).
-- `/library` — import panel, enrichment panel (model dropdown), searchable
-  paginated table with an Accuracy band per song and a per-song tag editor
+- `/library` — import panel, system-selected enrichment panel, searchable
+  paginated table with a Confidence band, private AI-tag hiding, personal tags,
+  and eligible per-song rechecks
   (`app/library/page.tsx`, `app/library/loading.tsx` (instant skeleton
   streamed while the page's queries run) +
-  `components/library-{import-panel,enrichment-panel,table,tag-editor,accuracy-info}.tsx`).
+  `components/library-{import-panel,enrichment-panel,table,tag-editor,confidence-info,recheck-action}.tsx`).
 - `/chat` — describe a playlist; conversation streams beside a live preview
   panel (rename, edit, drop tracks, create). Server-rendered empty states for
   no-library / not-yet-enriched (`app/chat/page.tsx` + `components/chat-*`,
@@ -120,10 +120,14 @@ an auth service that merely blinked is a 503 the client may retry for free:
   (`app/auth/signout/route.ts`).
 - `POST /api/import` — one Liked Songs batch, body `{offset}`
   (`app/api/import/route.ts` → `lib/spotify/import.ts`).
-- `POST /api/enrich` — one enrichment batch, body `{modelId,
-processedSoFar}`, `maxDuration` 300
+- `POST /api/enrich` — enqueue/claim and process one system-selected analysis
+  batch, body `{processedSoFar}`, `maxDuration` 300
   (`app/api/enrich/route.ts` → `lib/enrichment/engine.ts`).
-- `POST|DELETE /api/tags` — add/remove one personal tag
+- `POST /api/enrichment-requests` — request/coalesce a stronger analysis for
+  one owned Low or None song, body `{songId}`
+  (`app/api/enrichment-requests/route.ts` → `lib/enrichment/requests.ts`).
+- `POST|DELETE /api/tags` — explicit `add`, `remove`, `hide`, or `show`
+  operation for one personal/effective tag
   (`app/api/tags/route.ts` → `lib/tags.ts`).
 - `POST /api/playlists` — create a playlist from a curated proposal, body
   `{name, description, songIds, prompt}`
@@ -150,54 +154,56 @@ until done, riding out `safeToRetry` failures (`MAX_SAFE_RETRIES`) instead of
 pausing. `lib/spotify/import.ts` fetches up to 2 pages of `/me/tracks`
 through `lib/spotify/api.ts`, upserts metadata into `songs` (by
 `spotify_track_id`; enrichment columns never touched, so re-sync can't reset
-them) + `user_songs`. The `SongMetadata` alias pins that payload to the nine
+them) + `user_songs`. Each seen join row receives the server-issued sync
+timestamp in `imported_at`. Only after the complete import, older rows become
+removal candidates; `/me/library/contains` confirms each candidate is no
+longer saved before its private `user_songs` row is deleted. Partial imports
+never prune, and the confirmation keeps offset drift or overlapping tabs from
+deleting a current song. The `SongMetadata` alias pins that payload to the nine
 Spotify columns, and `EnrichmentWrite` (`lib/enrichment/engine.ts`) pins the
 other side — the two writers cannot reach each other's columns without a
 compile error. Artist-genre lookup degrades to `[]` on failure — the
 batch `/artists` endpoint 403s for this app (divergence: MVP-PLAN assumes it
 works).
 
-**Enrichment** — `app/library/page.tsx` loads enabled `llm_models`
-(`lib/ai/models.ts`, filtered by `lib/ai/providers.ts`) into
-`components/library-enrichment-panel.tsx`; the panel loops `POST /api/enrich`
-with the chosen model's row id. `lib/enrichment/engine.ts` selects ~20 songs,
-newest-liked first (env caps `ENRICHMENT_BATCH_SIZE` /
-`ENRICHMENT_MAX_SONGS_PER_RUN`): `pending` rows first, then — only if the batch
-isn't full — _improvable_ ones, meaning None/Low rows
-(`IMPROVABLE_SONGS_FILTER` in `lib/enrichment/accuracy.ts`) whose
-`enrichment_rank` is strictly below the selected model's. Medium and High are
-finished; same-or-weaker model refuses. That rank gate is half of what makes the
-run terminate: every write raises the row to the model's rank, so a song is
-picked at most once per run.
+**Enrichment** — `components/library-enrichment-panel.tsx` loops
+`POST /api/enrich` with only `processedSoFar`; the browser supplies no model,
+recipe, or rank authority. `lib/enrichment/engine.ts` asks Postgres to create
+or coalesce eligible jobs, then lease one same-recipe batch for songs in the
+caller's library (env caps `ENRICHMENT_BATCH_SIZE` /
+`ENRICHMENT_MAX_SONGS_PER_RUN`). The server generates the lease token before
+the claim RPC; replaying a lost HTTP response with that same token returns the
+already-leased batch instead of reserving another. The server-selected recipe
+resolves through `lib/ai/providers.ts`, and one AI SDK v7 `generateText` +
+`Output.object` call produces candidates.
 
-The other half covers songs the model **omits** from its response. Those get no
-write at all, so rank can't retire them; instead `recordOmissions` counts each
-one in `songs.enrichment_attempts`, and at `MAX_ENRICHMENT_ATTEMPTS`
-(`lib/enrichment/rank.ts`) stamps `songs.enrichment_skipped_rank` with the
-model's rank and resets the counter. Both selector passes and the pending count
-carry `enrichment_skipped_rank < model rank`, so the song stops being sent until
-a strictly stronger model asks — and a fresh allowance starts when one does. Any
-successful write clears both columns. The bookkeeping is best-effort
-(`console.error`, never fails the batch), because the batch is already billed by
-the time it runs; the panel's `MAX_STALLED_BATCHES` guard stays as a client-side
-backstop. It then makes one structured-output call (AI SDK v7
-`generateText` + `Output.object`; divergence: MVP-PLAN says SDK 5 /
-`generateObject`). The vocabulary is **closed**: the prompt carries only
-`is_approved` `genres`/`moods` rows and output resolves through
-`matchApprovedVocabulary` (`lib/vocabulary.ts`) — snap onto an approved row
-or drop. Dropped names are counted in `unmatched_tags` (via the
-`log_unmatched_tags` RPC) for review; enrichment never inserts vocabulary
-rows. Writes `song_genres`/`song_moods` and the `songs` enrichment columns.
-Confidence < 0.4 (`lib/enrichment/schema.ts`) → `unknown`, no tags — the flip
-also deletes any links a crashed earlier attempt left on that song.
+Every claimed song produces an immutable attempt: recognized, unknown,
+omitted, or failed. `promote_song_enrichment_attempt` locks the attempt, job,
+and canonical song, re-evaluates the promotion matrix, and either atomically
+replaces the full canonical attributes/tag snapshot or rejects the candidate
+without touching it. Pending accepts a trustworthy result or honest unknown;
+None accepts a recognized result; Low accepts only Medium/High; Medium/High
+never enter normal re-analysis. Highest-attempted recipe rank advances even on
+rejection, which prevents duplicate billing. Jobs are unique per song/recipe,
+claims use expiring leases, stale lease tokens cannot commit, and omissions
+and provider failures back off before being retired after three tries for that
+recipe.
 
-**Personal tags** — `components/library-tag-editor.tsx` → `/api/tags` →
-`lib/tags.ts` on the RLS client: ownership check against `user_songs`,
-vocabulary upsert via `lib/vocabulary.ts` (`ensureVocabularyIds` — the open
-path; personal tags are not gated by `is_approved`), link rows in
-`user_genres`/`user_moods`. A personal tag also makes its song selectable in
-chat even when enrichment never recognized it (`library_selectable_songs`),
-though such a song carries no `ai_attributes` and so fails energy/era filters.
+The vocabulary remains **closed**: the prompt carries only `is_approved`
+`genres`/`moods`; `matchApprovedVocabulary` snaps or drops output, and
+`unmatched_tags` records dropped names. Confidence is rounded before the 0.4
+recognition cutoff. Library outcome counts and recheck states come from
+database RPCs so the panel, rows, and queue share one eligibility definition.
+
+**Personal tags and suppressions** —
+`components/library-tag-editor.tsx` → `/api/tags` → `lib/tags.ts` on the RLS
+client. Every operation proves `user_songs` ownership. Personal additions use
+the open `ensureVocabularyIds` path and private `user_genres`/`user_moods`;
+`hide`/`show` only add or remove private suppression rows for tags that are
+actually on the canonical song. Effective tags are canonical Medium/High AI tags
+minus that user's suppressions, union personal tags; a same-name personal tag
+wins. A personal tag can make an unrecognized song selectable, but absent AI
+attributes still cannot satisfy energy/era filters.
 
 **Chat / selection** — `components/chat-screen.tsx` (`useChat` +
 `DefaultChatTransport`) streams to `POST /api/chat`. The route fetches one
@@ -208,9 +214,12 @@ in the prompt are **complete, never sampled** — a truncated list is a silently
 unsearchable slice of the library. Then `streamText` with a `stepCountIs(8)`
 tool loop. `search_library` (`lib/chat/tools.ts`) resolves requested tags
 against that vocabulary (`resolveTags`, fuzzy-snapping via
-`snapToExistingName`), unions AI + user link tables per kind and intersects
-across kinds, intersects with the selectable index (recency), scans ≤1000,
-TS-post-filters by energy/era/exclude, and returns ≤80 candidates.
+`snapToExistingName`), resolves effective matching ids through
+`library_effective_tagged_songs`, intersects across kinds and with the
+selectable index (recency), scans ≤1000, TS-post-filters by
+energy/era/exclude, and returns ≤80 candidates. Low AI tags stay visible
+in Library but do not drive chat matching; personal tags remain effective at
+every analysis state.
 `propose_playlist` verifies ownership and returns the preview payload. The
 proposal renders ONLY in `components/playlist-preview-panel.tsx`, never as
 chat text (prompt- and renderer-enforced).
@@ -231,12 +240,12 @@ and reports `partial`; a DB write failure after Spotify success reports
 Load-bearing rules the code already satisfies. Each is enforced somewhere and
 would break quietly if undone — they are not open work.
 
-**The model id is re-validated server-side.** The client sends only an
-`llm_models` row uuid; `lib/ai/models.ts` resolves it against `enabled = true`
-rows and the `lib/ai/providers.ts` map before any billable call. Trusting a
-client-supplied model string is unbounded cost exposure. `providers.ts` stays
-server-only — importing it into a client component ships AI SDK code to the
-browser bundle; the panel receives plain `{ id, label }` rows.
+**The browser has no enrichment model authority.** `/api/enrich` accepts only
+progress bookkeeping and `/api/enrichment-requests` accepts only an owned song
+id. Database functions choose an enabled default/next recipe; the engine then
+resolves its provider/model snapshot through the server-only
+`lib/ai/providers.ts`. Accepting a client model, recipe, or rank would expose
+unbounded cost and shared-data authority.
 
 **`ensureVocabularyIds` is the only legal vocabulary write path.**
 `.upsert(..., { onConflict: 'name' })` _without_ `ignoreDuplicates` compiles to
@@ -260,13 +269,13 @@ the approved lists would disappear. It also needs a per-request dynamic schema
 built with an `as` cast the TS rules discourage. Deliberate trade; flip only
 with eyes open.
 
-**The two `songs` writers are pinned by type, not by the table.**
-`SongMetadata` (`lib/spotify/import.ts`) and `EnrichmentWrite`
-(`lib/enrichment/engine.ts`) make it a compile error for either writer to touch
-the other's columns. Postgres cannot express this — there are no column-level
-grants and both writers use the service role — so a new call site doing
-`admin.from('songs').upsert({...})` directly still type-checks. Route any third
-writer through an alias rather than widening one.
+**Canonical enrichment writes only happen in atomic promotion.**
+`SongMetadata` (`lib/spotify/import.ts`) pins import upserts to Spotify columns.
+The engine never writes canonical enrichment tables directly: it records an
+attempt and invokes `promote_song_enrichment_attempt`, which updates the song,
+AI genres, AI moods, job, and decision in one transaction. A new service-role
+write to those canonical columns or link tables would bypass downgrade and
+lease protection.
 
 **gpt-5 models reject non-default `temperature`,** and a small
 `maxOutputTokens` starves reasoning tokens (they count against the cap),
@@ -300,12 +309,12 @@ During an outage, navigations fail `getUser()` fast and fall back to the
 If a proxy-level hard auth gate is ever added, it needs the retryable-vs-real
 distinction that `/api/*` gets from `requireUser`.
 
-**`llm_models` row content is operational data.** The initial catalog was
-seeded once (`supabase/migrations/20260722211849_add_llm_models.sql`); models,
-the default flag, ordering and `enrichment_rank` are edited in Supabase Studio
-thereafter. Do not add further seed migrations — they would fight Studio edits
-and resurrect deleted models. An empty or fully-unmapped catalog is the designed
-"enrichment unavailable" panel state, not an error.
+**Model and recipe rows are operational data.** The initial model catalog and
+legacy recipe snapshots were seeded once. Models and versioned recipes are
+owner-curated in Supabase Studio thereafter; prompt, vocabulary, or identity
+changes create a new recipe instead of mutating old attempt identity. Exactly
+one enabled recipe is the default for pending work. Do not add recurring seed
+migrations that fight Studio edits or resurrect deleted rows.
 
 ## Where does new code go
 

@@ -16,7 +16,7 @@ const [url, anonKey, serviceKey] = requireEnv([
 const service = createClient(url, serviceKey)
 const anon = createClient(url, anonKey)
 
-// Mirrored from lib/enrichment/accuracy.ts — this script is .mjs and cannot
+// Mirrored from lib/enrichment/confidence.ts — this script is .mjs and cannot
 // import TS. Same convention as CONFIDENCE_THRESHOLD.
 const LOW_MAX_CONFIDENCE = 0.5
 const MEDIUM_MAX_CONFIDENCE = 0.75
@@ -301,9 +301,8 @@ for (const status of ['pending', 'enriched', 'unknown']) {
   )
 }
 
-// Accuracy band distribution (lib/enrichment/accuracy.ts). Pending and None
-// come from the status; only enriched rows are scored. A null confidence on an
-// enriched row counts as Low, matching getAccuracyBand.
+// Confidence distribution (lib/enrichment/confidence.ts). Pending and None
+// come from status; only enriched rows are split by confidence.
 {
   const enriched = () =>
     service
@@ -333,7 +332,7 @@ for (const status of ['pending', 'enriched', 'unknown']) {
     headCount(enriched().gt('ai_confidence', MEDIUM_MAX_CONFIDENCE)),
   ])
   console.log(
-    `INFO  accuracy bands: pending=${pending.count} none=${none.count} ` +
+    `INFO  confidence bands: pending=${pending.count} none=${none.count} ` +
       `low=${lowScored.count + lowNull.count} medium=${medium.count} high=${high.count}`,
   )
 }

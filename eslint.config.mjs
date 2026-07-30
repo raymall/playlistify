@@ -74,6 +74,10 @@ const eslintConfig = defineConfig([
         'error',
         { fixStyle: 'inline-type-imports' },
       ],
+      // Repository rules prefer object-shape `type` aliases. The inherited
+      // stylistic preset prefers interfaces, so disable that contradictory
+      // preference and let the repository rule govern new code.
+      '@typescript-eslint/consistent-type-definitions': 'off',
       '@typescript-eslint/naming-convention': [
         'error',
         {
@@ -145,6 +149,7 @@ const eslintConfig = defineConfig([
       'app/auth/callback/route.ts',
       'components/account-menu.tsx',
       'lib/enrichment/engine.ts',
+      'lib/enrichment/requests.ts',
       'lib/spotify/import.ts',
       'lib/spotify/token.ts',
     ],
