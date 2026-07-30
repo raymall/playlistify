@@ -161,6 +161,15 @@ if (
         .select('song_id', { count: 'exact', head: true })
         .eq('user_id', tokenRow.data.user_id),
     )
+    hard(
+      'imported user rows do not exceed Spotify total',
+      userCount.error === null &&
+        typeof spotifyTotal === 'number' &&
+        userCount.count <= spotifyTotal,
+      userCount.error
+        ? `err(${userCount.error.message})`
+        : `spotify=${spotifyTotal} imported=${userCount.count}`,
+    )
     console.log(
       `INFO  spotify total=${spotifyTotal} vs user_songs=${userCount.count} (diff includes local files)`,
     )

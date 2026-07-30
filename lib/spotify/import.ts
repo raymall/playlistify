@@ -1,6 +1,7 @@
 import {
   fetchArtistGenres,
   fetchLikedTracksPage,
+  fetchSavedTrackStates,
   LIKED_TRACKS_PAGE_SIZE,
   type SavedTrackItem,
 } from '@/lib/spotify/api'
@@ -18,17 +19,43 @@ export type ImportBatchResponse =
       nextOffset: number
       total: number
       importedCount: number
+      syncStartedAt: string
     }
-  | { status: 'done'; total: number; importedCount: number }
+  | {
+      status: 'done'
+      total: number
+      importedCount: number
+      removedCount: number
+    }
   | { status: 'rate_limited'; retryAfterSeconds: number }
   | { status: 'reconnect_required' }
-  | { status: 'error'; message: string }
+  | { status: 'error'; message: string; safeToRetry?: boolean }
+
+type ImportErrorResponse = Extract<ImportBatchResponse, { status: 'error' }>
+
+const TRANSIENT_FETCH_FAILURE_PATTERN =
+  /fetch failed|network request failed|connect timeout|socket disconnected/i
+
+export const isTransientImportFailure = (message: string) =>
+  TRANSIENT_FETCH_FAILURE_PATTERN.test(message)
+
+const importFailure = (message: string): ImportErrorResponse =>
+  isTransientImportFailure(message)
+    ? {
+        status: 'error',
+        message: 'The import service connection was interrupted.',
+        safeToRetry: true,
+      }
+    : { status: 'error', message }
 
 /**
  * Pages fetched per invocation. Two pages (100 tracks) keeps each call well
  * inside serverless limits (~1.5–2.5s) while minimising round-trips.
  */
 const PAGES_PER_BATCH = 2
+
+const STALE_LIBRARY_PAGE_SIZE = 1000
+const DELETE_CHUNK_SIZE = 100
 
 /**
  * The nine Spotify-sourced metadata columns every song row always sets — the
@@ -108,21 +135,97 @@ const mapSavedTrack = (item: SavedTrackItem): MappedTrack | null => {
   return { row, artistIds, likedAt: item.added_at }
 }
 
+type ReconcileResult =
+  | { status: 'ok'; removedCount: number }
+  | Extract<
+      ImportBatchResponse,
+      { status: 'error' | 'rate_limited' | 'reconnect_required' }
+    >
+
+/**
+ * Remove only rows that this completed import did not see and Spotify confirms
+ * are no longer saved. The confirmation protects against offset drift and
+ * overlapping tabs; a partial import never calls this function.
+ */
+const reconcileRemovedSongs = async (
+  userId: string,
+  accessToken: string,
+  syncStartedAt: string,
+): Promise<ReconcileResult> => {
+  const admin = createAdminClient()
+  const candidates: { songId: string; spotifyTrackId: string }[] = []
+
+  for (let from = 0; ; from += STALE_LIBRARY_PAGE_SIZE) {
+    const result = await admin
+      .from('user_songs')
+      .select('song_id, songs!inner(spotify_track_id)')
+      .eq('user_id', userId)
+      .lt('imported_at', syncStartedAt)
+      .order('song_id', { ascending: true })
+      .range(from, from + STALE_LIBRARY_PAGE_SIZE - 1)
+    if (result.error) return importFailure(result.error.message)
+    for (const row of result.data) {
+      candidates.push({
+        songId: row.song_id,
+        spotifyTrackId: row.songs.spotify_track_id,
+      })
+    }
+    if (result.data.length < STALE_LIBRARY_PAGE_SIZE) break
+  }
+
+  if (candidates.length === 0) return { status: 'ok', removedCount: 0 }
+
+  const statesResult = await fetchSavedTrackStates(
+    accessToken,
+    candidates.map((candidate) => candidate.spotifyTrackId),
+  )
+  if (statesResult.status === 'auth_failed') {
+    return { status: 'reconnect_required' }
+  }
+  if (statesResult.status !== 'ok') return statesResult
+
+  const songIdsToRemove = candidates
+    .filter(
+      (candidate) => statesResult.data.get(candidate.spotifyTrackId) === false,
+    )
+    .map((candidate) => candidate.songId)
+
+  let removedCount = 0
+  for (
+    let index = 0;
+    index < songIdsToRemove.length;
+    index += DELETE_CHUNK_SIZE
+  ) {
+    const result = await admin
+      .from('user_songs')
+      .delete()
+      .eq('user_id', userId)
+      .in('song_id', songIdsToRemove.slice(index, index + DELETE_CHUNK_SIZE))
+      .select('song_id')
+    if (result.error) return importFailure(result.error.message)
+    removedCount += result.data.length
+  }
+
+  return { status: 'ok', removedCount }
+}
+
 /**
  * Import one batch (up to two pages) of the user's Liked Songs starting at
- * `offset`. Stateless per call — resumable by construction. All writes go
- * through the service-role client (`songs` is SELECT-only under RLS).
+ * `offset`. The server-issued sync timestamp makes it resumable without a
+ * database run record. All writes go through the service-role client (`songs`
+ * is SELECT-only under RLS).
  */
 export const importLikedSongsBatch = async (
   userId: string,
   offset: number,
+  syncStartedAt: string,
 ): Promise<ImportBatchResponse> => {
   const tokenResult = await getValidSpotifyToken(userId)
   if (tokenResult.status === 'reconnect_required') {
     return { status: 'reconnect_required' }
   }
   if (tokenResult.status === 'error') {
-    return { status: 'error', message: tokenResult.message }
+    return importFailure(tokenResult.message)
   }
   const { accessToken } = tokenResult
 
@@ -140,7 +243,7 @@ export const importLikedSongsBatch = async (
       return { status: 'reconnect_required' }
     }
     if (pageResult.status === 'error') {
-      return { status: 'error', message: pageResult.message }
+      return importFailure(pageResult.message)
     }
     if (pageResult.status === 'rate_limited') {
       // The first page must surface the rate limit so the client waits. A later
@@ -177,9 +280,28 @@ export const importLikedSongsBatch = async (
 
   // Nothing to write (empty library, or an all-local batch): still advance.
   if (mappedTracks.length === 0) {
-    return isDone
-      ? { status: 'done', total, importedCount: 0 }
-      : { status: 'progress', nextOffset, total, importedCount: 0 }
+    if (!isDone) {
+      return {
+        status: 'progress',
+        nextOffset,
+        total,
+        importedCount: 0,
+        syncStartedAt,
+      }
+    }
+    const reconciliation = await reconcileRemovedSongs(
+      userId,
+      accessToken,
+      syncStartedAt,
+    )
+    return reconciliation.status === 'ok'
+      ? {
+          status: 'done',
+          total,
+          importedCount: 0,
+          removedCount: reconciliation.removedCount,
+        }
+      : reconciliation
   }
 
   const admin = createAdminClient()
@@ -192,8 +314,7 @@ export const importLikedSongsBatch = async (
     .select('spotify_track_id')
     .in('spotify_track_id', trackIds)
     .not('spotify_genres', 'is', null)
-  if (existing.error)
-    return { status: 'error', message: existing.error.message }
+  if (existing.error) return importFailure(existing.error.message)
 
   const trackIdsWithGenres = new Set(
     existing.data.map((row) => row.spotify_track_id),
@@ -260,7 +381,7 @@ export const importLikedSongsBatch = async (
       .from('songs')
       .upsert(payload, { onConflict: 'spotify_track_id' })
       .select('id, spotify_track_id')
-    if (result.error) return { status: 'error', message: result.error.message }
+    if (result.error) return importFailure(result.error.message)
     for (const songRow of result.data) {
       songIdByTrackId.set(songRow.spotify_track_id, songRow.id)
     }
@@ -279,8 +400,9 @@ export const importLikedSongsBatch = async (
   const hasGenresError = await upsertSongs(hasGenres.map((track) => track.row))
   if (hasGenresError !== null) return hasGenresError
 
-  // `liked_at` self-heals an unlike/re-like; `imported_at` is omitted so it
-  // defaults on insert and stays put on update.
+  // `liked_at` self-heals an unlike/re-like. `imported_at` is the current
+  // sync's server-issued marker, used only after a complete run to find rows
+  // Spotify may have removed.
   const userSongsPayload: TablesInsert<'user_songs'>[] = []
   for (const track of mappedTracks) {
     const songId = songIdByTrackId.get(track.row.spotify_track_id)
@@ -289,6 +411,7 @@ export const importLikedSongsBatch = async (
       user_id: userId,
       song_id: songId,
       liked_at: track.likedAt,
+      imported_at: syncStartedAt,
     })
   }
 
@@ -296,11 +419,31 @@ export const importLikedSongsBatch = async (
     const result = await admin
       .from('user_songs')
       .upsert(userSongsPayload, { onConflict: 'user_id,song_id' })
-    if (result.error) return { status: 'error', message: result.error.message }
+    if (result.error) return importFailure(result.error.message)
   }
 
   const importedCount = userSongsPayload.length
-  return isDone
-    ? { status: 'done', total, importedCount }
-    : { status: 'progress', nextOffset, total, importedCount }
+  if (!isDone) {
+    return {
+      status: 'progress',
+      nextOffset,
+      total,
+      importedCount,
+      syncStartedAt,
+    }
+  }
+
+  const reconciliation = await reconcileRemovedSongs(
+    userId,
+    accessToken,
+    syncStartedAt,
+  )
+  return reconciliation.status === 'ok'
+    ? {
+        status: 'done',
+        total,
+        importedCount,
+        removedCount: reconciliation.removedCount,
+      }
+    : reconciliation
 }

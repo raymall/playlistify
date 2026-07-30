@@ -21,6 +21,7 @@ type ImportState =
       offset: number
       total: number | null
       imported: number
+      syncStartedAt: string | null
     }
   | {
       phase: 'waiting'
@@ -29,6 +30,7 @@ type ImportState =
       reason: 'rate_limit' | 'transient'
       total: number | null
       imported: number
+      syncStartedAt: string | null
     }
   | {
       phase: 'error'
@@ -36,19 +38,19 @@ type ImportState =
       message: string
       total: number | null
       imported: number
+      syncStartedAt: string | null
     }
   | { phase: 'reconnect' }
-  | { phase: 'done'; imported: number; total: number }
+  | { phase: 'done'; imported: number; removed: number; total: number }
 
 /** router.refresh() cadence so the table fills in live behind the panel. */
 const REFRESH_EVERY_N_BATCHES = 5
 
 /**
- * Failures the server marks `safeToRetry` happened before the batch wrote
- * anything — most often the Supabase token-rotation blip, where getUser()
- * momentarily reports null on a perfectly live session. A batch is idempotent
- * by offset, so re-POSTing the same offset costs nothing but a round trip.
- * Ten attempts at the delays below rides out roughly two minutes.
+ * Failures the server marks `safeToRetry` can be repeated at the same offset
+ * because every import write is idempotent. This covers auth blips and
+ * exhausted transport retries even when the server lost the response after a
+ * write landed. Ten attempts at the delays below rides out roughly two minutes.
  */
 const MAX_SAFE_RETRIES = 10
 
@@ -64,16 +66,25 @@ const parseResponse = (value: unknown): ImportBatchResponse | null => {
     const nextOffset = readNumber(value.nextOffset)
     const total = readNumber(value.total)
     const importedCount = readNumber(value.importedCount)
-    if (nextOffset === null || total === null || importedCount === null) {
+    const syncStartedAt = readString(value.syncStartedAt)
+    if (
+      nextOffset === null ||
+      total === null ||
+      importedCount === null ||
+      syncStartedAt === null
+    ) {
       return null
     }
-    return { status, nextOffset, total, importedCount }
+    return { status, nextOffset, total, importedCount, syncStartedAt }
   }
   if (status === 'done') {
     const total = readNumber(value.total)
     const importedCount = readNumber(value.importedCount)
-    if (total === null || importedCount === null) return null
-    return { status, total, importedCount }
+    const removedCount = readNumber(value.removedCount)
+    if (total === null || importedCount === null || removedCount === null) {
+      return null
+    }
+    return { status, total, importedCount, removedCount }
   }
   if (status === 'rate_limited') {
     const retryAfterSeconds = readNumber(value.retryAfterSeconds)
@@ -85,6 +96,7 @@ const parseResponse = (value: unknown): ImportBatchResponse | null => {
     return {
       status,
       message: readString(value.message) ?? 'Something went wrong.',
+      safeToRetry: value.safeToRetry === true,
     }
   }
   return null
@@ -109,6 +121,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
     startOffset: number,
     startImported: number,
     startTotal: number | null,
+    startSyncStartedAt: string | null,
   ) => {
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -123,6 +136,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
     let offset = startOffset
     let imported = startImported
     let total = startTotal
+    let syncStartedAt = startSyncStartedAt
     let batchesSinceRefresh = 0
     let lastDecile = -1
     let hasAnnouncedWaiting = false
@@ -137,6 +151,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         offset,
         total,
         imported,
+        syncStartedAt,
       })
 
       let response: Response
@@ -144,7 +159,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         response = await fetch('/api/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ offset }),
+          body: JSON.stringify({ offset, syncStartedAt }),
           signal,
         })
       } catch {
@@ -155,6 +170,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
           message: 'Network error — check your connection and retry.',
           total,
           imported,
+          syncStartedAt,
         })
         setAnnouncement('Import paused by a network error.')
         return
@@ -177,6 +193,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
           message: 'The server returned an unexpected response.',
           total,
           imported,
+          syncStartedAt,
         })
         setAnnouncement('Import paused by an error.')
         return
@@ -188,10 +205,9 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         return
       }
       if (parsed.status === 'error') {
-        // Billing-free, pre-write failures ride it out rather than dropping the
-        // user into a manual Retry — an auth blip is not an import problem.
-        const isSafeToRetry = isRecord(payload) && payload.safeToRetry === true
-        if (isSafeToRetry && safeRetries < MAX_SAFE_RETRIES) {
+        // Idempotent transport failures ride it out rather than dropping the
+        // user into a manual Retry — a connection blip is not an import problem.
+        if (parsed.safeToRetry === true && safeRetries < MAX_SAFE_RETRIES) {
           safeRetries += 1
           if (!hasAnnouncedRetrying) {
             hasAnnouncedRetrying = true
@@ -208,6 +224,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
               reason: 'transient',
               total,
               imported,
+              syncStartedAt,
             })
             await wait(1000, signal)
             secondsLeft -= 1
@@ -220,6 +237,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
           message: parsed.message,
           total,
           imported,
+          syncStartedAt,
         })
         setAnnouncement('Import paused by an error.')
         return
@@ -240,6 +258,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
             reason: 'rate_limit',
             total,
             imported,
+            syncStartedAt,
           })
           await wait(1000, signal)
           secondsLeft -= 1
@@ -254,17 +273,29 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
       total = parsed.total
 
       if (parsed.status === 'done') {
-        setState({ phase: 'done', imported, total })
+        setState({
+          phase: 'done',
+          imported,
+          removed: parsed.removedCount,
+          total,
+        })
+        const removedSummary =
+          parsed.removedCount === 0
+            ? ''
+            : ` Removed ${parsed.removedCount.toLocaleString()} no longer liked ${
+                parsed.removedCount === 1 ? 'song' : 'songs'
+              }.`
         setAnnouncement(
           total === 0
-            ? 'No Liked Songs found.'
-            : `Import complete. ${imported.toLocaleString()} songs imported.`,
+            ? `No Liked Songs found.${removedSummary}`
+            : `Import complete. ${imported.toLocaleString()} songs imported.${removedSummary}`,
         )
         router.refresh()
         return
       }
 
       offset = parsed.nextOffset
+      syncStartedAt = parsed.syncStartedAt
       if (total > 0) {
         const decile = Math.min(
           Math.floor((Math.min(offset, total) / total) * 10),
@@ -285,9 +316,14 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
 
   const handleStart = () => {
     if (state.phase === 'error') {
-      void runImport(state.offset, state.imported, state.total)
+      void runImport(
+        state.offset,
+        state.imported,
+        state.total,
+        state.syncStartedAt,
+      )
     } else {
-      void runImport(0, 0, null)
+      void runImport(0, 0, null, null)
     }
   }
 
@@ -359,6 +395,10 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
           {state.total === 0
             ? 'No Liked Songs found in your Spotify library.'
             : `Imported ${state.imported.toLocaleString()} songs from your Spotify library.`}
+          {state.removed > 0 &&
+            ` Removed ${state.removed.toLocaleString()} no longer liked ${
+              state.removed === 1 ? 'song' : 'songs'
+            }.`}
         </p>
       )}
 

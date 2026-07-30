@@ -12,6 +12,9 @@ export const LIKED_TRACKS_PAGE_SIZE = 50
 /** Max ids the Get Several Artists endpoint accepts per call. */
 const ARTIST_CHUNK_SIZE = 50
 
+/** Max URIs the Check User's Saved Items endpoint accepts per call. */
+const LIBRARY_CONTAINS_CHUNK_SIZE = 40
+
 const RETRY_AFTER_FALLBACK_SECONDS = 5
 const RETRY_AFTER_MIN_SECONDS = 1
 const RETRY_AFTER_MAX_SECONDS = 3600
@@ -69,6 +72,14 @@ const readBoolean = (value: unknown): boolean | null =>
 
 const readArray = (value: unknown): unknown[] | null =>
   Array.isArray(value) ? value : null
+
+const readBooleanArray = (value: unknown): boolean[] | null => {
+  const raw = readArray(value)
+  if (raw === null || raw.some((entry) => typeof entry !== 'boolean')) {
+    return null
+  }
+  return raw.map((entry) => entry === true)
+}
 
 const readStringArray = (value: unknown): string[] => {
   const raw = readArray(value)
@@ -304,6 +315,43 @@ export const fetchLikedTracksPage = async (
     return { status: 'error', message: 'Unexpected liked tracks payload' }
   }
   return { status: 'ok', data: page }
+}
+
+/**
+ * Confirm whether track ids are still in the current user's Spotify library.
+ * The generalized `/me/library/contains` endpoint replaced the retired
+ * track-specific endpoint and accepts at most 40 URIs per request.
+ */
+export const fetchSavedTrackStates = async (
+  accessToken: string,
+  trackIds: string[],
+): Promise<SpotifyApiResult<Map<string, boolean>>> => {
+  const states = new Map<string, boolean>()
+  for (
+    let index = 0;
+    index < trackIds.length;
+    index += LIBRARY_CONTAINS_CHUNK_SIZE
+  ) {
+    const chunk = trackIds.slice(index, index + LIBRARY_CONTAINS_CHUNK_SIZE)
+    const uris = chunk.map((trackId) => `spotify:track:${trackId}`).join(',')
+    const query = new URLSearchParams({ uris })
+    const result = await spotifyGet(
+      accessToken,
+      `${SPOTIFY_API_BASE}/me/library/contains?${query.toString()}`,
+    )
+    if (result.status !== 'ok') return result
+    const chunkStates = readBooleanArray(result.data)
+    if (chunkStates?.length !== chunk.length) {
+      return {
+        status: 'error',
+        message: 'Unexpected saved-items payload',
+      }
+    }
+    for (let chunkIndex = 0; chunkIndex < chunk.length; chunkIndex += 1) {
+      states.set(chunk[chunkIndex], chunkStates[chunkIndex])
+    }
+  }
+  return { status: 'ok', data: states }
 }
 
 /**
