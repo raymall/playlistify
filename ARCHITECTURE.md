@@ -16,7 +16,10 @@ the same commit (rule in `AGENTS.md`).
 - `components/` — React components (kebab-case, one primary per file);
   `library-*.tsx` are the `/library` client panels; `chat-screen.tsx`
   (chat state owner), `chat-conversation.tsx` (messages + composer), and
-  `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI.
+  `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI;
+  `playlist-status-panel.tsx`, `playlist-actions.tsx`, and
+  `playlist-tag-chips.tsx` provide the narrow client/server islands on the
+  managed `/playlists` cards.
 - `components/ui/` — shadcn/ui primitives, built on `@base-ui/react` (not
   Radix), including the `dialog` and destructive-confirmation `alert-dialog`.
   Touch only to restyle a primitive; add new ones via the shadcn CLI.
@@ -117,8 +120,11 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   panel (rename, edit, drop tracks, create). Server-rendered empty states for
   no-library / not-yet-enriched (`app/chat/page.tsx` + `components/chat-*`,
   `components/playlist-preview-panel.tsx`).
-- `/playlists` — created-playlist history: name, track count, date, prompt,
-  "Open in Spotify" link (`app/playlists/page.tsx`). Read-only, minimal.
+- `/playlists` — created-playlist management: cached live Spotify status,
+  title/description edit, delete/unfollow, recreate-from-stored-tracks,
+  effective genre/mood rollups, and a Start Playlist link
+  (`app/playlists/page.tsx`, `app/playlists/loading.tsx` +
+  `components/playlist-{status-panel,actions,tag-chips}.tsx`).
 - Chrome: `app/layout.tsx` — fonts, `ThemeProvider`, `SiteHeader` (nav,
   theme toggle, account menu with sign-out). `AccountMenu` renders on every
   page, so it reads the identity the proxy already resolved off `x-auth-state`
@@ -273,7 +279,10 @@ unfollow when reachable but always removes the local row even if Spotify
 fails. Recreate reads stored `playlist_songs` order, skips songs no longer in
 the user's library, rebuilds through `build.ts`, and replaces the stored
 Spotify id/status. `playlist_tag_summary()` returns every playlist's effective
-AI and personal genres/moods in one RLS-scoped call.
+AI and personal genres/moods in one RLS-scoped call. The server page fetches
+the cards and rollup in parallel; the status panel syncs on mount/manual
+refresh, while each action cluster owns only its dialogs and mutations before
+refreshing the server-rendered card.
 
 ## Constraints and invariants
 
