@@ -69,7 +69,7 @@ export const ChatScreen = () => {
   const isBusy = status === 'streaming' || status === 'submitted'
 
   return (
-    <div className='mt-8 grid gap-6 lg:h-[70vh] lg:grid-cols-2'>
+    <div className='mt-8 grid gap-6 lg:h-[70dvh] lg:grid-cols-2'>
       <div className='flex min-h-0 flex-col rounded-lg border p-4'>
         <ChatConversation
           error={error}
@@ -81,7 +81,7 @@ export const ChatScreen = () => {
         />
       </div>
 
-      <div className='min-h-0 lg:overflow-y-auto'>
+      <div className='h-[70dvh] min-h-0 lg:h-auto'>
         {latestProposal !== null ? (
           <PlaylistPreviewPanel
             key={latestProposal.toolCallId}

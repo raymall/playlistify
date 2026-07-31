@@ -185,115 +185,127 @@ export const PlaylistPreviewPanel = ({
   return (
     <section
       aria-label='Playlist preview'
-      className='flex flex-col gap-4 rounded-lg border p-4'
+      className='flex h-full min-h-0 flex-col rounded-lg border'
     >
-      <div className='flex flex-col gap-3'>
-        <div className='flex flex-col gap-1.5'>
-          <label className='text-sm font-medium' htmlFor='playlist-name'>
-            Playlist name
-          </label>
-          <Input
-            id='playlist-name'
-            maxLength={NAME_MAX}
-            value={name}
-            onChange={(event) => {
-              setName(event.target.value)
-            }}
-          />
+      <div className='flex shrink-0 flex-col gap-4 border-b p-4'>
+        <div className='flex flex-col gap-3'>
+          <div className='flex flex-col gap-1.5'>
+            <label className='text-sm font-medium' htmlFor='playlist-name'>
+              Playlist name
+            </label>
+            <Input
+              id='playlist-name'
+              maxLength={NAME_MAX}
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value)
+              }}
+            />
+          </div>
+          <div className='flex flex-col gap-1.5'>
+            <label
+              className='text-sm font-medium'
+              htmlFor='playlist-description'
+            >
+              Description
+            </label>
+            <Textarea
+              id='playlist-description'
+              maxLength={DESCRIPTION_MAX}
+              rows={2}
+              value={description}
+              onChange={(event) => {
+                setDescription(event.target.value)
+              }}
+            />
+          </div>
         </div>
-        <div className='flex flex-col gap-1.5'>
-          <label className='text-sm font-medium' htmlFor='playlist-description'>
-            Description
-          </label>
-          <Textarea
-            id='playlist-description'
-            maxLength={DESCRIPTION_MAX}
-            rows={2}
-            value={description}
-            onChange={(event) => {
-              setDescription(event.target.value)
-            }}
-          />
+
+        <div className='flex items-center justify-between gap-2'>
+          <p className='text-sm text-muted-foreground tabular-nums'>
+            {remainingTracks.length}{' '}
+            {remainingTracks.length === 1 ? 'track' : 'tracks'}
+          </p>
+          <Button
+            disabled={isBusy || isCreating}
+            size='sm'
+            variant='outline'
+            onClick={onRegenerate}
+          >
+            Regenerate
+          </Button>
         </div>
       </div>
 
-      <div className='flex items-center justify-between gap-2'>
-        <p className='text-sm text-muted-foreground tabular-nums'>
-          {remainingTracks.length}{' '}
-          {remainingTracks.length === 1 ? 'track' : 'tracks'}
-        </p>
-        <Button
-          disabled={isBusy || isCreating}
-          size='sm'
-          variant='outline'
-          onClick={onRegenerate}
-        >
-          Regenerate
-        </Button>
-      </div>
-
-      {remainingTracks.length > 0 ? (
-        <ul className='flex flex-col divide-y'>
-          {remainingTracks.map((track) => {
-            const artists =
-              track.artists.length > 0 ? track.artists.join(', ') : '—'
-            return (
-              <li
-                key={track.songId}
-                className='flex items-center gap-3 py-2 first:pt-0'
-              >
-                {track.albumArtUrl !== null ? (
-                  <Image
-                    alt=''
-                    className='size-10 shrink-0 rounded object-cover'
-                    height={40}
-                    src={track.albumArtUrl}
-                    width={40}
-                  />
-                ) : (
-                  <div
-                    aria-hidden='true'
-                    className='size-10 shrink-0 rounded bg-muted'
-                  />
-                )}
-                <div className='min-w-0 flex-1'>
-                  <p className='truncate text-sm font-medium text-foreground'>
-                    {track.title}
-                  </p>
-                  <p className='truncate text-xs text-muted-foreground'>
-                    {artists}
-                  </p>
-                  {track.reason.length > 0 && (
-                    <p className='truncate text-xs text-muted-foreground italic'>
-                      {track.reason}
-                    </p>
+      <div
+        aria-label='Playlist tracks'
+        className='min-h-0 flex-1 overflow-y-auto px-4 py-2'
+        role='region'
+        tabIndex={0}
+      >
+        {remainingTracks.length > 0 ? (
+          <ul className='flex flex-col divide-y'>
+            {remainingTracks.map((track) => {
+              const artists =
+                track.artists.length > 0 ? track.artists.join(', ') : '—'
+              return (
+                <li
+                  key={track.songId}
+                  className='flex items-center gap-3 py-2 first:pt-0'
+                >
+                  {track.albumArtUrl !== null ? (
+                    <Image
+                      alt=''
+                      className='size-10 shrink-0 rounded object-cover'
+                      height={40}
+                      src={track.albumArtUrl}
+                      width={40}
+                    />
+                  ) : (
+                    <div
+                      aria-hidden='true'
+                      className='size-10 shrink-0 rounded bg-muted'
+                    />
                   )}
-                </div>
-                {!isCreated && (
-                  <Button
-                    aria-label={`Remove ${track.title} from the playlist`}
-                    disabled={isCreating}
-                    size='sm'
-                    variant='ghost'
-                    onClick={() => {
-                      handleRemove(track.songId)
-                    }}
-                  >
-                    Remove
-                  </Button>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      ) : (
-        <p className='text-sm text-muted-foreground'>
-          All tracks removed. Regenerate for a new set, or keep at least one to
-          create the playlist.
-        </p>
-      )}
+                  <div className='min-w-0 flex-1'>
+                    <p className='truncate text-sm font-medium text-foreground'>
+                      {track.title}
+                    </p>
+                    <p className='truncate text-xs text-muted-foreground'>
+                      {artists}
+                    </p>
+                    {track.reason.length > 0 && (
+                      <p className='truncate text-xs text-muted-foreground italic'>
+                        {track.reason}
+                      </p>
+                    )}
+                  </div>
+                  {!isCreated && (
+                    <Button
+                      aria-label={`Remove ${track.title} from the playlist`}
+                      disabled={isCreating}
+                      size='sm'
+                      variant='ghost'
+                      onClick={() => {
+                        handleRemove(track.songId)
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        ) : (
+          <p className='text-sm text-muted-foreground'>
+            All tracks removed. Regenerate for a new set, or keep at least one
+            to create the playlist.
+          </p>
+        )}
+      </div>
 
-      <div className='flex flex-col gap-2'>
+      <div className='flex shrink-0 flex-col gap-2 border-t p-4'>
         {createState.phase === 'reconnect' ? (
           <Button onClick={() => void signInWithSpotify()}>
             Reconnect Spotify
@@ -363,7 +375,7 @@ export const PlaylistPreviewPanel = ({
         )}
       </div>
 
-      <div className='sr-only' role='status'>
+      <div className='sr-only shrink-0' role='status'>
         {announcement}
       </div>
     </section>
