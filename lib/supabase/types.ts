@@ -221,7 +221,9 @@ export type Database = {
           id: string
           name: string | null
           prompt: string | null
+          spotify_checked_at: string | null
           spotify_playlist_id: string | null
+          spotify_status: string
           user_id: string
         }
         Insert: {
@@ -230,7 +232,9 @@ export type Database = {
           id?: string
           name?: string | null
           prompt?: string | null
+          spotify_checked_at?: string | null
           spotify_playlist_id?: string | null
+          spotify_status?: string
           user_id: string
         }
         Update: {
@@ -239,7 +243,9 @@ export type Database = {
           id?: string
           name?: string | null
           prompt?: string | null
+          spotify_checked_at?: string | null
           spotify_playlist_id?: string | null
+          spotify_status?: string
           user_id?: string
         }
         Relationships: [
@@ -951,6 +957,15 @@ export type Database = {
       log_unmatched_tags: {
         Args: { p_kind: string; p_names: string[] }
         Returns: undefined
+      }
+      playlist_tag_summary: {
+        Args: never
+        Returns: {
+          kind: string
+          name: string
+          playlist_id: string
+          song_count: number
+        }[]
       }
       promote_song_enrichment_attempt: {
         Args: { p_attempt_id: string; p_job_id: string; p_lease_token: string }
