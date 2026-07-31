@@ -35,7 +35,7 @@ the same commit (rule in `AGENTS.md`).
   `propose_playlist` bound to the RLS client and the library vocabulary),
   `prompt.ts` (`buildChatSystemPrompt`), `suggestions.ts` (server-only
   library-grounded prompt ideas), `use-prompt-suggestions.ts` (client-side
-  session cache + static fallback), and `contract.ts` (client-safe proposal +
+  session cache + loading state), and `contract.ts` (client-safe proposal +
   create-response parsers).
 - `lib/enrichment/` — `engine.ts` (enqueue/claim loop + structured-output
   call), `recipes.ts` (system recipe, queue, lease, counts, and recheck RPC

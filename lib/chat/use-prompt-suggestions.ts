@@ -4,13 +4,12 @@ import { useEffect, useState } from 'react'
 
 import { isRecord } from '@/lib/json'
 
-export const FALLBACK_PROMPTS = [
-  'Upbeat indie for a morning run',
-  'Mellow late-night jazz and soul',
-  'High-energy 2000s hip-hop, no explicit tracks',
-] as const
-
 const STORAGE_KEY = 'playlistify:prompt-suggestions:v1'
+
+type PromptSuggestionsState =
+  | { status: 'loading' }
+  | { status: 'ready'; suggestions: readonly string[] }
+  | { status: 'unavailable' }
 
 const readPromptSuggestions = (value: unknown): string[] | null => {
   if (!Array.isArray(value) || value.length !== 3) return null
@@ -39,15 +38,16 @@ const readResponseSuggestions = (value: unknown): string[] | null => {
   return readPromptSuggestions(value.suggestions)
 }
 
-export const usePromptSuggestions = (): readonly string[] => {
-  const [suggestions, setSuggestions] =
-    useState<readonly string[]>(FALLBACK_PROMPTS)
+export const usePromptSuggestions = (): PromptSuggestionsState => {
+  const [state, setState] = useState<PromptSuggestionsState>({
+    status: 'loading',
+  })
 
   useEffect(() => {
     const cached = readCachedSuggestions()
     if (cached !== null) {
       const timeoutId = window.setTimeout(() => {
-        setSuggestions(cached)
+        setState({ status: 'ready', suggestions: cached })
       }, 0)
       return () => {
         window.clearTimeout(timeoutId)
@@ -55,24 +55,41 @@ export const usePromptSuggestions = (): readonly string[] => {
     }
 
     const controller = new AbortController()
+    const markUnavailable = () => {
+      if (!controller.signal.aborted) {
+        setState({ status: 'unavailable' })
+      }
+    }
     const loadSuggestions = async () => {
       try {
         const response = await fetch('/api/prompt-suggestions', {
           signal: controller.signal,
         })
-        if (!response.ok) return
+        if (!response.ok) {
+          markUnavailable()
+          return
+        }
 
-        const suggestions = readResponseSuggestions(await response.json())
-        if (suggestions === null || controller.signal.aborted) return
+        const generatedSuggestions = readResponseSuggestions(
+          await response.json(),
+        )
+        if (generatedSuggestions === null) {
+          markUnavailable()
+          return
+        }
+        if (controller.signal.aborted) return
 
-        setSuggestions(suggestions)
+        setState({ status: 'ready', suggestions: generatedSuggestions })
         try {
-          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(suggestions))
+          sessionStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify(generatedSuggestions),
+          )
         } catch {
           // Storage can be unavailable; the generated suggestions still work.
         }
       } catch {
-        // Suggestions are optional; keep the static fallback silently.
+        markUnavailable()
       }
     }
 
@@ -85,5 +102,5 @@ export const usePromptSuggestions = (): readonly string[] => {
     }
   }, [])
 
-  return suggestions
+  return state
 }

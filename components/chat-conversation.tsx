@@ -10,6 +10,7 @@ import {
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { readSearchSummary } from '@/lib/chat/contract'
 import { usePromptSuggestions } from '@/lib/chat/use-prompt-suggestions'
@@ -137,8 +138,16 @@ type PromptSuggestionsProps = {
   onSend: (text: string) => void
 }
 
+const PROMPT_SKELETON_CLASSES = [
+  'h-8 w-64 max-w-full',
+  'h-8 w-72 max-w-full',
+  'h-8 w-80 max-w-full',
+] as const
+
 const PromptSuggestions = ({ status, onSend }: PromptSuggestionsProps) => {
-  const suggestions = usePromptSuggestions()
+  const suggestionState = usePromptSuggestions()
+
+  if (suggestionState.status === 'unavailable') return null
 
   return (
     <div className='flex flex-col gap-3'>
@@ -147,19 +156,34 @@ const PromptSuggestions = ({ status, onSend }: PromptSuggestionsProps) => {
         example:
       </p>
       <div className='flex flex-col items-start gap-2'>
-        {suggestions.map((prompt) => (
-          <Button
-            key={prompt}
-            disabled={status !== 'ready'}
-            size='sm'
-            variant='outline'
-            onClick={() => {
-              onSend(prompt)
-            }}
-          >
-            {prompt}
-          </Button>
-        ))}
+        {suggestionState.status === 'loading' ? (
+          <>
+            <span className='sr-only' role='status'>
+              Loading playlist suggestions…
+            </span>
+            {PROMPT_SKELETON_CLASSES.map((className) => (
+              <Skeleton
+                key={className}
+                aria-hidden='true'
+                className={className}
+              />
+            ))}
+          </>
+        ) : (
+          suggestionState.suggestions.map((prompt) => (
+            <Button
+              key={prompt}
+              disabled={status !== 'ready'}
+              size='sm'
+              variant='outline'
+              onClick={() => {
+                onSend(prompt)
+              }}
+            >
+              {prompt}
+            </Button>
+          ))
+        )}
       </div>
     </div>
   )
