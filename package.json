@@ -25,6 +25,7 @@
     "verify:re-enrichment": "node --env-file=.env.local --import tsx scripts/verify-re-enrichment.mts",
     "verify:genres": "node --env-file=.env.local --import tsx scripts/verify-genres.mts",
     "verify:chat-prompt": "node --env-file=.env.local --import tsx scripts/verify-chat-prompt.mts",
+    "verify:playlists": "node --env-file=.env.local --import tsx scripts/verify-playlists.mts",
     "reset:enrichment": "node --env-file=.env.local --import tsx scripts/reset-enrichment.mts",
     "verify:tokens": "node --env-file=.env.local scripts/check-tokens.mjs",
     "verify:refresh": "node --env-file=.env.local --import tsx scripts/exercise-refresh.mts"

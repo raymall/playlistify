@@ -47,6 +47,11 @@ the same commit (rule in `AGENTS.md`).
   (legacy reset-script rank constants).
 - `lib/spotify/` — `api.ts` (typed Web API client), `import.ts` (Liked Songs
   batch import), `token.ts` (Spotify access-token refresh).
+- `lib/playlists/` — playlist creation and post-creation management:
+  `tracks.ts` (ordered RLS-scoped Spotify-id resolution), `build.ts` (shared
+  create/chunk-add/empty-shell cleanup), `create.ts`, `sync.ts`, `update.ts`,
+  `delete.ts`, `recreate.ts`, `validation.ts`, and the client-safe response
+  parsers in `contract.ts`.
 - `lib/supabase/` — client factories + plumbing: `client.ts` (browser anon),
   `server.ts` (request-scoped RLS), `admin.ts` (service role — importing it is
   lint-restricted to an allowlist in `eslint.config.mjs`), `session.ts`
@@ -66,8 +71,10 @@ the same commit (rule in `AGENTS.md`).
   sleep (importable from server and client code).
 - `scripts/` — Node ops + verification scripts (`npm run verify:*`,
   `gen:types`, `reset:enrichment`); each file's header comment says what it
-  proves. `check-node-version.mjs` enforces Node 24 before dev and build;
-  shared env guard lives in `scripts/lib/env.mjs`.
+  proves. `verify-playlists.mts` live-checks Spotify playlist create, list,
+  add, details-update, and unfollow endpoints. `check-node-version.mjs`
+  enforces Node 24 before dev and build; shared env guard lives in
+  `scripts/lib/env.mjs`.
 - `supabase/migrations/` — schema source of truth. Core tables are `profiles`,
   `spotify_tokens`, `songs`, `genres`, `moods`, AI and personal tag links,
   `user_songs`, `playlists`, `playlist_songs`, `llm_models`, and
@@ -77,7 +84,9 @@ the same commit (rule in `AGENTS.md`).
   Service-role RPCs own job enqueue/claim/release, attempt recording, atomic
   promotion, recheck requests, and outcome counts. Authenticated
   security-invoker RPCs expose effective tag names, selectable songs, matching
-  song ids, and row-level recheck states. Column detail lives in
+  song ids, row-level recheck states, and the per-playlist effective-tag
+  summary. `playlists.spotify_status` and `spotify_checked_at` cache the latest
+  user-triggered Spotify reachability scan. Column detail lives in
   `MVP-PLAN.md` § Database Schema.
 - `proxy.ts` — runs on every request: session refresh + route protection.
 - Root: `MVP-PLAN.md` (product spec), `HOW-IT-WORKS.md` (plain-language
@@ -135,9 +144,17 @@ an auth service that merely blinked is a 503 the client may retry for free:
 - `POST|DELETE /api/tags` — explicit `add`, `remove`, `hide`, or `show`
   operation for one personal/effective tag
   (`app/api/tags/route.ts` → `lib/tags.ts`).
-- `POST /api/playlists` — create a playlist from a curated proposal, body
-  `{name, description, songIds, prompt}`
-  (`app/api/playlists/route.ts` → `lib/playlists/create.ts`).
+- `POST|PATCH|DELETE /api/playlists` — create from a curated proposal, update
+  stored + Spotify details, or unfollow/delete; bodies
+  `{name, description, songIds, prompt}`, `{playlistId, name, description}`,
+  and `{playlistId}` (`app/api/playlists/route.ts` → `lib/playlists/{create,
+update,delete}.ts`).
+- `POST /api/playlists/sync` — scan `/me/playlists` and cache reachability for
+  every stored playlist (`app/api/playlists/sync/route.ts` →
+  `lib/playlists/sync.ts`).
+- `POST /api/playlists/recreate` — rebuild a playlist from its stored ordered
+  songs, body `{playlistId}` (`app/api/playlists/recreate/route.ts` →
+  `lib/playlists/recreate.ts`).
 - `POST /api/chat` — streaming chat, body `{messages}` (UIMessage[]),
   `maxDuration` 300 (`app/api/chat/route.ts` → `lib/chat/*`).
 - `GET /api/prompt-suggestions` — three library-grounded empty-chat ideas from
@@ -238,14 +255,24 @@ chat text (prompt- and renderer-enforced).
 
 **Playlist creation** — the preview panel POSTs a curated proposal to
 `/api/playlists` → `lib/playlists/create.ts` (`createPlaylistForUser`, RLS
-client): resolves song ids → Spotify track ids scoped by RLS, refreshes the
-token (`lib/spotify/token.ts`), creates a private playlist via
-`POST /me/playlists` and adds tracks in chunks (`lib/spotify/api.ts`), then
+client): `tracks.ts` resolves song ids → Spotify track ids scoped by RLS,
+refreshes the token (`lib/spotify/token.ts`), then `build.ts` creates a private
+playlist via `POST /me/playlists` and adds tracks in chunks before `create.ts`
 persists `playlists` + `playlist_songs`.
 Failure policy: pre-Spotify failures create nothing (clean
 error/reconnect/rate-limited); an add-tracks failure keeps the Spotify playlist
 and reports `partial`; a DB write failure after Spotify success reports
 `created` with `persisted: false`. `/playlists` lists the persisted rows.
+
+**Playlist management** — the JSON handlers keep the browser thin and call
+RLS-scoped engines. Sync obtains one bounded `/me/playlists` id set and bulk
+writes `present`/`missing` status + check time. Edit writes locally first, then
+updates Spotify unless the playlist is known missing. Delete tries Spotify
+unfollow when reachable but always removes the local row even if Spotify
+fails. Recreate reads stored `playlist_songs` order, skips songs no longer in
+the user's library, rebuilds through `build.ts`, and replaces the stored
+Spotify id/status. `playlist_tag_summary()` returns every playlist's effective
+AI and personal genres/moods in one RLS-scoped call.
 
 ## Constraints and invariants
 
