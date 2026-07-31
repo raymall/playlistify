@@ -33,7 +33,9 @@ the same commit (rule in `AGENTS.md`).
   `library_tag_names` / `library_selectable_songs` RPCs, link-table +
   candidate fetches), `tools.ts` (`createChatTools`: `search_library` +
   `propose_playlist` bound to the RLS client and the library vocabulary),
-  `prompt.ts` (`buildChatSystemPrompt`), `contract.ts` (client-safe proposal +
+  `prompt.ts` (`buildChatSystemPrompt`), `suggestions.ts` (server-only
+  library-grounded prompt ideas), `use-prompt-suggestions.ts` (client-side
+  session cache + static fallback), and `contract.ts` (client-safe proposal +
   create-response parsers).
 - `lib/enrichment/` — `engine.ts` (enqueue/claim loop + structured-output
   call), `recipes.ts` (system recipe, queue, lease, counts, and recheck RPC
@@ -134,6 +136,9 @@ an auth service that merely blinked is a 503 the client may retry for free:
   (`app/api/playlists/route.ts` → `lib/playlists/create.ts`).
 - `POST /api/chat` — streaming chat, body `{messages}` (UIMessage[]),
   `maxDuration` 300 (`app/api/chat/route.ts` → `lib/chat/*`).
+- `GET /api/prompt-suggestions` — three library-grounded empty-chat ideas from
+  the configured chat model
+  (`app/api/prompt-suggestions/route.ts` → `lib/chat/suggestions.ts`).
 
 ## Core flows
 
@@ -211,8 +216,11 @@ attributes still cannot satisfy energy/era filters.
 prompt (`lib/chat/prompt.ts`) and to bound what `search_library` may resolve,
 so the assistant searches exactly the vocabulary it was shown. The tag lists
 in the prompt are **complete, never sampled** — a truncated list is a silently
-unsearchable slice of the library. Then `streamText` with a `stepCountIs(8)`
-tool loop. `search_library` (`lib/chat/tools.ts`) resolves requested tags
+unsearchable slice of the library. The empty conversation separately requests
+three ideas grounded in a random bounded sample of those real tags and caches
+them in `sessionStorage`, so they stay stable across reloads in one browser tab.
+Then `streamText` with a `stepCountIs(8)` tool loop. `search_library`
+(`lib/chat/tools.ts`) resolves requested tags
 against that vocabulary (`resolveTags`, fuzzy-snapping via
 `snapToExistingName`), resolves effective matching ids through
 `library_effective_tagged_songs`, intersects across kinds and with the

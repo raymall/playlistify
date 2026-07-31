@@ -12,6 +12,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { readSearchSummary } from '@/lib/chat/contract'
+import { usePromptSuggestions } from '@/lib/chat/use-prompt-suggestions'
 import { isRecord } from '@/lib/json'
 
 interface ChatConversationProps {
@@ -22,12 +23,6 @@ interface ChatConversationProps {
   onStop: () => void
   onRetry: () => void
 }
-
-const EXAMPLE_PROMPTS = [
-  'Upbeat indie for a morning run',
-  'Mellow late-night jazz and soul',
-  'High-energy 2000s hip-hop, no explicit tracks',
-]
 
 const describeSearchInput = (input: unknown): string => {
   if (!isRecord(input)) return ''
@@ -137,6 +132,39 @@ const deriveLiveAnnouncement = (
   return status === 'submitted' ? 'Working on your request…' : ''
 }
 
+type PromptSuggestionsProps = {
+  status: ChatStatus
+  onSend: (text: string) => void
+}
+
+const PromptSuggestions = ({ status, onSend }: PromptSuggestionsProps) => {
+  const suggestions = usePromptSuggestions()
+
+  return (
+    <div className='flex flex-col gap-3'>
+      <p className='text-sm text-muted-foreground'>
+        Describe the playlist you want and I’ll build it from your library. For
+        example:
+      </p>
+      <div className='flex flex-col items-start gap-2'>
+        {suggestions.map((prompt) => (
+          <Button
+            key={prompt}
+            disabled={status !== 'ready'}
+            size='sm'
+            variant='outline'
+            onClick={() => {
+              onSend(prompt)
+            }}
+          >
+            {prompt}
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export const ChatConversation = ({
   messages,
   status,
@@ -166,27 +194,7 @@ export const ChatConversation = ({
     <div className='flex h-full flex-col gap-4'>
       <div className='flex flex-1 flex-col gap-4 overflow-y-auto'>
         {messages.length === 0 ? (
-          <div className='flex flex-col gap-3'>
-            <p className='text-sm text-muted-foreground'>
-              Describe the playlist you want and I’ll build it from your
-              library. For example:
-            </p>
-            <div className='flex flex-col items-start gap-2'>
-              {EXAMPLE_PROMPTS.map((prompt) => (
-                <Button
-                  key={prompt}
-                  disabled={status !== 'ready'}
-                  size='sm'
-                  variant='outline'
-                  onClick={() => {
-                    onSend(prompt)
-                  }}
-                >
-                  {prompt}
-                </Button>
-              ))}
-            </div>
-          </div>
+          <PromptSuggestions status={status} onSend={onSend} />
         ) : (
           messages.map((message) => (
             <div
