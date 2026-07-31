@@ -18,7 +18,8 @@ the same commit (rule in `AGENTS.md`).
   (chat state owner), `chat-conversation.tsx` (messages + composer), and
   `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI.
 - `components/ui/` — shadcn/ui primitives, built on `@base-ui/react` (not
-  Radix). Touch only to restyle a primitive; add new ones via the shadcn CLI.
+  Radix), including the `dialog` and destructive-confirmation `alert-dialog`.
+  Touch only to restyle a primitive; add new ones via the shadcn CLI.
 - `lib/ai/` — `providers.ts` (server-only provider → AI SDK factory map;
   `resolveProviderModel` non-throwing + `resolveLanguageModel` throwing
   wrapper), `chat-model.ts` (resolves the chat model from the `CHAT_MODEL`
