@@ -15,6 +15,12 @@ const ARTIST_CHUNK_SIZE = 50
 /** Max URIs the Check User's Saved Items endpoint accepts per call. */
 const LIBRARY_CONTAINS_CHUNK_SIZE = 40
 
+/** Max page size the Current User's Playlists endpoint accepts. */
+const USER_PLAYLISTS_PAGE_SIZE = 50
+
+/** Bounded to Spotify's documented 10,000-playlist library ceiling. */
+const USER_PLAYLISTS_PAGE_CAP = 200
+
 const RETRY_AFTER_FALLBACK_SECONDS = 5
 const RETRY_AFTER_MIN_SECONDS = 1
 const RETRY_AFTER_MAX_SECONDS = 3600
@@ -205,6 +211,40 @@ const spotifyPost = async (
   return reduceResponse(response)
 }
 
+/**
+ * Send a status-only Spotify mutation. Successful empty bodies are never
+ * parsed; failures still share the standard auth/rate-limit/error reduction.
+ */
+export const spotifySend = async (
+  accessToken: string,
+  url: string,
+  method: 'DELETE' | 'PUT',
+  body?: unknown,
+): Promise<SpotifyApiResult<null>> => {
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: 'no-store',
+    })
+  } catch (error) {
+    return {
+      status: 'error',
+      message:
+        error instanceof Error ? error.message : 'Spotify request failed',
+    }
+  }
+
+  if (response.ok) return { status: 'ok', data: null }
+  const result = await reduceResponse(response)
+  return result.status === 'ok' ? { status: 'ok', data: null } : result
+}
+
 const parseImages = (value: unknown): SpotifyImage[] => {
   const raw = readArray(value)
   if (raw === null) return []
@@ -380,6 +420,45 @@ export const fetchArtistGenres = async (
   return { status: 'ok', data: genresByArtist }
 }
 
+/**
+ * Fetch every playlist currently in the user's Spotify library.
+ *
+ * This is the one playlist-management call that needs the
+ * `playlist-read-private` scope. It uses `GET /me/playlists`; unlike the
+ * retired create endpoint, the current create form is `POST /me/playlists`.
+ */
+export const fetchUserPlaylistIds = async (
+  accessToken: string,
+): Promise<SpotifyApiResult<Set<string>>> => {
+  const playlistIds = new Set<string>()
+  for (let pageIndex = 0; pageIndex < USER_PLAYLISTS_PAGE_CAP; pageIndex += 1) {
+    const offset = pageIndex * USER_PLAYLISTS_PAGE_SIZE
+    const url = `${SPOTIFY_API_BASE}/me/playlists?limit=${USER_PLAYLISTS_PAGE_SIZE}&offset=${offset}`
+    const result = await spotifyGet(accessToken, url)
+    if (result.status !== 'ok') return result
+    if (!isRecord(result.data)) {
+      return { status: 'error', message: 'Unexpected playlists payload' }
+    }
+    const items = readArray(result.data.items)
+    if (items === null) {
+      return { status: 'error', message: 'Unexpected playlists payload' }
+    }
+    for (const item of items) {
+      if (!isRecord(item)) continue
+      const id = readString(item.id)
+      if (id !== null && id.length > 0) playlistIds.add(id)
+    }
+    if (items.length < USER_PLAYLISTS_PAGE_SIZE) {
+      return { status: 'ok', data: playlistIds }
+    }
+  }
+
+  return {
+    status: 'error',
+    message: 'Spotify playlist scan exceeded the safe page limit',
+  }
+}
+
 /** Max track uris the Add Items to Playlist endpoint accepts per request. */
 export const PLAYLIST_ADD_CHUNK_SIZE = 100
 
@@ -444,6 +523,16 @@ export const addPlaylistTracksChunk = async (
   return { status: 'ok', data: null }
 }
 
+/** Update a playlist's title and description; Spotify returns an empty body. */
+export const updateSpotifyPlaylistDetails = async (
+  accessToken: string,
+  playlistId: string,
+  details: { name: string; description: string },
+): Promise<SpotifyApiResult<null>> => {
+  const url = `${SPOTIFY_API_BASE}/playlists/${encodeURIComponent(playlistId)}`
+  return spotifySend(accessToken, url, 'PUT', details)
+}
+
 /**
  * Remove a playlist from the user's library by unfollowing it — Spotify has no
  * hard-delete for playlists; unfollow is what its own clients call "delete".
@@ -455,23 +544,5 @@ export const deleteSpotifyPlaylist = async (
   playlistId: string,
 ): Promise<SpotifyApiResult<null>> => {
   const url = `${SPOTIFY_API_BASE}/playlists/${encodeURIComponent(playlistId)}/followers`
-  let response: Response
-  try {
-    response = await fetch(url, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: 'no-store',
-    })
-  } catch (error) {
-    return {
-      status: 'error',
-      message:
-        error instanceof Error ? error.message : 'Spotify request failed',
-    }
-  }
-  const result = await reduceResponse(response)
-  if (result.status !== 'ok' && result.status !== 'error') return result
-  return response.ok
-    ? { status: 'ok', data: null }
-    : { status: 'error', message: `Unfollow failed (HTTP ${response.status})` }
+  return spotifySend(accessToken, url, 'DELETE')
 }
