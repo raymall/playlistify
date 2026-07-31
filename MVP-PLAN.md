@@ -73,7 +73,7 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 
 **End-user:**
 
-1. Sign in / sign out with Spotify (OAuth via Supabase Auth; scopes: `user-library-read`, `playlist-modify-public`, `playlist-modify-private`).
+1. Sign in / sign out with Spotify (OAuth via Supabase Auth; scopes: `user-library-read`, `playlist-read-private`, `playlist-modify-public`, `playlist-modify-private`).
 2. Import Liked Songs into the global songs table + personal library join table, with a visible progress indicator; re-sync on demand to pick up newly liked songs.
 3. AI enrichment of every imported track (genres, moods, energy, era,
    descriptors + recognition confidence), batched, cached globally, resumable,
@@ -90,7 +90,9 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 6. Conversational playlist creation: chat describing the desired playlist; AI queries the enriched library via tools, streams its reasoning, and proposes a track list.
 7. Playlist preview: review the proposed tracks (with the AI's one-line rationale), remove tracks, regenerate.
 8. Create the playlist in the user's Spotify account (name + description generated, editable before creation) and link to open it in Spotify.
-9. Playlist history: list of playlists created through the app, each linking to Spotify.
+9. Playlist management: list playlists created through the app; check whether
+   each is still reachable in Spotify; edit its title and description; delete
+   or recreate it; and show the effective genres and moods behind its songs.
 10. Light/dark mode toggle (system default), neo-Swiss theme.
 
 **Owner/operational (single developer — no admin UI, but must exist):**
@@ -113,7 +115,10 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
    Medium / High confidence counts and "Re-sync Liked Songs".
    Serves features 2, 3, 4, 5.
 3. **Chat — `/chat`** (the home screen once imported) — conversation pane with streaming responses and visible tool activity; proposed-playlist panel (track list with album art, per-track rationale, remove buttons); name/description fields; "Create in Spotify" button. Serves features 6, 7, 8.
-4. **Playlists — `/playlists`** — history of created playlists: name, prompt that produced it, track count, date, "Open in Spotify" link. Serves feature 9.
+4. **Playlists — `/playlists`** — management for created playlists: cached
+   Spotify reachability with manual refresh, title/description editing,
+   delete/unfollow, recreation from the stored songs, effective genre/mood
+   summaries, and an "Open in Spotify" link when reachable. Serves feature 9.
 5. **Global chrome** — top nav (Library / Chat / Playlists), theme toggle, account menu with sign-out and a re-connect-Spotify state for expired tokens. Serves features 1, 10, 11.
 
 ## Out of Scope
@@ -122,7 +127,6 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 - Importing saved albums or followed/owned playlists (Liked Songs only).
 - Web-search fallback for unrecognized songs (marked `unknown` instead).
 - Persisting chat history across sessions (a chat is ephemeral; only resulting playlists are saved).
-- Editing/updating a playlist after creation (create-only in MVP).
 - Email + password auth (considered and reverted: every feature requires a connected Spotify account anyway, so a second sign-in method only added an identity-linking flow and its edge cases; Spotify OAuth is the sole login).
 - Admin UI for the model/recipe catalogs (`llm_models` and
   `enrichment_recipes` are edited directly in Supabase Studio). Adding a whole
@@ -241,6 +245,8 @@ privately by one user (identical shape)
 | name                | text            |                                     |
 | description         | text            |                                     |
 | prompt              | text            | the user's request that produced it |
+| spotify_status      | text            | unknown, present, or missing        |
+| spotify_checked_at  | timestamptz     | last reachability check             |
 | created_at          | timestamptz     |                                     |
 
 **playlist_songs**
@@ -353,7 +359,7 @@ repeated requests still coalesce into the global job.
 ## Implementation Plan
 
 1. **Scaffold** — Next.js + TypeScript + Tailwind + shadcn/ui; neo-Swiss theme tokens (type scale, grid, light/dark CSS variables); nav shell and empty routes.
-2. **Auth** — Supabase project; Spotify app registration; Supabase Auth Spotify provider with the three scopes; login/logout; capture `provider_token` + `provider_refresh_token` into `spotify_tokens` at sign-in; server-side helper that returns a valid access token (refreshing against Spotify when expired) and surfaces `invalid_grant` as a "reconnect Spotify" state.
+2. **Auth** — Supabase project; Spotify app registration; Supabase Auth Spotify provider with the four scopes; login/logout; capture `provider_token` + `provider_refresh_token` into `spotify_tokens` at sign-in; server-side helper that returns a valid access token (refreshing against Spotify when expired) and surfaces `invalid_grant` as a "reconnect Spotify" state.
 3. **Schema** — migrations for the product, enrichment evidence/queue, private
    overlay tables, RLS policies, RPCs, constraints, and indexes.
 4. **Import** — paginated `/me/tracks` fetch → upsert `songs` (metadata + artist genres) + `user_songs`; completed re-syncs remove songs Spotify confirms are no longer liked; progress UI on `/library`.
@@ -365,7 +371,10 @@ repeated requests still coalesce into the global job.
    explicit hide/show operations over canonical AI tags; effective-tag reads
    shared by Library and Chat.
 7. **Chat** — AI SDK `streamText` + `useChat`; system prompt + `search_library` (AI tags OR the user's tags, confidence floor) and `propose_playlist` tools; streaming UI with tool-activity states; preview panel with remove/regenerate.
-8. **Playlist creation** — create playlist + add tracks via Spotify API; save to `playlists`/`playlist_songs`; `/playlists` history page.
+8. **Playlist creation and management** — create playlists and add tracks via
+   Spotify; save the ordered snapshot to `playlists`/`playlist_songs`; manage
+   reachability, details, deletion, recreation, and effective song-tag rollups
+   from `/playlists`.
 9. **Hardening + deploy** — empty/error/re-auth states, dark-mode pass, deploy to Vercel, test end-to-end with a real library.
 10. **Guarded global re-enrichment (implemented 2026-07-29)** — versioned
     recipes, append-only attempts, globally deduplicated jobs, atomic candidate

@@ -167,3 +167,25 @@ are applied on top.
 What comes back is a proposal, not an action. The user sees the tracks first,
 can rename the playlist and remove anything unwanted, and only then creates it
 in Spotify.
+
+## After a playlist is created
+
+Playlistify keeps the ordered song list that was used to create each playlist.
+It can therefore keep managing that playlist after the original chat has gone.
+
+Spotify does not offer a permanent-delete operation for playlists. Deleting a
+playlist here unfollows it in Spotify and removes Playlistify's stored copy. A
+playlist shown as **Deleted in Spotify** is one that no longer appears among the
+user's Spotify playlists, usually because it was unfollowed in the Spotify
+client. While it is missing, title and description edits stay in Playlistify,
+and deleting it removes only Playlistify's stored copy.
+
+Recreate uses the stored song order rather than asking the assistant to make a
+new selection. Songs no longer in the user's Liked Songs are skipped, and the
+result reports how many of the original songs were restored. A changed title or
+description becomes the title or description of the recreated playlist.
+
+A playlist's displayed genres and moods are derived from the effective tags on
+its songs. Medium- and High-confidence AI tags count unless that user hid them,
+and the user's personal tags count alongside them. These are summaries of the
+playlist's songs, not separate labels stored on the playlist itself.
