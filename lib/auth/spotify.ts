@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/client'
 
 const SPOTIFY_SCOPES =
-  'user-library-read playlist-modify-public playlist-modify-private'
+  'user-library-read playlist-read-private playlist-modify-public playlist-modify-private'
 
 /**
  * Starts the Spotify OAuth flow (browser only). Also used to re-connect
