@@ -3,9 +3,19 @@
 import { Button } from '@/components/ui/button'
 import { signInWithSpotify } from '@/lib/auth/spotify'
 
-export function SpotifySignInButton() {
+type SpotifySignInButtonProps = {
+  className?: string
+}
+
+export const SpotifySignInButton = ({
+  className,
+}: SpotifySignInButtonProps) => {
+  const handleSignIn = () => {
+    void signInWithSpotify()
+  }
+
   return (
-    <Button size='lg' onClick={() => void signInWithSpotify()}>
+    <Button className={className} size='lg' onClick={handleSignIn}>
       Continue with Spotify
     </Button>
   )

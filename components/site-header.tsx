@@ -6,7 +6,7 @@ import { ThemeToggle } from '@/components/theme-toggle'
 
 export function SiteHeader() {
   return (
-    <header className='border-b'>
+    <header className='site-header border-b'>
       <div className='mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6'>
         <div className='flex items-center gap-8'>
           <Link

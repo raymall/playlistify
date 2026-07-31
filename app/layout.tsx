@@ -1,10 +1,16 @@
 import './globals.css'
 
 import type { Metadata } from 'next'
-import { Geist } from 'next/font/google'
+import { Archivo, Geist } from 'next/font/google'
 import { ThemeProvider } from 'next-themes'
 
 import { SiteHeader } from '@/components/site-header'
+
+const archivo = Archivo({
+  variable: '--font-wordmark',
+  subsets: ['latin'],
+  weight: '700',
+})
 
 const geistSans = Geist({
   variable: '--font-sans',
@@ -28,7 +34,7 @@ export default function RootLayout({
   return (
     <html
       suppressHydrationWarning
-      className={`${geistSans.variable} h-full antialiased`}
+      className={`${archivo.variable} ${geistSans.variable} h-full antialiased`}
       lang='en'
     >
       <body className='flex min-h-full flex-col'>

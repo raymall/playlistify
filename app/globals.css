@@ -96,3 +96,187 @@
     @apply tracking-tight text-balance;
   }
 }
+
+body:has(.mesh-landing) {
+  background: #070905;
+}
+
+body:has(.mesh-landing) .site-header {
+  display: none;
+}
+
+.mesh-landing {
+  --mesh-base: #070905;
+  --mesh-color-1: #263f2a;
+  --mesh-color-2: #557341;
+  --mesh-color-3: #8ca462;
+  --mesh-color-4: #d0cf8d;
+  --mesh-wordmark: #edf2e6;
+  --mesh-flow-speed: 0.035;
+  --mesh-cloud-scale: 1.65;
+  --mesh-cloud-glow: 1.48;
+  --mesh-center-pull: 0.62;
+  --mesh-repel-strength: 4.2;
+  --mesh-wordmark-clearance: 14;
+
+  position: relative;
+  width: 100%;
+  min-height: 100svh;
+  overflow: hidden;
+  color: #f3f5ee;
+  background: radial-gradient(
+    circle at 50% 58%,
+    #172719 0%,
+    var(--mesh-base) 68%
+  );
+  isolation: isolate;
+}
+
+.mesh-landing-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  visibility: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+.mesh-landing[data-canvas-ready='true'] .mesh-landing-canvas {
+  visibility: visible;
+}
+
+.mesh-landing-depth,
+.mesh-landing-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.mesh-landing-depth {
+  background:
+    radial-gradient(
+      circle at 50% 54%,
+      transparent 0%,
+      transparent 42%,
+      rgb(0 0 0 / 28%) 76%,
+      rgb(0 0 0 / 68%) 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgb(0 0 0 / 36%) 0%,
+      transparent 25%,
+      transparent 78%,
+      rgb(0 0 0 / 18%) 100%
+    );
+}
+
+.mesh-landing-grain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.79' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.66'/%3E%3C/svg%3E");
+  mix-blend-mode: soft-light;
+  opacity: 0.045;
+}
+
+.mesh-landing-wordmark {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  z-index: 2;
+  font-family: var(--font-wordmark), sans-serif;
+  font-size: clamp(1.75rem, 5.5vw, 3.75rem);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--mesh-wordmark);
+  letter-spacing: 0.025em;
+  white-space: nowrap;
+  pointer-events: none;
+  text-rendering: geometricprecision;
+  transform: translate(-50%, -50%);
+}
+
+.mesh-landing[data-mode='veil'] .mesh-landing-wordmark {
+  color: transparent;
+  background:
+    radial-gradient(
+      ellipse at center,
+      rgb(237 242 230 / 98%) 0%,
+      rgb(237 242 230 / 76%) 34%,
+      rgb(121 140 105 / 28%) 62%,
+      transparent 84%
+    ),
+    radial-gradient(
+      ellipse at center,
+      rgb(237 242 230 / 92%) 0%,
+      rgb(217 226 207 / 58%) 38%,
+      rgb(90 109 79 / 18%) 68%,
+      transparent 88%
+    ),
+    radial-gradient(
+      ellipse at center,
+      rgb(237 242 230 / 96%) 0%,
+      rgb(226 234 218 / 66%) 36%,
+      rgb(103 123 90 / 22%) 64%,
+      transparent 86%
+    ),
+    radial-gradient(
+      ellipse at center,
+      rgb(237 242 230 / 96%) 0%,
+      rgb(211 222 199 / 64%) 42%,
+      rgb(103 121 90 / 22%) 72%,
+      transparent 90%
+    );
+  background-repeat: no-repeat;
+  background-position:
+    -28% 18%,
+    31% -36%,
+    72% 28%,
+    128% -18%;
+  background-clip: text;
+  background-size:
+    52% 190%,
+    38% 220%,
+    50% 205%,
+    52% 230%;
+  animation: mesh-wordmark-flow 84s linear infinite;
+}
+
+.mesh-landing-cta {
+  position: absolute;
+  inset-block-start: calc(50% + clamp(4.25rem, 8vw, 5.5rem));
+  inset-inline-start: 50%;
+  z-index: 3;
+  transform: translateX(-50%);
+}
+
+@keyframes mesh-wordmark-flow {
+  0%,
+  100% {
+    background-position:
+      -28% 18%,
+      31% -36%,
+      72% 28%,
+      128% -18%;
+  }
+
+  34% {
+    background-position:
+      -18% -28%,
+      44% 42%,
+      62% -22%,
+      118% 34%;
+  }
+
+  68% {
+    background-position:
+      -32% 38%,
+      54% -18%,
+      80% 46%,
+      132% -32%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mesh-landing-wordmark {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
+}

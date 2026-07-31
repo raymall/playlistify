@@ -91,8 +91,12 @@ the same commit (rule in `AGENTS.md`).
 
 Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 
-- `/` — landing + "Continue with Spotify"; proxy redirects signed-in users
-  to `/chat` (`app/page.tsx`, `components/spotify-sign-in-button.tsx`).
+- `/` — Wake animated mesh + "Continue with Spotify"; proxy redirects signed-in
+  users to `/chat` (`app/page.tsx`,
+  `components/playlistify-mesh-landing.tsx`,
+  `components/spotify-sign-in-button.tsx`).
+- `/v2` — alternate Veil presentation of the shared landing mesh for design
+  comparison (`app/v2/page.tsx`, `components/playlistify-mesh-landing.tsx`).
 - `/library` — import panel, system-selected enrichment panel, searchable
   paginated table with a Confidence band, private AI-tag hiding, personal tags,
   and eligible per-song rechecks
