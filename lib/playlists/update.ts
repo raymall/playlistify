@@ -35,26 +35,33 @@ export const updatePlaylistDetails = async (
     return { status: 'error', message: 'Invalid playlist details.' }
   }
 
-  const updateResult = await supabase
+  const playlistResult = await supabase
     .from('playlists')
-    .update({
-      name,
-      description: description.length > 0 ? description : null,
-    })
+    .select('spotify_playlist_id, spotify_status')
     .eq('id', payload.playlistId)
     .eq('user_id', userId)
-    .select('spotify_playlist_id, spotify_status')
     .maybeSingle()
-  if (updateResult.error) {
-    return { status: 'error', message: updateResult.error.message }
+  if (playlistResult.error) {
+    return { status: 'error', message: playlistResult.error.message }
   }
-  if (updateResult.data === null) {
+  if (playlistResult.data === null) {
     return { status: 'error', message: 'Playlist not found.' }
   }
 
   const { spotify_playlist_id: spotifyPlaylistId, spotify_status: status } =
-    updateResult.data
+    playlistResult.data
   if (spotifyPlaylistId === null || status === 'missing') {
+    const localResult = await supabase
+      .from('playlists')
+      .update({
+        name,
+        description: description.length > 0 ? description : null,
+      })
+      .eq('id', payload.playlistId)
+      .eq('user_id', userId)
+    if (localResult.error) {
+      return { status: 'error', message: localResult.error.message }
+    }
     return { status: 'updated', didUpdateSpotify: false }
   }
 
@@ -82,6 +89,18 @@ export const updatePlaylistDetails = async (
   }
   if (spotifyResult.status === 'error') {
     return { status: 'error', message: spotifyResult.message }
+  }
+
+  const localResult = await supabase
+    .from('playlists')
+    .update({
+      name,
+      description: description.length > 0 ? description : null,
+    })
+    .eq('id', payload.playlistId)
+    .eq('user_id', userId)
+  if (localResult.error) {
+    return { status: 'error', message: localResult.error.message }
   }
 
   return { status: 'updated', didUpdateSpotify: true }

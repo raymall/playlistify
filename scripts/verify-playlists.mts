@@ -1,17 +1,18 @@
 // Live Spotify playlist verification: creates a private throwaway playlist,
 // confirms it appears in the current user's playlist listing, adds one saved
-// track, updates and reads back its details, unfollows it, and confirms it no
-// longer appears. Cleanup runs even when an intermediate assertion fails.
+// track, waits for its cover, updates and reads back its details from that same
+// listing, unfollows it, and confirms it no longer appears. Cleanup runs even
+// when an intermediate assertion fails.
 //
 // Usage: node --env-file=.env.local --import tsx scripts/verify-playlists.mts
 import { createClient } from '@supabase/supabase-js'
 
-import { isRecord, readString } from '../lib/json'
 import {
   addPlaylistTracksChunk,
   createSpotifyPlaylist,
   deleteSpotifyPlaylist,
-  fetchUserPlaylistIds,
+  fetchUserPlaylists,
+  type SpotifyPlaylistMetadata,
   updateSpotifyPlaylistDetails,
 } from '../lib/spotify/api'
 import { getValidSpotifyToken } from '../lib/spotify/token'
@@ -23,8 +24,7 @@ const [url, serviceKey] = requireEnv(
   ' --import tsx',
 )
 
-const SPOTIFY_API_BASE = 'https://api.spotify.com/v1'
-const LIST_RETRIES = 5
+const LIST_RETRIES = 15
 const LIST_RETRY_DELAY_MS = 1_000
 
 const service = createClient<Database>(url, serviceKey)
@@ -57,16 +57,16 @@ if (songResult.error || songResult.data === null) {
   process.exit(1)
 }
 
-const waitForPlaylistState = async (
+const waitForPlaylist = async (
   playlistId: string,
-  shouldBePresent: boolean,
+  predicate: (playlist: SpotifyPlaylistMetadata | undefined) => boolean,
 ): Promise<boolean> => {
   for (let attempt = 0; attempt < LIST_RETRIES; attempt += 1) {
-    const listResult = await fetchUserPlaylistIds(accessToken)
+    const listResult = await fetchUserPlaylists(accessToken)
     if (listResult.status !== 'ok') {
       throw new Error(`Playlist listing failed: ${listResult.status}`)
     }
-    if (listResult.data.has(playlistId) === shouldBePresent) return true
+    if (predicate(listResult.data.get(playlistId))) return true
     await new Promise<void>((resolve) => {
       setTimeout(resolve, LIST_RETRY_DELAY_MS)
     })
@@ -92,7 +92,9 @@ try {
   playlistId = createResult.data.id
   console.log('PASS  created a private throwaway playlist')
 
-  if (!(await waitForPlaylistState(playlistId, true))) {
+  if (
+    !(await waitForPlaylist(playlistId, (playlist) => playlist !== undefined))
+  ) {
     throw new Error('Created playlist did not appear in GET /me/playlists')
   }
   console.log('PASS  playlist appeared in GET /me/playlists')
@@ -105,6 +107,16 @@ try {
   }
   console.log('PASS  added one saved track through /playlists/{id}/items')
 
+  if (
+    !(await waitForPlaylist(
+      playlistId,
+      (playlist) => playlist !== undefined && playlist.imageUrl !== null,
+    ))
+  ) {
+    throw new Error('Spotify did not generate a playlist cover in time')
+  }
+  console.log('PASS  generated cover appeared in GET /me/playlists')
+
   const updateResult = await updateSpotifyPlaylistDetails(
     accessToken,
     playlistId,
@@ -114,21 +126,21 @@ try {
     throw new Error(`Playlist detail update failed: ${updateResult.status}`)
   }
 
-  const detailsResponse = await fetch(
-    `${SPOTIFY_API_BASE}/playlists/${encodeURIComponent(playlistId)}?fields=name,description`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-  )
-  const details: unknown = detailsResponse.ok
-    ? await detailsResponse.json()
-    : null
   if (
-    !isRecord(details) ||
-    readString(details.name) !== updatedName ||
-    readString(details.description) !== updatedDescription
+    !(await waitForPlaylist(
+      playlistId,
+      (playlist) =>
+        playlist?.name === updatedName &&
+        playlist.description === updatedDescription,
+    ))
   ) {
-    throw new Error('Updated playlist details did not read back from Spotify')
+    throw new Error(
+      'Updated playlist details did not read back from GET /me/playlists',
+    )
   }
-  console.log('PASS  updated title and description read back from Spotify')
+  console.log(
+    'PASS  updated title and description appeared in GET /me/playlists',
+  )
 
   const deleteResult = await deleteSpotifyPlaylist(accessToken, playlistId)
   if (deleteResult.status !== 'ok') {
@@ -136,7 +148,9 @@ try {
   }
   hasUnfollowed = true
 
-  if (!(await waitForPlaylistState(playlistId, false))) {
+  if (
+    !(await waitForPlaylist(playlistId, (playlist) => playlist === undefined))
+  ) {
     throw new Error('Unfollowed playlist still appears in GET /me/playlists')
   }
   console.log('PASS  unfollowed playlist disappeared from GET /me/playlists')

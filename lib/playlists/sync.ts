@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { fetchUserPlaylistIds } from '@/lib/spotify/api'
+import { fetchUserPlaylists } from '@/lib/spotify/api'
 import { getValidSpotifyToken } from '@/lib/spotify/token'
 import type { Database } from '@/lib/supabase/types'
 
@@ -30,7 +30,7 @@ export const syncPlaylistStatuses = async (
     return { status: 'error', message: tokenResult.message }
   }
 
-  const spotifyResult = await fetchUserPlaylistIds(tokenResult.accessToken)
+  const spotifyResult = await fetchUserPlaylists(tokenResult.accessToken)
   if (spotifyResult.status === 'auth_failed') {
     return { status: 'reconnect_required' }
   }
@@ -44,45 +44,33 @@ export const syncPlaylistStatuses = async (
     return { status: 'error', message: spotifyResult.message }
   }
 
-  const presentIds: string[] = []
-  const missingIds: string[] = []
+  const spotifyPlaylists = []
   for (const playlist of playlistsResult.data) {
-    if (
-      playlist.spotify_playlist_id !== null &&
-      spotifyResult.data.has(playlist.spotify_playlist_id)
-    ) {
-      presentIds.push(playlist.id)
-    } else {
-      missingIds.push(playlist.id)
-    }
+    const spotifyPlaylist =
+      playlist.spotify_playlist_id === null
+        ? undefined
+        : spotifyResult.data.get(playlist.spotify_playlist_id)
+    spotifyPlaylists.push({
+      playlist_id: playlist.id,
+      spotify_playlist_id: playlist.spotify_playlist_id,
+      is_present: spotifyPlaylist !== undefined,
+      name: spotifyPlaylist?.name ?? null,
+      description: spotifyPlaylist?.description ?? null,
+      image_url: spotifyPlaylist?.imageUrl ?? null,
+    })
   }
 
-  const checkedAt = new Date().toISOString()
-  const updateStatus = async (
-    playlistIds: string[],
-    spotifyStatus: 'missing' | 'present',
-  ) => {
-    if (playlistIds.length === 0) return null
-    const result = await supabase
-      .from('playlists')
-      .update({ spotify_status: spotifyStatus, spotify_checked_at: checkedAt })
-      .eq('user_id', userId)
-      .in('id', playlistIds)
-    return result.error
+  const syncResult = await supabase.rpc('sync_playlist_spotify_metadata', {
+    p_playlists: spotifyPlaylists,
+  })
+  if (syncResult.error) {
+    return { status: 'error', message: syncResult.error.message }
   }
-
-  const [presentError, missingError] = await Promise.all([
-    updateStatus(presentIds, 'present'),
-    updateStatus(missingIds, 'missing'),
-  ])
-  const updateError = presentError ?? missingError
-  if (updateError !== null) {
-    return { status: 'error', message: updateError.message }
-  }
+  const counts = syncResult.data[0]
 
   return {
     status: 'ok',
-    presentCount: presentIds.length,
-    missingCount: missingIds.length,
+    presentCount: counts.present_count,
+    missingCount: counts.missing_count,
   }
 }

@@ -76,7 +76,8 @@ the same commit (rule in `AGENTS.md`).
 - `scripts/` — Node ops + verification scripts (`npm run verify:*`,
   `gen:types`, `reset:enrichment`); each file's header comment says what it
   proves. `verify-playlists.mts` live-checks Spotify playlist create, list,
-  add, details-update, and unfollow endpoints. `check-node-version.mjs`
+  add, generated cover metadata, details-update, and unfollow endpoints.
+  `check-node-version.mjs`
   enforces Node 24 before dev and build; shared env guard lives in
   `scripts/lib/env.mjs`.
 - `supabase/migrations/` — schema source of truth. Core tables are `profiles`,
@@ -89,16 +90,16 @@ the same commit (rule in `AGENTS.md`).
   promotion, recheck requests, and outcome counts. Authenticated
   security-invoker RPCs expose effective tag names, selectable songs, matching
   song ids, row-level recheck states, and the per-playlist effective-tag
-  summary. `playlists.spotify_status` and `spotify_checked_at` cache the latest
-  user-triggered Spotify reachability scan. Column detail lives in
-  `MVP-PLAN.md` § Database Schema.
+  summary. `playlists.spotify_status`, `spotify_checked_at`, and
+  `spotify_image_url` cache the latest user-triggered Spotify reachability and
+  metadata scan. Column detail lives in `MVP-PLAN.md` § Database Schema.
 - `proxy.ts` — runs on every request: session refresh + route protection.
 - Root: `MVP-PLAN.md` (product spec), `HOW-IT-WORKS.md` (plain-language
   reasoning for behavior that has shipped), `RE-ENRICHMENT-PLAN.md` (guarded
   re-enrichment design and rollout record), `IMPROVEMENTS.md` (gitignored debt log),
   `README.md` (setup), `.nvmrc` + `package.json#engines` (Node 24 runtime
   contract), `.env.example` (every env var, commented), `next.config.ts`
-  (album-art image host allowlist).
+  (Spotify image host allowlist).
 
 ## Route inventory
 
@@ -120,9 +121,10 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   panel (rename, edit, drop tracks, create). Server-rendered empty states for
   no-library / not-yet-enriched (`app/chat/page.tsx` + `components/chat-*`,
   `components/playlist-preview-panel.tsx`).
-- `/playlists` — created-playlist management: cached live Spotify status,
-  title/description edit, delete/unfollow, recreate-from-stored-tracks,
-  effective genre/mood rollups, and a Start Playlist link
+- `/playlists` — created-playlist management: cached live Spotify status and
+  authoritative title/description/cover metadata, edit, delete/unfollow,
+  recreate-from-stored-tracks, effective genre/mood rollups, and a Start
+  Playlist link
   (`app/playlists/page.tsx`, `app/playlists/loading.tsx` +
   `components/playlist-{status-panel,actions,tag-chips}.tsx`).
 - Chrome: `app/layout.tsx` — fonts, `ThemeProvider`, `SiteHeader` (nav,
@@ -156,9 +158,10 @@ an auth service that merely blinked is a 503 the client may retry for free:
   `{name, description, songIds, prompt}`, `{playlistId, name, description}`,
   and `{playlistId}` (`app/api/playlists/route.ts` → `lib/playlists/{create,
 update,delete}.ts`).
-- `POST /api/playlists/sync` — scan `/me/playlists` and cache reachability for
-  every stored playlist (`app/api/playlists/sync/route.ts` →
-  `lib/playlists/sync.ts`).
+- `POST /api/playlists/sync` — scan `/me/playlists` and atomically cache
+  reachability plus Spotify-authoritative title, description, and temporary
+  cover URL for every stored playlist (`app/api/playlists/sync/route.ts` →
+  `lib/playlists/sync.ts` → `sync_playlist_spotify_metadata()`).
 - `POST /api/playlists/recreate` — rebuild a playlist from its stored ordered
   songs, body `{playlistId}` (`app/api/playlists/recreate/route.ts` →
   `lib/playlists/recreate.ts`).
@@ -272,17 +275,20 @@ and reports `partial`; a DB write failure after Spotify success reports
 `created` with `persisted: false`. `/playlists` lists the persisted rows.
 
 **Playlist management** — the JSON handlers keep the browser thin and call
-RLS-scoped engines. Sync obtains one bounded `/me/playlists` id set and bulk
-writes `present`/`missing` status + check time. Edit writes locally first, then
-updates Spotify unless the playlist is known missing. Delete tries Spotify
-unfollow when reachable but always removes the local row even if Spotify
-fails. Recreate reads stored `playlist_songs` order, skips songs no longer in
-the user's library, rebuilds through `build.ts`, and replaces the stored
-Spotify id/status. `playlist_tag_summary()` returns every playlist's effective
-AI and personal genres/moods in one RLS-scoped call. The server page fetches
-the cards and rollup in parallel; the status panel syncs on mount/manual
-refresh, while each action cluster owns only its dialogs and mutations before
-refreshing the server-rendered card.
+RLS-scoped engines. Sync obtains one bounded `/me/playlists` metadata map;
+`sync_playlist_spotify_metadata()` applies title, description, temporary cover
+URL, `present`/`missing` status, and check time in one security-invoker write.
+Spotify is authoritative while a playlist is reachable, so edit updates
+Spotify before committing the same details locally; known-missing playlists
+remain local-only. Delete tries Spotify unfollow when reachable but always
+removes the local row even if Spotify fails. Recreate reads stored
+`playlist_songs` order, skips songs no longer in the user's library, rebuilds
+through `build.ts`, and replaces the stored Spotify id/status.
+`playlist_tag_summary()` returns every playlist's effective AI and personal
+genres/moods in one RLS-scoped call. The server page fetches the cards and
+rollup in parallel; the status panel syncs on mount/manual refresh, while each
+action cluster owns only its dialogs and mutations before refreshing the
+server-rendered card.
 
 ## Constraints and invariants
 

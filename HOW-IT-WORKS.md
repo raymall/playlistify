@@ -176,9 +176,17 @@ It can therefore keep managing that playlist after the original chat has gone.
 Spotify does not offer a permanent-delete operation for playlists. Deleting a
 playlist here unfollows it in Spotify and removes Playlistify's stored copy. A
 playlist shown as **Deleted in Spotify** is one that no longer appears among the
-user's Spotify playlists, usually because it was unfollowed in the Spotify
+user’s Spotify playlists, usually because it was unfollowed in the Spotify
 client. While it is missing, title and description edits stay in Playlistify,
-and deleting it removes only Playlistify's stored copy.
+and deleting it removes only Playlistify’s stored copy.
+
+While a playlist still exists in Spotify, Spotify is the source of truth for
+its title and description. Opening the Playlists page checks Spotify and pulls
+changes made in the Spotify client back into Playlistify. Edits made in
+Playlistify go to Spotify first, then the matching local display is updated.
+The same check picks up Spotify’s generated or custom cover image; because
+Spotify’s image links are temporary, Playlistify refreshes the cached link as
+part of every check.
 
 Recreate uses the stored song order rather than asking the assistant to make a
 new selection. Songs no longer in the user's Liked Songs are skipped, and the

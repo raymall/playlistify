@@ -171,19 +171,17 @@ export const PlaylistActions = ({
         return
       }
       if (parsed.status === 'reconnect_required') {
-        const message = 'Saved here. Reconnect Spotify to update it there.'
+        const message = 'Reconnect Spotify before changing this playlist.'
         setFeedback({ kind: 'reconnect', message })
         setAnnouncement(message)
         setIsEditOpen(false)
-        router.refresh()
         return
       }
       if (parsed.status === 'rate_limited') {
         setEditError(
-          `Saved here, but Spotify is rate limited. Try again in ${parsed.retryAfterSeconds}s.`,
+          `Spotify is rate limited. Nothing changed; try again in ${parsed.retryAfterSeconds}s.`,
         )
-        setAnnouncement('Playlist saved locally; Spotify update was delayed.')
-        router.refresh()
+        setAnnouncement('Playlist update was delayed by Spotify.')
         return
       }
       setEditError(parsed.message)
@@ -346,8 +344,8 @@ export const PlaylistActions = ({
               <DialogHeader>
                 <DialogTitle>Edit “{name}”</DialogTitle>
                 <DialogDescription>
-                  Changes are saved in Playlistify and sent to Spotify when the
-                  playlist is reachable.
+                  Spotify is the source of truth while this playlist exists
+                  there. Missing playlists are edited only in Playlistify.
                 </DialogDescription>
               </DialogHeader>
 

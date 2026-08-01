@@ -91,8 +91,9 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 7. Playlist preview: review the proposed tracks (with the AI's one-line rationale), remove tracks, regenerate.
 8. Create the playlist in the user's Spotify account (name + description generated, editable before creation) and link to open it in Spotify.
 9. Playlist management: list playlists created through the app; check whether
-   each is still reachable in Spotify; edit its title and description; delete
-   or recreate it; and show the effective genres and moods behind its songs.
+   each is still reachable in Spotify; mirror Spotify-authoritative titles,
+   descriptions, and cover images; edit, delete, or recreate it; and show the
+   effective genres and moods behind its songs.
 10. Light/dark mode toggle (system default), neo-Swiss theme.
 
 **Owner/operational (single developer — no admin UI, but must exist):**
@@ -116,9 +117,10 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
    Serves features 2, 3, 4, 5.
 3. **Chat — `/chat`** (the home screen once imported) — conversation pane with streaming responses and visible tool activity; proposed-playlist panel (track list with album art, per-track rationale, remove buttons); name/description fields; "Create in Spotify" button. Serves features 6, 7, 8.
 4. **Playlists — `/playlists`** — management for created playlists: cached
-   Spotify reachability with manual refresh, title/description editing,
-   delete/unfollow, recreation from the stored songs, effective genre/mood
-   summaries, and an "Open in Spotify" link when reachable. Serves feature 9.
+   Spotify reachability and metadata with manual refresh, cover images,
+   title/description editing, delete/unfollow, recreation from the stored
+   songs, effective genre/mood summaries, and an "Open in Spotify" link when
+   reachable. Serves feature 9.
 5. **Global chrome** — top nav (Library / Chat / Playlists), theme toggle, account menu with sign-out and a re-connect-Spotify state for expired tokens. Serves features 1, 10, 11.
 
 ## Out of Scope
@@ -247,6 +249,7 @@ privately by one user (identical shape)
 | prompt              | text            | the user's request that produced it |
 | spotify_status      | text            | unknown, present, or missing        |
 | spotify_checked_at  | timestamptz     | last reachability check             |
+| spotify_image_url   | text            | temporary cover URL from Spotify    |
 | created_at          | timestamptz     |                                     |
 
 **playlist_songs**

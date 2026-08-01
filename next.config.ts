@@ -2,10 +2,11 @@ import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
   images: {
-    // Spotify serves all album art from this host; the stored URL is the
-    // 640px cover, which next/image downscales to the ~40px table thumbnail.
+    // Spotify album art and generated playlist mosaics are served from these
+    // hosts. next/image resizes the original square without cropping it.
     remotePatterns: [
       { protocol: 'https', hostname: 'i.scdn.co', pathname: '/image/**' },
+      { protocol: 'https', hostname: 'mosaic.scdn.co', pathname: '/**' },
     ],
   },
 }

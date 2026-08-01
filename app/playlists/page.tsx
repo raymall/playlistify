@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Image from 'next/image'
 import Link from 'next/link'
 
 import { PageSection } from '@/components/page-section'
@@ -62,7 +63,7 @@ export default async function PlaylistsPage() {
     supabase
       .from('playlists')
       .select(
-        'id, name, description, prompt, spotify_playlist_id, spotify_status, spotify_checked_at, created_at, playlist_songs(count)',
+        'id, name, description, prompt, spotify_playlist_id, spotify_image_url, spotify_status, spotify_checked_at, created_at, playlist_songs(count)',
       )
       .order('created_at', { ascending: false })
       .limit(PLAYLISTS_LIMIT),
@@ -129,29 +130,51 @@ export default async function PlaylistsPage() {
                 className='flex flex-col gap-5 rounded-lg border p-4 sm:p-5'
               >
                 <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'>
-                  <div className='min-w-0 space-y-2'>
-                    <div className='flex flex-wrap items-center gap-2'>
-                      <h2 className='truncate font-medium text-foreground'>
-                        {name}
-                      </h2>
-                      <Badge variant={status.variant}>{status.label}</Badge>
+                  <div className='flex min-w-0 gap-4'>
+                    {playlist.spotify_image_url !== null &&
+                      hasSpotifyPlaylist &&
+                      spotifyStatus !== 'missing' && (
+                        <a
+                          aria-label={`Open “${name}” in Spotify`}
+                          className='shrink-0 self-start rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2'
+                          href={`https://open.spotify.com/playlist/${playlist.spotify_playlist_id}`}
+                          rel='noreferrer'
+                          target='_blank'
+                        >
+                          <Image
+                            alt=''
+                            className='size-24 rounded-sm bg-muted object-contain sm:size-28'
+                            height={112}
+                            sizes='(min-width: 640px) 7rem, 6rem'
+                            src={playlist.spotify_image_url}
+                            width={112}
+                          />
+                        </a>
+                      )}
+                    <div className='min-w-0 space-y-2'>
+                      <div className='flex flex-wrap items-center gap-2'>
+                        <h2 className='truncate font-medium text-foreground'>
+                          {name}
+                        </h2>
+                        <Badge variant={status.variant}>{status.label}</Badge>
+                      </div>
+                      <p className='text-sm text-muted-foreground tabular-nums'>
+                        {trackCount.toLocaleString()}{' '}
+                        {trackCount === 1 ? 'track' : 'tracks'} · Created{' '}
+                        {created}
+                        {checkedAt === null ? '' : ` · Checked ${checkedAt}`}
+                      </p>
+                      {playlist.description !== null && (
+                        <p className='max-w-prose text-sm text-muted-foreground'>
+                          {playlist.description}
+                        </p>
+                      )}
+                      {playlist.prompt !== null && (
+                        <p className='max-w-prose text-sm text-muted-foreground italic'>
+                          “{playlist.prompt}”
+                        </p>
+                      )}
                     </div>
-                    <p className='text-sm text-muted-foreground tabular-nums'>
-                      {trackCount.toLocaleString()}{' '}
-                      {trackCount === 1 ? 'track' : 'tracks'} · Created{' '}
-                      {created}
-                      {checkedAt === null ? '' : ` · Checked ${checkedAt}`}
-                    </p>
-                    {playlist.description !== null && (
-                      <p className='max-w-prose text-sm text-muted-foreground'>
-                        {playlist.description}
-                      </p>
-                    )}
-                    {playlist.prompt !== null && (
-                      <p className='max-w-prose text-sm text-muted-foreground italic'>
-                        “{playlist.prompt}”
-                      </p>
-                    )}
                   </div>
 
                   <PlaylistActions

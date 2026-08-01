@@ -75,6 +75,7 @@ export const recreatePlaylistForUser = async (
     .from('playlists')
     .update({
       spotify_playlist_id: buildResult.spotifyPlaylistId,
+      spotify_image_url: null,
       spotify_status: 'present',
       spotify_checked_at: checkedAt,
     })

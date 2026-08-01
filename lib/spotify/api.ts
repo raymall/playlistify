@@ -73,6 +73,13 @@ export interface LikedTracksPage {
   next: string | null
 }
 
+export type SpotifyPlaylistMetadata = {
+  description: string | null
+  id: string
+  imageUrl: string | null
+  name: string
+}
+
 const readBoolean = (value: unknown): boolean | null =>
   typeof value === 'boolean' ? value : null
 
@@ -427,10 +434,10 @@ export const fetchArtistGenres = async (
  * `playlist-read-private` scope. It uses `GET /me/playlists`; unlike the
  * retired create endpoint, the current create form is `POST /me/playlists`.
  */
-export const fetchUserPlaylistIds = async (
+export const fetchUserPlaylists = async (
   accessToken: string,
-): Promise<SpotifyApiResult<Set<string>>> => {
-  const playlistIds = new Set<string>()
+): Promise<SpotifyApiResult<Map<string, SpotifyPlaylistMetadata>>> => {
+  const playlists = new Map<string, SpotifyPlaylistMetadata>()
   for (let pageIndex = 0; pageIndex < USER_PLAYLISTS_PAGE_CAP; pageIndex += 1) {
     const offset = pageIndex * USER_PLAYLISTS_PAGE_SIZE
     const url = `${SPOTIFY_API_BASE}/me/playlists?limit=${USER_PLAYLISTS_PAGE_SIZE}&offset=${offset}`
@@ -446,10 +453,24 @@ export const fetchUserPlaylistIds = async (
     for (const item of items) {
       if (!isRecord(item)) continue
       const id = readString(item.id)
-      if (id !== null && id.length > 0) playlistIds.add(id)
+      const name = readString(item.name)
+      if (
+        id === null ||
+        id.length === 0 ||
+        name === null ||
+        name.length === 0
+      ) {
+        return { status: 'error', message: 'Unexpected playlist item' }
+      }
+      playlists.set(id, {
+        description: readString(item.description),
+        id,
+        imageUrl: parseImages(item.images)[0]?.url ?? null,
+        name,
+      })
     }
     if (items.length < USER_PLAYLISTS_PAGE_SIZE) {
-      return { status: 'ok', data: playlistIds }
+      return { status: 'ok', data: playlists }
     }
   }
 
