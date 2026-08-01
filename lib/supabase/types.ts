@@ -222,6 +222,7 @@ export type Database = {
           name: string | null
           prompt: string | null
           spotify_checked_at: string | null
+          spotify_image_url: string | null
           spotify_playlist_id: string | null
           spotify_status: string
           user_id: string
@@ -233,6 +234,7 @@ export type Database = {
           name?: string | null
           prompt?: string | null
           spotify_checked_at?: string | null
+          spotify_image_url?: string | null
           spotify_playlist_id?: string | null
           spotify_status?: string
           user_id: string
@@ -244,6 +246,7 @@ export type Database = {
           name?: string | null
           prompt?: string | null
           spotify_checked_at?: string | null
+          spotify_image_url?: string | null
           spotify_playlist_id?: string | null
           spotify_status?: string
           user_id?: string
@@ -1020,6 +1023,13 @@ export type Database = {
         Returns: number
       }
       songs_artists_search: { Args: { arr: string[] }; Returns: string }
+      sync_playlist_spotify_metadata: {
+        Args: { p_playlists: Json }
+        Returns: {
+          missing_count: number
+          present_count: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
