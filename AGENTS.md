@@ -44,7 +44,7 @@ The DB is a linked remote Supabase project; `supabase/migrations/` is the source
 
 # Improvements log
 
-`IMPROVEMENTS.md` (root, gitignored) is the running log of technical debt, sharp edges, deferred work, suggestions, and ideas. Whenever any of those surface during a session — something you noticed, worked around, deferred, or would recommend — record it there **in the same session**, don't just mention it in chat.
+`IMPROVEMENTS.md` (root, committed) is the running log of technical debt, sharp edges, deferred work, suggestions, and ideas. Whenever any of those surface during a session — something you noticed, worked around, deferred, or would recommend — record it there **in the same session**, don't just mention it in chat.
 
 - Follow the file's entry format: `## <Title>` + `**Issue:**` / `**Why fix:**` bullets.
 - Active sharp edges go in the top section; nice-to-haves and deferred work go under `# Deferred`.

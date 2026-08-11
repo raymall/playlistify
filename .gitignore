@@ -37,9 +37,6 @@ yarn-error.log*
 # local agent settings
 .claude/settings.local.json
 
-# local working notes (sharp edges + deferred work; not part of the repo)
-IMPROVEMENTS.md
-
 # vercel
 .vercel
 
