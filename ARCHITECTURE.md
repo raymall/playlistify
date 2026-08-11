@@ -26,6 +26,8 @@ the same commit (rule in `AGENTS.md`).
 - `components/ui/` — shadcn/ui primitives, built on `@base-ui/react` (not
   Radix), including the `dialog` and destructive-confirmation `alert-dialog`.
   Touch only to restyle a primitive; add new ones via the shadcn CLI.
+- `public/` — static assets, including the Chandler hugging cutout shown on the
+  `/` landing page.
 - `lib/ai/` — `providers.ts` (server-only provider → AI SDK factory map;
   `resolveProviderModel` non-throwing + `resolveLanguageModel` throwing
   wrapper), `chat-model.ts` (resolves the chat model from the `CHAT_MODEL`
