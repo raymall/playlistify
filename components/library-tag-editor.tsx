@@ -17,6 +17,7 @@ import {
   ComboboxPopup,
   ComboboxPortal,
   ComboboxPositioner,
+  ComboboxStatus,
 } from '@/components/ui/combobox'
 import {
   Popover,
@@ -26,7 +27,9 @@ import {
 } from '@/components/ui/popover'
 import { type SongAIAttributes } from '@/lib/enrichment/schema'
 import { isRecord, readString } from '@/lib/json'
-import { createClient } from '@/lib/supabase/client'
+import { MIN_TAG_QUERY_LENGTH } from '@/lib/library/search-params'
+import { type LibraryTag } from '@/lib/library/song'
+import { useTagSuggestions } from '@/lib/library/use-tag-suggestions'
 import {
   type TagAddResponse,
   type TagKind,
@@ -34,12 +37,6 @@ import {
 } from '@/lib/tags'
 import { cn } from '@/lib/utils'
 import { isValidTagName, normalizeTagName } from '@/lib/vocabulary'
-
-/** One personal tag: the shared-vocabulary row id plus its normalized name. */
-export type LibraryTag = {
-  id: string
-  name: string
-}
 
 type LibraryTagEditorProps = {
   aiConfidence: number | null
@@ -52,37 +49,6 @@ type LibraryTagEditorProps = {
   songTitle: string
   userGenres: LibraryTag[]
   userMoods: LibraryTag[]
-}
-
-type TagVocabulary = {
-  genres: string[]
-  moods: string[]
-}
-
-/**
- * The shared vocabulary is fetched once per session, on first editor open,
- * through the browser client (genres/moods are SELECT-able under RLS). A
- * failed fetch clears the cache so the next open retries.
- */
-let vocabularyPromise: Promise<TagVocabulary> | null = null
-
-const loadVocabulary = (): Promise<TagVocabulary> => {
-  vocabularyPromise ??= (async () => {
-    const supabase = createClient()
-    const [genresResult, moodsResult] = await Promise.all([
-      supabase.from('genres').select('name').order('name'),
-      supabase.from('moods').select('name').order('name'),
-    ])
-    if (genresResult.error !== null || moodsResult.error !== null) {
-      vocabularyPromise = null
-      throw new Error('Vocabulary fetch failed')
-    }
-    return {
-      genres: genresResult.data.map((row) => row.name),
-      moods: moodsResult.data.map((row) => row.name),
-    }
-  })()
-  return vocabularyPromise
 }
 
 const parseAddResponse = (value: unknown): TagAddResponse | null => {
@@ -133,14 +99,15 @@ type TagKindEditorProps = {
   placeholder: string
   selected: LibraryTag[]
   songTitle: string
-  vocabulary: string[] | null
   onValueChange: (next: string[]) => void
 }
 
 /**
- * One independently floating combobox over one vocabulary table. Free entry
- * works by injecting the normalized query as the first item when it isn't in
- * the vocabulary yet.
+ * One independently floating combobox per tag kind, over the same debounced
+ * typeahead the library filter bar uses. Free entry works by injecting the
+ * normalized query as the first item when it isn't among the matches — the
+ * write path then snaps it onto the shared vocabulary, so a name that exists
+ * but isn't in this library yet still resolves to the same row.
  */
 const TagKindEditor = ({
   kind,
@@ -148,19 +115,34 @@ const TagKindEditor = ({
   placeholder,
   selected,
   songTitle,
-  vocabulary,
   onValueChange,
 }: TagKindEditorProps) => {
   const labelId = useId()
   const [inputValue, setInputValue] = useState('')
+  const suggestions = useTagSuggestions(inputValue)
 
   const selectedNames = selected.map((tag) => tag.name)
-  const vocab = vocabulary ?? []
   const query = normalizeTagName(inputValue)
   const matches =
-    query.length === 0 ? vocab : vocab.filter((name) => name.includes(query))
-  const isCreatable = isValidTagName(query) && !vocab.includes(query)
+    suggestions.status === 'ready'
+      ? suggestions.suggestions
+          .filter((suggestion) => suggestion.kind === kind)
+          .map((suggestion) => suggestion.name)
+      : []
+  const isCreatable = isValidTagName(query) && !matches.includes(query)
   const items = isCreatable ? [query, ...matches] : matches
+
+  const statusMessage = (() => {
+    if (query.length === 0) return ''
+    if (query.length < MIN_TAG_QUERY_LENGTH) {
+      return `Type ${MIN_TAG_QUERY_LENGTH} letters to see suggestions.`
+    }
+    if (suggestions.status === 'loading') return 'Loading suggestions…'
+    if (suggestions.status === 'unavailable') {
+      return 'Suggestions are unavailable. Free entry still works.'
+    }
+    return ''
+  })()
 
   return (
     <Combobox
@@ -191,28 +173,22 @@ const TagKindEditor = ({
           ))}
           <ComboboxInput aria-labelledby={labelId} placeholder={placeholder} />
         </ComboboxChips>
-        {vocabulary === null ? (
-          <p className='px-1.5 text-xs text-muted-foreground'>
-            Loading suggestions…
-          </p>
-        ) : null}
       </div>
-      {vocabulary !== null && (
-        <ComboboxPortal>
-          <ComboboxPositioner>
-            <ComboboxPopup>
-              <ComboboxList className='border-0'>
-                {(item: string) => (
-                  <ComboboxItem key={item} value={item}>
-                    {isCreatable && item === query ? `Create "${item}"` : item}
-                  </ComboboxItem>
-                )}
-              </ComboboxList>
-              <ComboboxEmpty>Type to add your own {kind}.</ComboboxEmpty>
-            </ComboboxPopup>
-          </ComboboxPositioner>
-        </ComboboxPortal>
-      )}
+      <ComboboxPortal>
+        <ComboboxPositioner>
+          <ComboboxPopup>
+            <ComboboxStatus>{statusMessage}</ComboboxStatus>
+            <ComboboxList className='border-0'>
+              {(item: string) => (
+                <ComboboxItem key={item} value={item}>
+                  {isCreatable && item === query ? `Create "${item}"` : item}
+                </ComboboxItem>
+              )}
+            </ComboboxList>
+            <ComboboxEmpty>Type to add your own {kind}.</ComboboxEmpty>
+          </ComboboxPopup>
+        </ComboboxPositioner>
+      </ComboboxPortal>
     </Combobox>
   )
 }
@@ -238,7 +214,6 @@ export const LibraryTagEditor = ({
 }: LibraryTagEditorProps) => {
   const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
-  const [vocabulary, setVocabulary] = useState<TagVocabulary | null>(null)
   const [genres, setGenres] = useState(userGenres)
   const [moods, setMoods] = useState(userMoods)
   const [hiddenAiGenres, setHiddenAiGenres] = useState(hiddenGenres)
@@ -282,20 +257,7 @@ export const LibraryTagEditor = ({
 
   const handleOpenChange = (nextOpen: boolean) => {
     setIsOpen(nextOpen)
-    if (nextOpen) {
-      loadVocabulary()
-        .then((loaded) => {
-          if (isActiveRef.current) setVocabulary(loaded)
-        })
-        .catch(() => {
-          if (!isActiveRef.current) return
-          setVocabulary({ genres: [], moods: [] })
-          setAnnouncement(
-            'Tag suggestions could not be loaded. Free entry still works.',
-          )
-        })
-      return
-    }
+    if (nextOpen) return
     if (hasChangedRef.current) {
       hasChangedRef.current = false
       router.refresh()
@@ -344,15 +306,6 @@ export const LibraryTagEditor = ({
           : [...current, tag]
       if (kind === 'genre') setGenres(append)
       else setMoods(append)
-      setVocabulary((current) => {
-        if (current === null) return current
-        const list = kind === 'genre' ? current.genres : current.moods
-        if (list.includes(tag.name)) return current
-        const grown = [...list, tag.name].sort()
-        return kind === 'genre'
-          ? { ...current, genres: grown }
-          : { ...current, moods: grown }
-      })
       setAnnouncement(`Added ${kind} ${tag.name}.`)
     })
   }
@@ -573,7 +526,6 @@ export const LibraryTagEditor = ({
             placeholder='Add genre'
             selected={genres}
             songTitle={songTitle}
-            vocabulary={vocabulary?.genres ?? null}
             onValueChange={handleGenresChange}
           />
           <TagKindEditor
@@ -582,7 +534,6 @@ export const LibraryTagEditor = ({
             placeholder='Add mood'
             selected={moods}
             songTitle={songTitle}
-            vocabulary={vocabulary?.moods ?? null}
             onValueChange={handleMoodsChange}
           />
         </div>

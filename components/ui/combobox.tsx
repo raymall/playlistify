@@ -160,16 +160,72 @@ function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
   )
 }
 
+function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
+  return (
+    <ComboboxPrimitive.Group
+      className={cn('empty:hidden', className)}
+      data-slot='combobox-group'
+      {...props}
+    />
+  )
+}
+
+function ComboboxGroupLabel({
+  className,
+  ...props
+}: ComboboxPrimitive.GroupLabel.Props) {
+  return (
+    <ComboboxPrimitive.GroupLabel
+      className={cn(
+        'px-1.5 py-1 text-[0.7rem] font-medium tracking-wide text-muted-foreground uppercase',
+        className,
+      )}
+      data-slot='combobox-group-label'
+      {...props}
+    />
+  )
+}
+
+/** Renders the filtered items of the enclosing List or Group. No element. */
+function ComboboxCollection({ ...props }: ComboboxPrimitive.Collection.Props) {
+  return <ComboboxPrimitive.Collection {...props} />
+}
+
+/**
+ * Politely announced status line for asynchronous lists. Must stay mounted —
+ * conditionally render its children, never the component, or the announcement
+ * is lost.
+ */
+function ComboboxStatus({
+  className,
+  ...props
+}: ComboboxPrimitive.Status.Props) {
+  return (
+    <ComboboxPrimitive.Status
+      className={cn(
+        'px-1.5 py-1 text-xs text-muted-foreground empty:hidden',
+        className,
+      )}
+      data-slot='combobox-status'
+      {...props}
+    />
+  )
+}
+
 export {
   Combobox,
   ComboboxChip,
   ComboboxChipRemove,
   ComboboxChips,
+  ComboboxCollection,
   ComboboxEmpty,
+  ComboboxGroup,
+  ComboboxGroupLabel,
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
   ComboboxPopup,
   ComboboxPortal,
   ComboboxPositioner,
+  ComboboxStatus,
 }

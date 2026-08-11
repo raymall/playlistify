@@ -1,14 +1,9 @@
 import Image from 'next/image'
-import Link from 'next/link'
 
 import { LibraryConfidenceInfo } from '@/components/library-confidence-info'
 import { LibraryRecheckAction } from '@/components/library-recheck-action'
-import {
-  type LibraryTag,
-  LibraryTagEditor,
-} from '@/components/library-tag-editor'
+import { LibraryTagEditor } from '@/components/library-tag-editor'
 import { Badge } from '@/components/ui/badge'
-import { buttonVariants } from '@/components/ui/button'
 import {
   Table,
   TableBody,
@@ -23,38 +18,12 @@ import {
   type ConfidenceBand,
   getConfidenceBand,
 } from '@/lib/enrichment/confidence'
-import { type RecheckState } from '@/lib/enrichment/recheck'
-import { type SongAIAttributes } from '@/lib/enrichment/schema'
-import { cn } from '@/lib/utils'
-
-export type LibrarySong = {
-  id: string
-  title: string | null
-  artists: string[] | null
-  albumArtUrl: string | null
-  enrichmentStatus: string
-  aiConfidence: number | null
-  aiAttributes: SongAIAttributes | null
-  aiGenres: LibraryTag[]
-  aiMoods: LibraryTag[]
-  hiddenGenres: LibraryTag[]
-  hiddenMoods: LibraryTag[]
-  userGenres: LibraryTag[]
-  userMoods: LibraryTag[]
-  recheckState: RecheckState | null
-}
+import { type LibrarySong } from '@/lib/library/song'
 
 type LibraryTableProps = {
-  page: number
-  pageCount: number
-  query: string
+  activeGenres: string[]
+  activeMoods: string[]
   songs: LibrarySong[]
-}
-
-type LibraryPaginationProps = {
-  page: number
-  pageCount: number
-  query: string
 }
 
 /**
@@ -72,63 +41,23 @@ const confidenceVariant: Record<
   high: 'default',
 }
 
-const buildHref = (targetPage: number, query: string) => {
-  const params = new URLSearchParams()
-  if (query.length > 0) params.set('q', query)
-  if (targetPage > 1) params.set('page', String(targetPage))
-  const search = params.toString()
-  return search.length > 0 ? `/library?${search}` : '/library'
-}
-
-const LibraryPagination = ({
-  page,
-  pageCount,
-  query,
-}: LibraryPaginationProps) => {
-  const hasPrev = page > 1
-  const hasNext = page < pageCount
-  const linkClass = buttonVariants({ variant: 'outline', size: 'sm' })
-  const disabledClass = cn(linkClass, 'pointer-events-none opacity-50')
-
-  return (
-    <nav
-      aria-label='Library pagination'
-      className='mt-4 flex items-center justify-between gap-4'
-    >
-      {hasPrev ? (
-        <Link className={linkClass} href={buildHref(page - 1, query)}>
-          Previous
-        </Link>
-      ) : (
-        <span aria-disabled='true' className={disabledClass}>
-          Previous
-        </span>
-      )}
-      <span className='text-sm text-muted-foreground tabular-nums'>
-        Page {page} of {pageCount}
-      </span>
-      {hasNext ? (
-        <Link className={linkClass} href={buildHref(page + 1, query)}>
-          Next
-        </Link>
-      ) : (
-        <span aria-disabled='true' className={disabledClass}>
-          Next
-        </span>
-      )}
-    </nav>
-  )
-}
-
 type LibraryTagChipsProps = {
+  activeGenres: Set<string>
+  activeMoods: Set<string>
   song: LibrarySong
 }
 
 /**
  * AI tags (filled) and the user's own tags (outlined) — variant is the
- * distinction, never hue, per the monochrome theme.
+ * distinction, never hue, per the monochrome theme. A chip matching an active
+ * filter is promoted to the strongest variant and says so in text, which
+ * answers "why did this row match?" without relying on appearance.
  */
-const LibraryTagChips = ({ song }: LibraryTagChipsProps) => {
+const LibraryTagChips = ({
+  activeGenres,
+  activeMoods,
+  song,
+}: LibraryTagChipsProps) => {
   const hiddenGenreIds = new Set(song.hiddenGenres.map((tag) => tag.id))
   const hiddenMoodIds = new Set(song.hiddenMoods.map((tag) => tag.id))
   const aiGenres = song.aiGenres.filter((tag) => !hiddenGenreIds.has(tag.id))
@@ -143,47 +72,75 @@ const LibraryTagChips = ({ song }: LibraryTagChipsProps) => {
     return <span className='text-sm text-muted-foreground'>—</span>
   }
 
+  const renderChip = (
+    key: string,
+    prefix: string,
+    name: string,
+    isActive: boolean,
+    inactiveVariant: 'secondary' | 'outline',
+  ) => (
+    <Badge key={key} variant={isActive ? 'default' : inactiveVariant}>
+      <span className='sr-only'>{prefix}</span>
+      {name}
+      {isActive && <span className='sr-only'> (active filter)</span>}
+    </Badge>
+  )
+
   return (
     <div className='flex flex-wrap items-center gap-1'>
-      {aiGenres.map((tag) => (
-        <Badge key={`ai-genre-${tag.id}`} variant='secondary'>
-          <span className='sr-only'>AI genre: </span>
-          {tag.name}
-        </Badge>
-      ))}
-      {aiMoods.map((tag) => (
-        <Badge key={`ai-mood-${tag.id}`} variant='secondary'>
-          <span className='sr-only'>AI mood: </span>
-          {tag.name}
-        </Badge>
-      ))}
-      {song.userGenres.map((tag) => (
-        <Badge key={`user-genre-${tag.id}`} variant='outline'>
-          <span className='sr-only'>Your genre: </span>
-          {tag.name}
-        </Badge>
-      ))}
-      {song.userMoods.map((tag) => (
-        <Badge key={`user-mood-${tag.id}`} variant='outline'>
-          <span className='sr-only'>Your mood: </span>
-          {tag.name}
-        </Badge>
-      ))}
+      {aiGenres.map((tag) =>
+        renderChip(
+          `ai-genre-${tag.id}`,
+          'AI genre: ',
+          tag.name,
+          activeGenres.has(tag.name),
+          'secondary',
+        ),
+      )}
+      {aiMoods.map((tag) =>
+        renderChip(
+          `ai-mood-${tag.id}`,
+          'AI mood: ',
+          tag.name,
+          activeMoods.has(tag.name),
+          'secondary',
+        ),
+      )}
+      {song.userGenres.map((tag) =>
+        renderChip(
+          `user-genre-${tag.id}`,
+          'Your genre: ',
+          tag.name,
+          activeGenres.has(tag.name),
+          'outline',
+        ),
+      )}
+      {song.userMoods.map((tag) =>
+        renderChip(
+          `user-mood-${tag.id}`,
+          'Your mood: ',
+          tag.name,
+          activeMoods.has(tag.name),
+          'outline',
+        ),
+      )}
     </div>
   )
 }
 
 export const LibraryTable = ({
-  page,
-  pageCount,
-  query,
+  activeGenres,
+  activeMoods,
   songs,
 }: LibraryTableProps) => {
+  const activeGenreNames = new Set(activeGenres)
+  const activeMoodNames = new Set(activeMoods)
+
   return (
     <div>
       <Table className='table-fixed'>
         <TableCaption className='sr-only'>
-          Your imported Liked Songs
+          Your imported Liked Songs, most recently liked first
         </TableCaption>
         <TableHeader>
           <TableRow>
@@ -248,7 +205,11 @@ export const LibraryTable = ({
                 <TableCell>
                   <div className='flex items-start gap-1'>
                     <div className='min-w-0 flex-1'>
-                      <LibraryTagChips song={song} />
+                      <LibraryTagChips
+                        activeGenres={activeGenreNames}
+                        activeMoods={activeMoodNames}
+                        song={song}
+                      />
                     </div>
                     <LibraryTagEditor
                       aiAttributes={song.aiAttributes}
@@ -281,7 +242,6 @@ export const LibraryTable = ({
           })}
         </TableBody>
       </Table>
-      <LibraryPagination page={page} pageCount={pageCount} query={query} />
     </div>
   )
 }

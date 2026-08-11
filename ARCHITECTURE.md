@@ -11,10 +11,13 @@ the same commit (rule in `AGENTS.md`).
 - `app/` — App Router pages + route handlers; `app/globals.css` holds the
   theme tokens (light/dark CSS variables).
 - `app/api/` — JSON route handlers for the client-driven batch loops and
-  mutations (import, enrich, enrichment requests, tags).
+  mutations (import, enrich, enrichment requests, tags) plus the two
+  per-keystroke read endpoints (prompt ideas, library tag suggestions).
 - `app/auth/` — OAuth callback + signout route handlers.
 - `components/` — React components (kebab-case, one primary per file);
-  `library-*.tsx` are the `/library` client panels; `chat-screen.tsx`
+  `library-*.tsx` are the `/library` panels and table — only
+  `import-panel`, `enrichment-panel`, `search-bar`, `tag-editor`,
+  `recheck-action`, and `confidence-info` are client components; `chat-screen.tsx`
   (chat state owner), `chat-conversation.tsx` (messages + composer), and
   `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI;
   `playlist-status-panel.tsx`, `playlist-actions.tsx`, and
@@ -41,6 +44,13 @@ the same commit (rule in `AGENTS.md`).
   library-grounded prompt ideas), `use-prompt-suggestions.ts` (client-side
   session cache + loading state), and `contract.ts` (client-safe proposal +
   create-response parsers).
+- `lib/library/` — `/library` search: `search-params.ts` (isomorphic URL state —
+  parse/canonicalize/build plus the transition helpers; only `withLibraryPage`
+  keeps the page), `search.ts` (server-only `searchLibrary` over
+  `library_search_page` + the hydration pass), `song.ts` (`LibrarySong` /
+  `LibraryTag` row shapes), `pagination.ts` (pure slot model), and
+  `use-tag-suggestions.ts` (client-side debounced typeahead with a bounded
+  module cache).
 - `lib/enrichment/` — `engine.ts` (enqueue/claim loop + structured-output
   call), `recipes.ts` (system recipe, queue, lease, counts, and recheck RPC
   contracts), `candidates.ts` (per-song normalization), `promotion.ts`
@@ -89,10 +99,19 @@ the same commit (rule in `AGENTS.md`).
   Service-role RPCs own job enqueue/claim/release, attempt recording, atomic
   promotion, recheck requests, and outcome counts. Authenticated
   security-invoker RPCs expose effective tag names, selectable songs, matching
-  song ids, row-level recheck states, and the per-playlist effective-tag
-  summary. `playlists.spotify_status`, `spotify_checked_at`, and
-  `spotify_image_url` cache the latest user-triggered Spotify reachability and
-  metadata scan. Column detail lives in `MVP-PLAN.md` § Database Schema.
+  song ids, row-level recheck states, the per-playlist effective-tag summary,
+  and — added by `library_search`, which also installs `pg_trgm` into the
+  `extensions` schema — `library_search_page()` (one filtered, counted,
+  ordered page of the library) and `library_tag_suggestions()` (typeahead).
+  Those two apply **no** `ai_confidence` gate, unlike
+  `library_effective_tagged_songs()`: they filter what the Library displays,
+  not what the assistant may build from. `songs.search_text` is a generated
+  lowercased `title + artists` column behind a trigram GIN;
+  `user_songs (user_id, liked_at desc nulls last, song_id)` makes the canonical
+  library order an ordered index scan. `playlists.spotify_status`,
+  `spotify_checked_at`, and `spotify_image_url` cache the latest
+  user-triggered Spotify reachability and metadata scan. Column detail lives
+  in `MVP-PLAN.md` § Database Schema.
 - `proxy.ts` — runs on every request: session refresh + route protection.
 - Root: `MVP-PLAN.md` (product spec), `HOW-IT-WORKS.md` (plain-language
   reasoning for behavior that has shipped), `RE-ENRICHMENT-PLAN.md` (guarded
@@ -111,12 +130,17 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   `components/spotify-sign-in-button.tsx`).
 - `/v2` — alternate Veil presentation of the shared landing mesh for design
   comparison (`app/v2/page.tsx`, `components/playlistify-mesh-landing.tsx`).
-- `/library` — import panel, system-selected enrichment panel, searchable
-  paginated table with a Confidence band, private AI-tag hiding, personal tags,
-  and eligible per-song rechecks
+- `/library` — import panel, system-selected enrichment panel, and a
+  database-side search: one combobox that commits either free text or
+  AND-combined genre/mood filter pills, over a first/last/numbered paginated
+  table with a Confidence band, private AI-tag hiding, personal tags, and
+  eligible per-song rechecks. URL state is `?q=&genre=&genre=&mood=&page=`
+  (repeated params, tag names as the key). Only the results suspend, so the
+  panels and the typed query survive every search
   (`app/library/page.tsx`, `app/library/loading.tsx` (instant skeleton
-  streamed while the page's queries run) +
-  `components/library-{import-panel,enrichment-panel,table,tag-editor,confidence-info,recheck-action}.tsx`).
+  streamed while the page's counts query runs) +
+  `components/library-{import-panel,enrichment-panel,search-bar,results,table,table-skeleton,pagination,tag-editor,confidence-info,recheck-action}.tsx`
+  → `lib/library/*`).
 - `/chat` — describe a playlist; conversation streams beside a live preview
   panel (rename, edit, drop tracks, create). Server-rendered empty states for
   no-library / not-yet-enriched (`app/chat/page.tsx` + `components/chat-*`,
@@ -170,6 +194,11 @@ update,delete}.ts`).
 - `GET /api/prompt-suggestions` — three library-grounded empty-chat ideas from
   the configured chat model
   (`app/api/prompt-suggestions/route.ts` → `lib/chat/suggestions.ts`).
+- `GET /api/library/tag-suggestions?q=` — matching genre/mood names present in
+  the caller's library with capped head counts, for the filter bar and the
+  per-song tag editor. Enforces the three-character minimum and the row/count
+  caps server-side (`app/api/library/tag-suggestions/route.ts` →
+  `library_tag_suggestions()`).
 
 ## Core flows
 
@@ -239,7 +268,24 @@ the open `ensureVocabularyIds` path and private `user_genres`/`user_moods`;
 actually on the canonical song. Effective tags are canonical Medium/High AI tags
 minus that user's suppressions, union personal tags; a same-name personal tag
 wins. A personal tag can make an unrecognized song selectable, but absent AI
-attributes still cannot satisfy energy/era filters.
+attributes still cannot satisfy energy/era filters. The editor's two comboboxes
+suggest from `GET /api/library/tag-suggestions` (three-character minimum,
+debounced) rather than preloading the whole shared vocabulary; free entry still
+accepts any name, and `ensureVocabularyIds` snaps it onto the existing row.
+
+**Library search** — `app/library/page.tsx` parses the URL through
+`lib/library/search-params.ts` and renders `LibrarySearchBar` plus a
+`<Suspense>` keyed on the canonical href, so a search remounts a fresh boundary
+(a revealed one would not fall back) while the panels and the typed query stay
+put. Inside it, `LibraryResults` → `searchLibrary` → `library_search_page()`
+does all filtering, counting, ordering, and paging in Postgres and returns thin
+ids; the app then hydrates song detail and the six tag embeds with one
+`.in('song_id', ids)` and scopes `library_recheck_states()` to the same ids.
+Free text ANDs its whitespace-separated terms (each matching title or artist,
+longest first so the seed drives the trigram index); pills AND across genres
+and moods by relational division. Filter matching is source-agnostic and
+ungated: an AI link the user has not hidden, or the user's own link, on any
+confidence band — clicking a chip you can see always finds the row it was on.
 
 **Chat / selection** — `components/chat-screen.tsx` (`useChat` +
 `DefaultChatTransport`) streams to `POST /api/chat`. The route fetches one
