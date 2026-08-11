@@ -524,6 +524,7 @@ export type Database = {
           id: string
           popularity: number | null
           release_date: string | null
+          search_text: string | null
           spotify_genres: string[] | null
           spotify_track_id: string
           title: string | null
@@ -551,6 +552,7 @@ export type Database = {
           id?: string
           popularity?: number | null
           release_date?: string | null
+          search_text?: string | null
           spotify_genres?: string[] | null
           spotify_track_id: string
           title?: string | null
@@ -578,6 +580,7 @@ export type Database = {
           id?: string
           popularity?: number | null
           release_date?: string | null
+          search_text?: string | null
           spotify_genres?: string[] | null
           spotify_track_id?: string
           title?: string | null
@@ -942,6 +945,21 @@ export type Database = {
           state: string
         }[]
       }
+      library_search_page: {
+        Args: {
+          p_genres?: string[]
+          p_limit?: number
+          p_moods?: string[]
+          p_offset?: number
+          p_terms?: string[]
+          p_with_count?: boolean
+        }
+        Returns: {
+          liked_at: string
+          song_id: string
+          total_count: number
+        }[]
+      }
       library_selectable_songs: {
         Args: never
         Returns: {
@@ -957,10 +975,21 @@ export type Database = {
           name: string
         }[]
       }
+      library_tag_suggestions: {
+        Args: { p_count_cap?: number; p_limit?: number; p_query?: string }
+        Returns: {
+          is_capped: boolean
+          kind: string
+          name: string
+          song_count: number
+        }[]
+      }
+      like_escape: { Args: { p_value: string }; Returns: string }
       log_unmatched_tags: {
         Args: { p_kind: string; p_names: string[] }
         Returns: undefined
       }
+      normalize_tag_name: { Args: { p_name: string }; Returns: string }
       playlist_tag_summary: {
         Args: never
         Returns: {
