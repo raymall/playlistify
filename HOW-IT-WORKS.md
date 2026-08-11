@@ -77,8 +77,9 @@ calls the column **Confidence**.
 Values are rounded to two decimal places before any cutoff is applied. A result
 below 0.40, or a supposedly recognized result with neither genres nor moods,
 becomes None and contributes no AI tags or attributes. Low AI tags stay visible
-so a user can understand the result, but they do not drive playlist matching;
-personal tags still do.
+so a user can understand the result, and they can still be searched and
+filtered in the Library, but they do not drive playlist matching; personal tags
+still do.
 
 ## When a song is allowed to be re-analyzed
 
@@ -122,9 +123,18 @@ be a deliberate operator-run backfill, not a consumer control.
 Canonical AI analysis is global, but each person controls how it affects their
 own library.
 
-For a user, the effective tags on a song are:
+For playlist building, the effective tags on a song are:
 
 `(Medium/High canonical AI tags - that user's hidden AI tags) + that user's personal tags`
+
+The Medium/High bar applies only to the AI half. A user's own tags always
+count, on any song in their library, whatever its Confidence band — a personal
+tag on a Pending, None, or Low song is as good for building a playlist as a
+High-confidence AI tag. That is what makes personal tagging a real fix and not
+just a note to self.
+
+Browsing the Library uses a deliberately wider rule, described under _Finding
+songs in the library_ below.
 
 Adding a personal genre or mood changes only that user's experience. Hiding an
 AI tag also changes only that user; the shared song is untouched and another
@@ -140,10 +150,43 @@ makes the song searchable even when AI tags do not. The limitation is that
 personal tags do not invent AI attributes: a personally tagged song with no
 known energy, era, or tempo still cannot satisfy those filters.
 
+## Finding songs in the library
+
+The Library lists a user's songs newest-liked first, a page at a time. One
+search box does both jobs: typed words search titles and artists, and choosing
+a suggested genre or mood adds it as a filter pill.
+
+**Everything narrows.** Several typed words must all match the same song's
+title or artist, not merely one of them. Several pills must all be on the song.
+Text and pills apply together. No part of a search widens it.
+
+**Suggestions come from the user's own library**, so a genre that would return
+nothing is never offered, and each suggestion carries the number of songs
+behind it. Very short fragments are ignored, because a one- or two-letter run
+matches almost everything.
+
+**What a user can see, a user can filter by.** Display deliberately ignores the
+Confidence band. For finding songs, the tags on a song are:
+
+`(all canonical AI tags - that user's hidden AI tags) + that user's personal tags`
+
+with no confidence floor — so a Low-confidence AI tag, or a personal tag on an
+unrecognized song, still finds its row. Playlist building uses the stricter
+Medium/High rule described above.
+
+The divergence is deliberate, not an oversight: a chip visible on a row must
+find that row when it is clicked, while a weak tag must still never quietly
+shape a playlist.
+
 ## From a sentence to a playlist
 
 The chat turns “something warm for a rainy Sunday, nothing too sad” into an
 actual list of songs from the user's library.
+
+**An empty conversation offers starting points.** Three prompt ideas are drawn
+from tags that genuinely exist in that user's library, so every suggestion is
+one the assistant can actually satisfy. They stay put for the life of a browser
+tab rather than reshuffling on every visit.
 
 **Free text becomes vetted tags.** The app keeps an approved list of genres and
 moods, and enrichment may only use names from that controlled vocabulary.

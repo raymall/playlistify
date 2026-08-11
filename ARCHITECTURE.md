@@ -22,7 +22,10 @@ the same commit (rule in `AGENTS.md`).
   `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI;
   `playlist-status-panel.tsx`, `playlist-actions.tsx`, and
   `playlist-tag-chips.tsx` provide the narrow client/server islands on the
-  managed `/playlists` cards.
+  managed `/playlists` cards. Shared chrome: `site-header.tsx`,
+  `nav-links.tsx`, `account-menu{,-client}.tsx`, `theme-toggle.tsx`,
+  `spotify-sign-in-button.tsx`, and `page-section.tsx` (the standard page
+  container every route renders into).
 - `components/ui/` — shadcn/ui primitives, built on `@base-ui/react` (not
   Radix), including the `dialog` and destructive-confirmation `alert-dialog`.
   Touch only to restyle a primitive; add new ones via the shadcn CLI.
@@ -83,15 +86,21 @@ the same commit (rule in `AGENTS.md`).
   chat's `resolveTags` (`lib/chat/tools.ts`), which snaps via
   `snapToExistingName` against the library's own tags — approved or not — so
   the assistant can search every name the prompt showed it.
-- `lib/json.ts` / `lib/sleep.ts` — shared JSON narrowing guards / abort-aware
-  sleep (importable from server and client code).
+- `lib/json.ts` / `lib/sleep.ts` / `lib/utils.ts` — shared JSON narrowing
+  guards / abort-aware sleep / the shadcn `cn()` class merger (all importable
+  from server and client code).
 - `scripts/` — Node ops + verification scripts (`npm run verify:*`,
   `gen:types`, `reset:enrichment`); each file's header comment says what it
-  proves. `verify-playlists.mts` live-checks Spotify playlist create, list,
-  add, generated cover metadata, details-update, and unfollow endpoints.
-  `check-node-version.mjs`
-  enforces Node 24 before dev and build; shared env guard lives in
-  `scripts/lib/env.mjs`.
+  proves. `verify-re-enrichment.mts` runs the promotion matrix as pure policy
+  tests, then checks the remote queue/attempt/canonical and RLS invariants —
+  it is the executable form of the guarded-re-enrichment test matrix.
+  `verify-playlists.mts` live-checks Spotify playlist create, list, add,
+  generated cover metadata, details-update, and unfollow endpoints;
+  `verify-rls.mjs`, `verify-import.mjs`, `verify-enrichment.mjs`,
+  `verify-genres.mts`, and `verify-chat-prompt.mts` cover their own domains,
+  and `check-tokens.mjs` / `exercise-refresh.mts` probe the Spotify token
+  path. `check-node-version.mjs` enforces Node 24 before dev and build; shared
+  env guard lives in `scripts/lib/env.mjs`.
 - `supabase/migrations/` — schema source of truth. Core tables are `profiles`,
   `spotify_tokens`, `songs`, `genres`, `moods`, AI and personal tag links,
   `user_songs`, `playlists`, `playlist_songs`, `llm_models`, and
@@ -116,8 +125,8 @@ the same commit (rule in `AGENTS.md`).
   in `MVP-PLAN.md` § Database Schema.
 - `proxy.ts` — runs on every request: session refresh + route protection.
 - Root: `MVP-PLAN.md` (product spec), `HOW-IT-WORKS.md` (plain-language
-  reasoning for behavior that has shipped), `RE-ENRICHMENT-PLAN.md` (guarded
-  re-enrichment design and rollout record), `IMPROVEMENTS.md` (gitignored debt log),
+  reasoning for behavior that has shipped), `IMPROVEMENTS.md` (committed log of
+  sharp edges + deferred work), `AGENTS.md`/`CLAUDE.md` (agent instructions),
   `README.md` (setup), `.nvmrc` + `package.json#engines` (Node 24 runtime
   contract), `.env.example` (every env var, commented), `next.config.ts`
   (Spotify image host allowlist).
@@ -168,8 +177,11 @@ an auth service that merely blinked is a 503 the client may retry for free:
   (`app/auth/callback/route.ts`).
 - `POST /auth/signout` — clears the session, redirects to `/`
   (`app/auth/signout/route.ts`).
-- `POST /api/import` — one Liked Songs batch, body `{offset}`
-  (`app/api/import/route.ts` → `lib/spotify/import.ts`).
+- `POST /api/import` — one Liked Songs batch, body
+  `{offset, syncStartedAt}`. The server issues `syncStartedAt` on the first
+  batch (`offset: 0` must send `null`) and every later batch echoes it back, so
+  one client loop is one sync pass (`app/api/import/route.ts` →
+  `lib/spotify/import.ts`).
 - `POST /api/enrich` — enqueue/claim and process one system-selected analysis
   batch, body `{processedSoFar}`, `maxDuration` 300
   (`app/api/enrich/route.ts` → `lib/enrichment/engine.ts`).
@@ -221,8 +233,9 @@ until done, riding out `safeToRetry` failures (`MAX_SAFE_RETRIES`) instead of
 pausing. `lib/spotify/import.ts` fetches up to 2 pages of `/me/tracks`
 through `lib/spotify/api.ts`, upserts metadata into `songs` (by
 `spotify_track_id`; enrichment columns never touched, so re-sync can't reset
-them) + `user_songs`. Each seen join row receives the server-issued sync
-timestamp in `imported_at`. Only after the complete import, older rows become
+them) + `user_songs`. Each seen join row receives that pass's `syncStartedAt`
+in `imported_at` — issued server-side on the first batch, echoed by the client
+afterwards and re-validated. Only after the complete import, older rows become
 removal candidates; `/me/library/contains` confirms each candidate is no
 longer saved before its private `user_songs` row is deleted. Partial imports
 never prune, and the confirmation keeps offset drift or overlapping tabs from
@@ -255,6 +268,17 @@ rejection, which prevents duplicate billing. Jobs are unique per song/recipe,
 claims use expiring leases, stale lease tokens cannot commit, and omissions
 and provider failures back off before being retired after three tries for that
 recipe.
+
+Queue order is `priority desc`, then reach (how many libraries hold the song),
+then `liked_at desc`. `priority` encodes five classes, set at enqueue:
+never-analyzed 500, explicitly rechecked None 400, explicitly rechecked Low
+300, background None 200, background Low 100 — so a user's first pass always
+outranks improvement work, and an explicit request jumps the background queue
+without bypassing eligibility, attempt caps, cooldowns, or promotion rules.
+Reach is a prioritization signal only; it never affects promotion.
+`library_recheck_states()` reports the per-row state machine
+(`available` / `queued` / `analyzing` / `no_better_recipe` /
+`checked_not_improved` / `improved`, labelled in `lib/enrichment/recheck.ts`).
 
 The vocabulary remains **closed**: the prompt carries only `is_approved`
 `genres`/`moods`; `matchApprovedVocabulary` snaps or drops output, and
@@ -356,6 +380,21 @@ unbounded cost and shared-data authority.
 have INSERT but no UPDATE policy. `lib/vocabulary.ts` uses
 insert-ignore-duplicates → select. Any write that bypasses it breaks `/api/tags`
 at runtime with an RLS error.
+
+**Display and selection use two different effective-tag rules, on purpose.**
+`library_search_page` / `library_tag_suggestions` apply
+`(all AI links − this caller's suppressions) ∪ this caller's own links` with
+**no** `ai_confidence` gate. `library_effective_tagged_songs` gates **only the
+AI branch** on `enrichment_status = 'enriched' and ai_confidence > 0.5`; the
+caller's own `user_genres`/`user_moods` links are unioned in ungated, and
+`library_selectable_songs` / `library_tag_names` OR them in the same way — so a
+personal tag counts for playlist building on any song in the caller's library,
+whatever its band. Display must be ungated so a chip visible on a row finds
+that row when clicked; the AI branch of selection must be gated so a Low
+result never quietly shapes a playlist.
+"Unifying the duplicated effective-tag logic" silently breaks one of the two.
+Stated in the `library_search` migration header and in `HOW-IT-WORKS.md`;
+no verification script asserts it yet (tracked in `IMPROVEMENTS.md`).
 
 **Confidence is rounded before it is thresholded.** `songs.ai_confidence` is
 `numeric(3,2)`, so Postgres rounds to 2dp on write. Thresholding the raw value

@@ -19,7 +19,7 @@ A user can log in with Spotify, watch their Liked Songs import and enrich, chat 
 
 ### Other
 
-- **Spotify Web API** — library import (`/me/tracks`), artist genres, playlist creation. **Important:** audio features / recommendations endpoints are deprecated for new apps (Nov 2024), so LLM enrichment is the _only_ source of mood/energy data — it is the core of the product, not a nice-to-have.
+- **Spotify Web API** — library import (`/me/tracks`), saved-state confirmation (`/me/library/contains`), playlist create/list/update/unfollow. **Important:** audio features / recommendations endpoints are deprecated for new apps (Nov 2024), so LLM enrichment is the _only_ source of mood/energy data — it is the core of the product, not a nice-to-have. Artist genres were planned as a weak fallback signal, but the batch `GET /artists` endpoint returns 403 for this app; the import degrades to `[]` and continues, so `songs.spotify_genres` is empty for every row in practice and nothing reads it.
 - **OpenAI API (default LLM provider)** — a small, cheap model for bulk
   enrichment; a stronger model for chat/selection. The system chooses an
   owner-curated enrichment recipe; users never select the model or rank that
@@ -36,7 +36,8 @@ Stated by the user (treat as non-negotiable):
 - Enrichment is cached globally: each song has one canonical AI result across
   all users. Normal analysis is bought once; only `None`/`Low` results may be
   retried, and a retry replaces the canonical result only through the guarded
-  promotion policy in `RE-ENRICHMENT-PLAN.md`.
+  promotion policy (product reasoning in `HOW-IT-WORKS.md`, mechanism in
+  `ARCHITECTURE.md`).
 - LLM provider must be swappable (OpenAI default, per user's choice).
 - Songs table keyed for multi-platform: `spotify_track_id` now, nullable `apple_music_id` reserved.
 - Songs are global; user libraries are a join table.
@@ -48,7 +49,7 @@ Decided during planning (user confirmed):
 - Unknown songs: **mark as unknown**, no web-search fallback in the MVP.
   Unknown tracks get no trusted AI tags and are skipped by AI selection unless
   the user supplies personal tags. A strictly stronger analysis recipe may
-  retry them through the guarded workflow in `RE-ENRICHMENT-PLAN.md`.
+  retry them through the guarded re-enrichment workflow.
 - Hosting: **Vercel**.
 - Enrichment recipe: **system-selected from an owner-curated catalog** (decision
   updated 2026-07-29). The earlier 2026-07-22 decision exposed the model picker
@@ -74,15 +75,17 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 **End-user:**
 
 1. Sign in / sign out with Spotify (OAuth via Supabase Auth; scopes: `user-library-read`, `playlist-read-private`, `playlist-modify-public`, `playlist-modify-private`).
-2. Import Liked Songs into the global songs table + personal library join table, with a visible progress indicator; re-sync on demand to pick up newly liked songs.
+2. Import Liked Songs into the global songs table + personal library join table, with a visible progress indicator; re-sync on demand to pick up newly liked songs and, once a pass completes, drop songs Spotify confirms are no longer saved.
 3. AI enrichment of every imported track (genres, moods, energy, era,
    descriptors + recognition confidence), batched, cached globally, resumable,
    with progress shown. The system chooses an owner-curated recipe. Weak global
    results may be retried once per genuinely stronger recipe; only a better
    candidate is promoted.
-4. Library view: browse/search imported tracks, see each track's AI
-   attributes, model-reported Confidence band, queue/recheck state, and
-   effective tags.
+4. Library view: browse imported tracks with each track's AI attributes,
+   model-reported Confidence band, queue/recheck state, and effective tags.
+   Search runs in Postgres: free text over title + artists, AND-combined
+   genre/mood filter pills fed by a library-scoped typeahead, exact counts, and
+   full pagination. All search state lives in the URL.
 5. Personal tags: add/remove your own moods and genres on any song in your
    library, and privately suppress an AI tag that should not affect your own
    playlists. Personal additions/suppressions never alter the global canonical
@@ -109,10 +112,11 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 
 1. **Landing / Login — `/`** — the Wake animated mesh, Playlistify wordmark, and "Continue with Spotify" button. The alternate Veil mesh remains available at `/v2` for comparison. Serves feature 1. Redirects signed-in users from `/` to `/chat`.
 2. **Import & Library — `/library`** — first-run: import/enrichment progress
-   with system-selected analysis; afterwards: searchable table/grid showing
-   title, artist, AI/personal mood and genre chips, Recognition state, and
-   per-track controls to add personal tags, hide AI tags privately, and request
-   an eligible recheck for `None`/`Low` songs. Includes Pending / None / Low /
+   with system-selected analysis; afterwards: a search bar that commits either
+   free text or genre/mood filter pills, over a paginated table showing title,
+   artist, AI/personal mood and genre chips, the Confidence band, and per-track
+   controls to add personal tags, hide AI tags privately, and request an
+   eligible recheck for `None`/`Low` songs. Includes Pending / None / Low /
    Medium / High confidence counts and "Re-sync Liked Songs".
    Serves features 2, 3, 4, 5.
 3. **Chat — `/chat`** (the home screen once imported) — conversation pane with streaming responses and visible tool activity; proposed-playlist panel (track list with album art, per-track rationale, remove buttons); name/description fields; "Create in Spotify" button. Serves features 6, 7, 8.
@@ -144,8 +148,9 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 ## Database Schema
 
 All tables are in Supabase Postgres. `auth.users` is managed by Supabase Auth.
-The guarded workflow's rationale, policies, and rollout record are in
-`RE-ENRICHMENT-PLAN.md`.
+`supabase/migrations/` is the source of truth; this section is the annotated
+reading of it. The guarded re-enrichment workflow's rationale is in
+`HOW-IT-WORKS.md` and its mechanism in `ARCHITECTURE.md`.
 
 **profiles** — one row per user
 
@@ -181,7 +186,9 @@ The guarded workflow's rationale, policies, and rollout record are in
 | release_date                  | date                        |                                                                             |
 | popularity                    | int                         | Spotify 0–100                                                               |
 | explicit                      | boolean                     |                                                                             |
-| spotify_genres                | text[]                      | from artist lookup (weak fallback signal)                                   |
+| spotify_genres                | text[]                      | intended artist-lookup fallback; always `[]` (see Stack → Spotify Web API)  |
+| artists_search                | text                        | generated: artists joined for search                                        |
+| search_text                   | text                        | generated: lowercased `title + artists`, behind a trigram GIN               |
 | ai_confidence                 | numeric(3,2)                | rounded 0–1 recognition self-report                                         |
 | ai_attributes                 | jsonb                       | energy (1–5), tempo_feel, era, instrumentation, descriptors[]               |
 | enrichment_status             | text                        | `pending` \| `enriched` \| `unknown`                                        |
@@ -192,6 +199,11 @@ The guarded workflow's rationale, policies, and rollout record are in
 | enrichment_revision           | bigint not null default 0   | monotonic canonical snapshot revision                                       |
 | highest_attempted_recipe_id   | uuid nullable               | highest-ranked recipe already attempted                                     |
 | highest_attempted_recipe_rank | smallint not null default 0 | eligibility/cost guard independent of whether the latest candidate promoted |
+| enrichment_attempts           | smallint not null default 0 | legacy omission counter, superseded by `song_enrichment_jobs.attempt_count` |
+| enrichment_skipped_rank       | smallint not null default 0 | legacy give-up marker, superseded by the job queue                          |
+
+The two legacy columns stay zero and are slated for removal — see
+`IMPROVEMENTS.md` → "Remove legacy model-rank and omission residue".
 
 **genres** / **moods** — shared vocabulary tables (identical shape)
 
@@ -227,6 +239,17 @@ privately by one user (identical shape)
 | song_id            | uuid → songs        | PK part 2 |
 | genre_id / mood_id | uuid → genres/moods | PK part 3 |
 | created_at         | timestamptz         |           |
+
+**unmatched_tags** — off-list enrichment output, counted so real vocabulary
+gaps can be reviewed deliberately (service-role only)
+
+| column                 | type        | notes                                  |
+| ---------------------- | ----------- | -------------------------------------- |
+| id                     | uuid PK     |                                        |
+| kind                   | text        | `genre` \| `mood`                      |
+| name                   | text        | normalized name the matcher threw away |
+| occurrences            | int         | how often it has been produced         |
+| first_seen / last_seen | timestamptz |                                        |
 
 **user_songs** — each user's library (join table)
 
@@ -346,10 +369,14 @@ repeated requests still coalesce into the global job.
 - **`ai_attributes` is jsonb on purpose**: the descriptor set will evolve; genres, moods, and confidence are promoted out of it because they're the SQL filter/cleanup targets.
 - **Why tool calling for selection**: a few-thousand-track library doesn't fit
   in a chat context. The chat model gets a `search_library` tool and picks the
-  final set from compact candidates. SQL narrows, the LLM curates. Chat and
-  Library use the same effective-tag functions: Medium/High AI tags minus the
-  caller's suppressions, plus personal tags. Low AI tags are informational
-  only.
+  final set from compact candidates. SQL narrows, the LLM curates.
+- **Display and selection are two different effective-tag rules.** Both
+  subtract the caller's suppressions and add the caller's personal tags, but
+  chat selection also gates AI links on `ai_confidence > 0.5` while Library
+  search and the tag typeahead apply no gate at all. A visible chip must find
+  its own row; a Low result must not shape a playlist. The divergence is
+  deliberate and load-bearing — see `ARCHITECTURE.md` § Constraints and
+  invariants.
 - **Enrichment remains a client-driven loop over a durable queue**: each
   authenticated request claims one leased same-recipe batch and returns
   progress. This stays inside serverless limits and is resumable without a
@@ -361,11 +388,15 @@ repeated requests still coalesce into the global job.
 
 ## Implementation Plan
 
+Status: steps 1–8, 10, and 11 are shipped. Step 9 (hardening + deploy) is the
+only remaining MVP work — the app has never been deployed to Vercel, and the
+open hardening items are tracked in `IMPROVEMENTS.md`.
+
 1. **Scaffold** — Next.js + TypeScript + Tailwind + shadcn/ui; neo-Swiss theme tokens (type scale, grid, light/dark CSS variables); nav shell and empty routes.
 2. **Auth** — Supabase project; Spotify app registration; Supabase Auth Spotify provider with the four scopes; login/logout; capture `provider_token` + `provider_refresh_token` into `spotify_tokens` at sign-in; server-side helper that returns a valid access token (refreshing against Spotify when expired) and surfaces `invalid_grant` as a "reconnect Spotify" state.
 3. **Schema** — migrations for the product, enrichment evidence/queue, private
    overlay tables, RLS policies, RPCs, constraints, and indexes.
-4. **Import** — paginated `/me/tracks` fetch → upsert `songs` (metadata + artist genres) + `user_songs`; completed re-syncs remove songs Spotify confirms are no longer liked; progress UI on `/library`.
+4. **Import** — paginated `/me/tracks` fetch → upsert `songs` (Spotify metadata; the artist-genre lookup degrades to `[]`) + `user_songs`; completed re-syncs remove songs Spotify confirms are no longer liked; progress UI on `/library`.
 5. **Enrichment** — AI SDK structured output; system-selected versioned
    recipes; globally deduplicated leased jobs; immutable candidate attempts;
    transactional guarded promotion; bounded omissions/backoff; client batch
@@ -382,8 +413,14 @@ repeated requests still coalesce into the global job.
 10. **Guarded global re-enrichment (implemented 2026-07-29)** — versioned
     recipes, append-only attempts, globally deduplicated jobs, atomic candidate
     promotion, private AI-tag suppressions, system recipe selection, and
-    outcome-centric recheck UX. The design and production rollout checklist
-    remain in `RE-ENRICHMENT-PLAN.md`.
+    outcome-centric recheck UX. Product reasoning lives in `HOW-IT-WORKS.md`,
+    mechanism in `ARCHITECTURE.md`, and the executable policy matrix in
+    `npm run verify:re-enrichment`.
+
+11. **Database-side library search (implemented 2026-08-11)** — `pg_trgm` over a
+    generated `songs.search_text`, an ordered `user_songs` index, one RPC that
+    filters/counts/orders/pages in Postgres, a library-scoped tag typeahead,
+    URL-owned search state, and full pagination.
 
 Steps 4–6 and 7–8 are the two halves of the product; each is independently demoable.
 
