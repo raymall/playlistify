@@ -1,16 +1,6 @@
+import { LibraryTableSkeleton } from '@/components/library-table-skeleton'
 import { PageSection } from '@/components/page-section'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-
-// Stable keys for the static placeholder rows (index-as-key would trip lint).
-const PLACEHOLDER_ROWS = ['a', 'b', 'c', 'd', 'e', 'f']
 
 /**
  * Instant shell for /library while the page's queries run. Mirrors the
@@ -49,56 +39,19 @@ export default function LibraryLoading() {
           </div>
         </div>
 
-        <div className='mt-10 flex flex-col gap-4'>
-          <div className='flex max-w-md items-center gap-2'>
-            <Skeleton className='h-9 flex-1' />
-            <Skeleton className='h-9 w-20' />
+        <div className='mt-10 flex flex-col gap-6'>
+          {/* Taller than the old single-line input: the chips field grows with
+              its pills, and a hint line now sits under it. */}
+          <div className='flex flex-col gap-1.5'>
+            <Skeleton className='h-5 w-40' />
+            <div className='flex max-w-2xl items-start gap-2'>
+              <Skeleton className='h-10 flex-1' />
+              <Skeleton className='h-9 w-20' />
+            </div>
+            <Skeleton className='h-4 w-72' />
           </div>
 
-          <Table className='table-fixed'>
-            <TableHeader>
-              <TableRow>
-                <TableHead className='w-16' scope='col'>
-                  <span className='sr-only'>Artwork</span>
-                </TableHead>
-                <TableHead scope='col'>Title</TableHead>
-                <TableHead scope='col'>Artists</TableHead>
-                <TableHead className='w-2/5' scope='col'>
-                  Tags
-                </TableHead>
-                <TableHead className='w-32 text-right' scope='col'>
-                  Confidence
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {PLACEHOLDER_ROWS.map((key) => (
-                <TableRow key={key}>
-                  <TableCell>
-                    <Skeleton className='size-10' />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className='h-4 w-3/4' />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className='h-4 w-2/3' />
-                  </TableCell>
-                  <TableCell>
-                    <div className='flex flex-wrap gap-1.5'>
-                      <Skeleton className='h-5 w-16 rounded-4xl' />
-                      <Skeleton className='h-5 w-20 rounded-4xl' />
-                      <Skeleton className='h-5 w-14 rounded-4xl' />
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className='flex justify-end'>
-                      <Skeleton className='h-5 w-16 rounded-4xl' />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <LibraryTableSkeleton />
         </div>
       </div>
 
