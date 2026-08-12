@@ -20,15 +20,19 @@ type LibraryResultsProps = {
 const buildEmptyMessage = (state: LibrarySearchState): string => {
   const filters = describeLibraryFilters(state)
   const hasQuery = state.query.length > 0
+  const hasTags = state.genres.length + state.moods.length > 0
   if (hasQuery && filters.length > 0) {
     return `No songs match “${state.query}” and ${filters}.`
   }
   if (hasQuery) {
     return `No songs match “${state.query}”. Try fewer words or a different spelling.`
   }
-  if (filters.length > 0) {
+  // "all of these tags" only holds while tags are the whole filter — a band
+  // widens rather than narrows, so a mixed set gets the neutral phrasing.
+  if (hasTags && state.bands.length === 0) {
     return `No songs have all of these tags: ${filters}.`
   }
+  if (filters.length > 0) return `No songs match ${filters}.`
   return 'No songs to show.'
 }
 
@@ -88,6 +92,7 @@ export const LibraryResults = async ({
       {hasResults ? (
         <div>
           <LibraryTable
+            activeBands={effectiveState.bands}
             activeGenres={effectiveState.genres}
             activeMoods={effectiveState.moods}
             songs={result.songs}

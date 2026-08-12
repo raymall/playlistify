@@ -174,7 +174,10 @@ would duplicate an existing item, contradict one, or make one obsolete:
   § Finding songs in the library — but no `verify:*` script asserts it.
 - **Why fix:** add a verification script asserting the same Low-confidence AI
   tag is findable in Library and unusable in chat. Prose in three files is a
-  weak guard for an invariant that spans two features.
+  weak guard for an invariant that spans two features. The Confidence band
+  filter now makes the divergence directly reachable — filtering Library by Low
+  lists exactly the songs whose AI tags chat refuses — so the assertion has an
+  obvious fixture to build on.
 
 ## Prompt tag lists still carry a silent 600-name cap
 
@@ -611,18 +614,6 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** length is one of the most visible playlist properties. A
   `lengthIntent` such as `all | count | duration` and a preview adjustment would
   make it explicit instead of forcing track-by-track deletion.
-
-## Library cannot filter by status or confidence
-
-- **In plain terms:** Library now filters by genre and mood, but the Confidence
-  band and enrichment status shown in the table are still display-only.
-- **Complexity:** Low — two more URL params through the existing
-  `library_search_page` guards; no new UI pattern, the pills already exist.
-- **Issue:** `parseLibrarySearchParams` reads `q`, `genre`, `mood`, and `page`.
-  A user who wants "everything still Pending" or "only Low" has to page the
-  whole library by eye.
-- **Why fix:** those two are the natural companions to the tag pills and the
-  main way to find rows worth rechecking or tagging by hand.
 
 ## Per-run cap and batch size are unmeasured cost/quality knobs
 

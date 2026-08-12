@@ -10,6 +10,12 @@
 // Pure and isomorphic (no 'use client', no next/server): the server component
 // parses, the search bar rebuilds, both from this module.
 
+import {
+  CONFIDENCE_BAND_ORDER,
+  CONFIDENCE_BANDS,
+  type ConfidenceBand,
+  readConfidenceBand,
+} from '@/lib/enrichment/confidence'
 import { type TagKind } from '@/lib/tags'
 import { MAX_TAG_LENGTH, normalizeTagName } from '@/lib/vocabulary'
 
@@ -36,6 +42,7 @@ export type LibrarySearchState = {
   query: string
   genres: string[]
   moods: string[]
+  bands: ConfidenceBand[]
   page: number
 }
 
@@ -68,6 +75,20 @@ const parseNames = (raw: string | string[] | undefined): string[] => {
   return [...names].sort().slice(0, MAX_LIBRARY_TAG_FILTERS)
 }
 
+/**
+ * Ordered by the band scale, not alphabetically — Pending → High is the order
+ * the panel and the help popover already use, and being deterministic is what
+ * keeps one filter set from producing two hrefs.
+ */
+const parseBands = (raw: string | string[] | undefined): ConfidenceBand[] => {
+  const bands = new Set<ConfidenceBand>()
+  for (const value of toValues(raw)) {
+    const band = readConfidenceBand(value.trim().toLowerCase())
+    if (band !== null) bands.add(band)
+  }
+  return CONFIDENCE_BAND_ORDER.filter((band) => bands.has(band))
+}
+
 const parsePage = (raw: string | string[] | undefined): number => {
   const page = Number.parseInt(toValues(raw).at(0) ?? '', 10)
   if (!Number.isFinite(page) || page < 1) return 1
@@ -80,6 +101,7 @@ export const parseLibrarySearchParams = (
   query: parseQuery(params.q),
   genres: parseNames(params.genre),
   moods: parseNames(params.mood),
+  bands: parseBands(params.band),
   page: parsePage(params.page),
 })
 
@@ -88,6 +110,7 @@ export const buildLibraryHref = (state: LibrarySearchState): string => {
   if (state.query.length > 0) params.set('q', state.query)
   for (const name of state.genres) params.append('genre', name)
   for (const name of state.moods) params.append('mood', name)
+  for (const band of state.bands) params.append('band', band)
   if (state.page > 1) params.set('page', String(state.page))
   const search = params.toString()
   return search.length > 0 ? `/library?${search}` : '/library'
@@ -143,16 +166,37 @@ export const withoutLibraryFilter = (
   }
 }
 
+export const withLibraryBand = (
+  state: LibrarySearchState,
+  band: ConfidenceBand,
+): LibrarySearchState => ({
+  ...state,
+  bands: CONFIDENCE_BAND_ORDER.filter(
+    (candidate) => candidate === band || state.bands.includes(candidate),
+  ),
+  page: 1,
+})
+
+export const withoutLibraryBand = (
+  state: LibrarySearchState,
+  band: ConfidenceBand,
+): LibrarySearchState => ({
+  ...state,
+  bands: state.bands.filter((candidate) => candidate !== band),
+  page: 1,
+})
+
 /** Back to a bare /library — text, pills, and page all dropped. */
 export const clearLibraryFilters = (): LibrarySearchState => ({
   query: '',
   genres: [],
   moods: [],
+  bands: [],
   page: 1,
 })
 
 export const countLibraryFilters = (state: LibrarySearchState): number =>
-  state.genres.length + state.moods.length
+  state.genres.length + state.moods.length + state.bands.length
 
 /** Ordered pills, genres first — the order chips and copy both follow. */
 export const listLibraryFilters = (
@@ -162,15 +206,34 @@ export const listLibraryFilters = (
   ...state.moods.map((name) => ({ kind: 'mood' as const, name })),
 ]
 
+const joinParts = (parts: string[], conjunction: string): string => {
+  if (parts.length === 0) return ''
+  if (parts.length === 1) return parts[0]
+  const last = parts[parts.length - 1]
+  return `${parts.slice(0, -1).join(', ')} ${conjunction} ${last}`
+}
+
 /**
- * "genre britpop and mood melancholy" — one phrasing shared by the empty-state
- * copy and the live region, so the two can't drift.
+ * "Confidence High or Medium" — bands read as a choice because a song carries
+ * exactly one, so unlike tags they widen the result rather than narrowing it.
+ */
+export const describeLibraryBands = (state: LibrarySearchState): string =>
+  state.bands.length === 0
+    ? ''
+    : `Confidence ${joinParts(
+        state.bands.map((band) => CONFIDENCE_BANDS[band].label),
+        'or',
+      )}`
+
+/**
+ * "genre britpop and Confidence High or Medium" — one phrasing shared by the
+ * empty-state copy and the live region, so the two can't drift.
  */
 export const describeLibraryFilters = (state: LibrarySearchState): string => {
   const parts = listLibraryFilters(state).map(
     (filter) => `${filter.kind} ${filter.name}`,
   )
-  if (parts.length === 0) return ''
-  if (parts.length === 1) return parts[0]
-  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+  const bands = describeLibraryBands(state)
+  if (bands.length > 0) parts.push(bands)
+  return joinParts(parts, 'and')
 }

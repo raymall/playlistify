@@ -142,11 +142,13 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 - `/v2` — alternate Veil presentation of the shared landing mesh for design
   comparison (`app/v2/page.tsx`, `components/playlistify-mesh-landing.tsx`).
 - `/library` — import panel, system-selected enrichment panel, and a
-  database-side search: one combobox that commits either free text or
-  AND-combined genre/mood filter pills, over a first/last/numbered paginated
-  table with a Confidence band, private AI-tag hiding, personal tags, and
-  eligible per-song rechecks. URL state is `?q=&genre=&genre=&mood=&page=`
-  (repeated params, tag names as the key). Only the results suspend, so the
+  database-side search: one combobox that commits free text, AND-combined
+  genre/mood filter pills, or OR-combined Confidence band pills, over a
+  first/last/numbered paginated table with a Confidence band, private AI-tag
+  hiding, personal tags, and eligible per-song rechecks. URL state is
+  `?q=&genre=&genre=&mood=&band=&page=` (repeated params, tag names and band
+  slugs as the keys). Bands OR because a song carries exactly one; they still
+  AND with text and tags. Only the results suspend, so the
   panels and the typed query survive every search
   (`app/library/page.tsx`, `app/library/loading.tsx` (instant skeleton
   streamed while the page's counts query runs) +
@@ -320,6 +322,11 @@ prompt (`lib/chat/prompt.ts`) and to bound what `search_library` may resolve,
 so the assistant searches exactly the vocabulary it was shown. The tag lists
 in the prompt are **complete, never sampled** — a truncated list is a silently
 unsearchable slice of the library. The empty conversation separately requests
+Confidence band pills go through `confidence_band()`, the one SQL definition of
+the band rule; `get_library_enrichment_counts` and the row badge must agree with
+it, and an expression index over the identical call keeps the predicate
+sargable without a generated column. Bands are a closed set of five, so the bar
+matches them locally with no request and no three-character minimum.
 three ideas grounded in a random bounded sample of those real tags and caches
 them in `sessionStorage`, so they stay stable across reloads in one browser tab.
 Then `streamText` with a `stepCountIs(8)` tool loop. `search_library`
@@ -404,6 +411,17 @@ writes the rounded value — which keeps the cutoff auditable in SQL and
 `verify:enrichment` truthful.
 
 **The closed vocabulary is prompt-enforced, not schema-enforced.** The zod
+**One Confidence band rule, read by three surfaces.** The row badge
+(`getConfidenceBand`), the panel totals (`get_library_enrichment_counts`), and
+the Library band filter must classify every song identically, or a user filters
+by Low and gets rows the badge calls Medium. `public.confidence_band()` is the
+single SQL definition and the filter calls it; `getConfidenceBand` mirrors it in
+TypeScript. The two stay equivalent only because `enrichment_status` is CHECKed
+to `('pending', 'enriched', 'unknown')`, which is what makes SQL's
+`<> 'enriched'` and the counts' `= 'unknown'` the same test — widen that CHECK
+and the None band silently swallows the new status. Bands OR rather than AND in
+the URL because a song carries exactly one.
+
 schema still types genres/moods as `z.array(z.string())`. A hard
 `z.enum(approvedNames)` would make off-list output impossible — but also
 invisible, so nothing would reach `unmatched_tags` and the signal for growing

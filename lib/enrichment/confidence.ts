@@ -17,6 +17,25 @@ export const CONFIDENCE_BAND_ORDER = [
   'high',
 ] as const
 
+/** Narrows a URL param or API value onto the band union. */
+export const readConfidenceBand = (value: unknown): ConfidenceBand | null => {
+  switch (value) {
+    case 'pending':
+    case 'none':
+    case 'low':
+    case 'medium':
+    case 'high':
+      return value
+    default:
+      return null
+  }
+}
+
+/**
+ * The app-side band rule. Mirrored in SQL by `public.confidence_band()`, which
+ * the Library filter and the panel counts both go through — change one and the
+ * badge, the filter, and the totals disagree.
+ */
 export const getConfidenceBand = (
   status: string,
   confidence: number | null,

@@ -67,7 +67,10 @@ export const searchLibrary = async (
 ): Promise<LibrarySearchResult> => {
   const terms = toSearchTerms(state.query)
   const hasFilters =
-    terms.length > 0 || state.genres.length > 0 || state.moods.length > 0
+    terms.length > 0 ||
+    state.genres.length > 0 ||
+    state.moods.length > 0 ||
+    state.bands.length > 0
 
   // With nothing filtered the count equals the library total, which the page
   // already has from library_enrichment_counts — so don't pay for it twice.
@@ -75,6 +78,7 @@ export const searchLibrary = async (
     p_terms: terms,
     p_genres: state.genres,
     p_moods: state.moods,
+    p_bands: state.bands,
     p_limit: LIBRARY_PAGE_SIZE,
     p_offset: (state.page - 1) * LIBRARY_PAGE_SIZE,
     p_with_count: hasFilters,

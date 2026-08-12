@@ -21,6 +21,7 @@ import {
 import { type LibrarySong } from '@/lib/library/song'
 
 type LibraryTableProps = {
+  activeBands: ConfidenceBand[]
   activeGenres: string[]
   activeMoods: string[]
   songs: LibrarySong[]
@@ -129,12 +130,14 @@ const LibraryTagChips = ({
 }
 
 export const LibraryTable = ({
+  activeBands,
   activeGenres,
   activeMoods,
   songs,
 }: LibraryTableProps) => {
   const activeGenreNames = new Set(activeGenres)
   const activeMoodNames = new Set(activeMoods)
+  const activeBandSet = new Set(activeBands)
 
   return (
     <div>
@@ -226,8 +229,17 @@ export const LibraryTable = ({
                   </div>
                 </TableCell>
                 <TableCell className='text-right'>
-                  <Badge variant={confidenceVariant[confidenceBand]}>
+                  <Badge
+                    variant={
+                      activeBandSet.has(confidenceBand)
+                        ? 'default'
+                        : confidenceVariant[confidenceBand]
+                    }
+                  >
                     {CONFIDENCE_BANDS[confidenceBand].label}
+                    {activeBandSet.has(confidenceBand) && (
+                      <span className='sr-only'> (active filter)</span>
+                    )}
                   </Badge>
                   {song.recheckState !== null && (
                     <LibraryRecheckAction

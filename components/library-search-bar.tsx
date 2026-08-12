@@ -29,6 +29,12 @@ import {
   ComboboxStatus,
 } from '@/components/ui/combobox'
 import {
+  CONFIDENCE_BAND_ORDER,
+  CONFIDENCE_BANDS,
+  type ConfidenceBand,
+  readConfidenceBand,
+} from '@/lib/enrichment/confidence'
+import {
   buildLibraryHref,
   clearLibraryFilters,
   countLibraryFilters,
@@ -36,8 +42,10 @@ import {
   type LibraryTagFilter,
   listLibraryFilters,
   MIN_TAG_QUERY_LENGTH,
+  withLibraryBand,
   withLibraryFilter,
   withLibraryQuery,
+  withoutLibraryBand,
   withoutLibraryFilter,
 } from '@/lib/library/search-params'
 import { useTagSuggestions } from '@/lib/library/use-tag-suggestions'
@@ -51,6 +59,7 @@ type LibrarySearchItem =
   | { kind: 'text'; name: string }
   | { kind: 'genre'; name: string; songCount: number; isCapped: boolean }
   | { kind: 'mood'; name: string; songCount: number; isCapped: boolean }
+  | { kind: 'band'; band: ConfidenceBand }
 
 type LibrarySearchGroup = {
   key: string
@@ -58,25 +67,41 @@ type LibrarySearchGroup = {
   items: LibrarySearchItem[]
 }
 
+/** A pill in the chips field: a tag, or a Confidence band. */
+type AppliedFilter =
+  | { kind: 'tag'; filter: LibraryTagFilter }
+  | { kind: 'band'; band: ConfidenceBand }
+
 /**
- * The free-text row's value. Tag values always carry a `kind:name` colon, so a
- * bare sentinel can never collide with one.
+ * The free-text row's value. Every filter value carries a `kind:value` colon,
+ * so a bare sentinel can never collide with one.
  */
 const TEXT_ITEM_VALUE = 'text'
 
-const toItemValue = (item: LibrarySearchItem) =>
-  item.kind === 'text' ? TEXT_ITEM_VALUE : `${item.kind}:${item.name}`
+const toItemValue = (item: LibrarySearchItem) => {
+  if (item.kind === 'text') return TEXT_ITEM_VALUE
+  if (item.kind === 'band') return `band:${item.band}`
+  return `${item.kind}:${item.name}`
+}
 
-const toFilterValue = (filter: LibraryTagFilter) =>
-  `${filter.kind}:${filter.name}`
+const toFilterValue = (applied: AppliedFilter) =>
+  applied.kind === 'band'
+    ? `band:${applied.band}`
+    : `${applied.filter.kind}:${applied.filter.name}`
 
-const parseFilterValue = (value: string): LibraryTagFilter | null => {
+const parseFilterValue = (value: string): AppliedFilter | null => {
   const separator = value.indexOf(':')
   if (separator < 0) return null
   const kind = value.slice(0, separator)
-  const name = value.slice(separator + 1)
+  const rest = value.slice(separator + 1)
+  if (kind === 'band') {
+    const band = readConfidenceBand(rest)
+    return band === null ? null : { kind: 'band', band }
+  }
   if (kind !== 'genre' && kind !== 'mood') return null
-  return name.length === 0 ? null : { kind, name }
+  return rest.length === 0
+    ? null
+    : { kind: 'tag', filter: { kind, name: rest } }
 }
 
 const KIND_LABELS = { genre: 'Genre', mood: 'Mood' } as const
@@ -122,8 +147,15 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
 
   const suggestions = useTagSuggestions(inputValue)
   const trimmedInput = inputValue.trim()
+  const lowerInput = trimmedInput.toLowerCase()
   const normalizedInput = normalizeTagName(inputValue)
-  const pills = listLibraryFilters(echo)
+  const pills: AppliedFilter[] = [
+    ...listLibraryFilters(echo).map((filter): AppliedFilter => ({
+      kind: 'tag',
+      filter,
+    })),
+    ...echo.bands.map((band): AppliedFilter => ({ kind: 'band', band })),
+  ]
   const appliedValues = pills.map(toFilterValue)
 
   const suggested =
@@ -153,6 +185,17 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
       })
     }
   }
+  // Bands are a closed set of five, so they match locally — no request, and no
+  // three-character gate, which is why "hi" can already offer High while tag
+  // suggestions are still below their minimum.
+  if (trimmedInput.length > 0) {
+    const bandItems = CONFIDENCE_BAND_ORDER.filter((band) =>
+      CONFIDENCE_BANDS[band].label.toLowerCase().includes(lowerInput),
+    ).map((band): LibrarySearchItem => ({ kind: 'band', band }))
+    if (bandItems.length > 0) {
+      groups.push({ key: 'band', label: 'Confidence', items: bandItems })
+    }
+  }
 
   const commit = (next: LibrarySearchState) => {
     setEcho(next)
@@ -177,16 +220,22 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
     const incoming = new Set(next)
     let nextState = echo
     for (const value of next) {
-      const filter = applied.has(value) ? null : parseFilterValue(value)
-      if (filter !== null) nextState = withLibraryFilter(nextState, filter)
+      const added = applied.has(value) ? null : parseFilterValue(value)
+      if (added === null) continue
+      nextState =
+        added.kind === 'band'
+          ? withLibraryBand(nextState, added.band)
+          : withLibraryFilter(nextState, added.filter)
     }
     let hasRemoved = false
     for (const value of appliedValues) {
-      const filter = incoming.has(value) ? null : parseFilterValue(value)
-      if (filter !== null) {
-        nextState = withoutLibraryFilter(nextState, filter)
-        hasRemoved = true
-      }
+      const removed = incoming.has(value) ? null : parseFilterValue(value)
+      if (removed === null) continue
+      nextState =
+        removed.kind === 'band'
+          ? withoutLibraryBand(nextState, removed.band)
+          : withoutLibraryFilter(nextState, removed.filter)
+      hasRemoved = true
     }
     if (nextState === echo) return
 
@@ -266,6 +315,9 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
       {echo.moods.map((name) => (
         <input key={`mood-${name}`} name='mood' type='hidden' value={name} />
       ))}
+      {echo.bands.map((band) => (
+        <input key={`band-${band}`} name='band' type='hidden' value={band} />
+      ))}
 
       <label className='text-sm font-medium' htmlFor={inputId}>
         Search your library
@@ -286,17 +338,27 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
       >
         <div className='flex max-w-2xl items-start gap-2'>
           <ComboboxChips>
-            {pills.map((filter) => (
-              <ComboboxChip key={toFilterValue(filter)}>
-                <span className='sr-only'>
-                  {KIND_LABELS[filter.kind]} filter:{' '}
-                </span>
-                {filter.name}
-                <ComboboxChipRemove
-                  aria-label={`Remove ${filter.kind} ${filter.name} filter`}
-                />
-              </ComboboxChip>
-            ))}
+            {pills.map((pill) => {
+              const label =
+                pill.kind === 'band'
+                  ? CONFIDENCE_BANDS[pill.band].label
+                  : pill.filter.name
+              const prefix =
+                pill.kind === 'band'
+                  ? 'Confidence'
+                  : KIND_LABELS[pill.filter.kind]
+              const target =
+                pill.kind === 'band'
+                  ? `confidence ${label}`
+                  : `${pill.filter.kind} ${label}`
+              return (
+                <ComboboxChip key={toFilterValue(pill)}>
+                  <span className='sr-only'>{prefix} filter: </span>
+                  {label}
+                  <ComboboxChipRemove aria-label={`Remove ${target} filter`} />
+                </ComboboxChip>
+              )
+            })}
             <ComboboxInput
               ref={inputRef}
               aria-describedby={hintId}
@@ -339,11 +401,22 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
                           key={toItemValue(item)}
                           value={toItemValue(item)}
                         >
-                          {item.kind === 'text' ? (
+                          {item.kind === 'text' && (
                             <span className='truncate'>
                               Search “{item.name}” in titles and artists
                             </span>
-                          ) : (
+                          )}
+                          {item.kind === 'band' && (
+                            <>
+                              <span className='truncate'>
+                                {CONFIDENCE_BANDS[item.band].label}
+                              </span>
+                              <span className='ml-auto shrink-0 text-xs text-muted-foreground'>
+                                confidence band
+                              </span>
+                            </>
+                          )}
+                          {(item.kind === 'genre' || item.kind === 'mood') && (
                             <>
                               <span className='truncate'>{item.name}</span>
                               <span className='ml-auto shrink-0 text-xs text-muted-foreground tabular-nums'>
@@ -369,7 +442,8 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
       </Combobox>
 
       <p className='text-xs text-muted-foreground' id={hintId}>
-        Type a title or artist, or pick a tag to filter. Tags combine with AND.
+        Type a title or artist, or pick a tag or Confidence band to filter. Tags
+        combine with AND, bands with OR.
       </p>
 
       <p aria-live='polite' className='sr-only' role='status'>
