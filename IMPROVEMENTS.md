@@ -57,10 +57,9 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Severity:** Medium — the last observed set included high-severity
   advisories, but the install summary did not separate production dependencies
   from development tools.
-- **Issue:** the last verified `npm install` result on 2026-07-29 reported 14
-  advisories (2 moderate, 12 high). The current count was not re-queried during
-  this audit because `npm audit` sends the dependency graph to npm's external
-  advisory service and that egress was not authorized. No broad
+- **Issue:** the GSAP dependency install on 2026-08-11 reported 12 advisories
+  (3 moderate, 9 high), down from the 14 reported on 2026-07-29. The install
+  summary still does not classify production reachability. No broad
   `npm audit fix` has been run.
 - **Why fix:** determine which advisories are reachable in production, dismiss
   irrelevant development-only paths explicitly, and apply compatible upgrades
@@ -124,6 +123,35 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** explicit approved branding makes the source unmistakable and
   brings the cover presentation fully in line with Spotify's display guidance.
 
+## Landing hero text contrast changes with the shader frame
+
+- **In plain terms:** the wordmark and tagline sit directly on an animated light
+  field, so bright frames can wash them out. Find a frame-independent treatment
+  that preserves the clean, panel-free hero design.
+- **Severity:** Medium — shader estimates show frames below the required text
+  contrast, but the current shadow still needs direct sampling.
+- **Issue:** the tagline deliberately uses only a subtle text shadow, and the
+  wordmark relies on the shader's protected lane. Reconstructing the tone-mapped
+  shader output puts a bright patch near 1.8:1 against their light colors; text
+  shadow may improve the glyph-edge contrast but has not been measured across
+  representative frames.
+- **Why fix:** a stable treatment keeps both pieces of hero copy readable
+  throughout the animation and removes a frame-dependent WCAG 1.4.3 failure
+  without bringing back a broad dark panel.
+
+## The landing cutout paints above every hero layer
+
+- **In plain terms:** the Chandler cutout is a sibling painted over the entire
+  isolated hero, so it can cover copy or controls at cramped sizes. Put it in a
+  stacking layer between the canvas and the interactive hero content.
+- **Severity:** Medium — the current widths keep the new tagline clear, but the
+  CTA has little clearance and future hero content can be silently obscured.
+- **Issue:** `.mesh-landing` creates an isolated stacking context while the
+  image in `app/page.tsx` has `z-10`. The wordmark, tagline, and CTA z-indexes
+  are trapped inside the section and can never paint over that sibling.
+- **Why fix:** a deliberate shared stacking context would let the cutout stay
+  above the mesh while guaranteeing that readable and interactive content wins.
+
 ## The site header forces horizontal scrolling on mobile
 
 - **In plain terms:** the main navigation and account controls stay on one line
@@ -136,6 +164,19 @@ would duplicate an existing item, contradict one, or make one obsolete:
   becomes the document width below that threshold.
 - **Why fix:** removing the page-level horizontal scroll restores WCAG 1.4.10
   reflow and lets the otherwise responsive chat layout use the real viewport.
+
+## The landing cutout requests an undersized desktop image
+
+- **In plain terms:** large screens render the cutout at 25rem but tell the
+  image optimizer it will be only 16rem, so the browser can choose a blurry
+  source. Make `sizes` match the responsive width classes.
+- **Severity:** Low — the page still works, but desktop visitors may download a
+  256px candidate and upscale it to roughly 400px.
+- **Issue:** `app/page.tsx` pairs `lg:w-100` with
+  `sizes='(min-width: 1024px) 16rem, …'`; those two declarations disagree by
+  about 36% at the large breakpoint.
+- **Why fix:** accurate sizing lets Next.js choose a sharp-enough candidate
+  without guessing high and wasting bandwidth at smaller breakpoints.
 
 ## The admin-client allowlist is lint-only
 

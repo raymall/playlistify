@@ -110,7 +110,7 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 
 ## Views / Pages
 
-1. **Landing / Login — `/`** — the Wake animated mesh, Playlistify wordmark, and "Continue with Spotify" button. The alternate Veil mesh remains available at `/v2` for comparison. Serves feature 1. Redirects signed-in users from `/` to `/chat`.
+1. **Landing / Login — `/`** — the Wake animated mesh, Playlistify wordmark, briefly rotating liked-songs tagline, and "Continue with Spotify" button. The alternate Veil mesh remains available at `/v2` for comparison. Serves feature 1. Redirects signed-in users from `/` to `/chat`.
 2. **Import & Library — `/library`** — first-run: import/enrichment progress
    with system-selected analysis; afterwards: a search bar that commits either
    free text or genre/mood filter pills, over a paginated table showing title,

@@ -22,7 +22,9 @@ the same commit (rule in `AGENTS.md`).
   `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI;
   `playlist-status-panel.tsx`, `playlist-actions.tsx`, and
   `playlist-tag-chips.tsx` provide the narrow client/server islands on the
-  managed `/playlists` cards. Shared chrome: `site-header.tsx`,
+  managed `/playlists` cards; `playlistify-mesh-landing.tsx` owns the shared
+  Wake/Veil canvas and `playlistify-mesh-tagline.tsx` owns its animated landing
+  copy. Shared chrome: `site-header.tsx`,
   `nav-links.tsx`, `account-menu{,-client}.tsx`, `theme-toggle.tsx`,
   `spotify-sign-in-button.tsx`, and `page-section.tsx` (the standard page
   container every route renders into).
@@ -56,6 +58,8 @@ the same commit (rule in `AGENTS.md`).
   `LibraryTag` row shapes), `pagination.ts` (pure slot model), and
   `use-tag-suggestions.ts` (client-side debounced typeahead with a bounded
   module cache).
+- `lib/landing/` — client-safe landing-page copy and the never-repeat random
+  tagline picker.
 - `lib/enrichment/` — `engine.ts` (enqueue/claim loop + structured-output
   call), `recipes.ts` (system recipe, queue, lease, counts, and recheck RPC
   contracts), `candidates.ts` (per-song normalization), `promotion.ts`
@@ -135,12 +139,16 @@ the same commit (rule in `AGENTS.md`).
 
 Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 
-- `/` — Wake animated mesh + "Continue with Spotify"; proxy redirects signed-in
-  users to `/chat` (`app/page.tsx`,
+- `/` — Wake animated mesh, briefly rotating liked-songs tagline, and
+  "Continue with Spotify"; proxy redirects signed-in users to `/chat`
+  (`app/page.tsx`,
   `components/playlistify-mesh-landing.tsx`,
+  `components/playlistify-mesh-tagline.tsx`,
   `components/spotify-sign-in-button.tsx`).
-- `/v2` — alternate Veil presentation of the shared landing mesh for design
-  comparison (`app/v2/page.tsx`, `components/playlistify-mesh-landing.tsx`).
+- `/v2` — alternate Veil presentation of the shared landing mesh and briefly
+  rotating tagline for design comparison (`app/v2/page.tsx`,
+  `components/playlistify-mesh-landing.tsx`,
+  `components/playlistify-mesh-tagline.tsx`).
 - `/library` — import panel, system-selected enrichment panel, and a
   database-side search: one combobox that commits free text, AND-combined
   genre/mood filter pills, or OR-combined Confidence band pills, over a

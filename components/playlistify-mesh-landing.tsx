@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 
+import { PlaylistifyMeshTagline } from '@/components/playlistify-mesh-tagline'
 import { SpotifySignInButton } from '@/components/spotify-sign-in-button'
 
 const VERTEX_SHADER_SOURCE = `
@@ -489,6 +490,8 @@ export const PlaylistifyMeshLanding = ({
       >
         PLAYLISTIFY
       </h1>
+
+      <PlaylistifyMeshTagline />
 
       <div className='mesh-landing-cta'>
         <SpotifySignInButton className='h-12 cursor-pointer rounded-full border-white/20 bg-[#f1f5eb] px-6 text-[#10170f] shadow-[0_1rem_3rem_rgba(0,0,0,0.3)] hover:bg-white focus-visible:border-white/70 focus-visible:ring-white/30' />

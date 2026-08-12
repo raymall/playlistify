@@ -122,7 +122,7 @@ body:has(.mesh-landing) .site-header {
   position: relative;
   width: 100%;
   min-height: 100svh;
-  overflow: hidden;
+  overflow-x: clip;
   color: #f3f5ee;
   background: radial-gradient(
     circle at 50% 58%,
@@ -241,10 +241,47 @@ body:has(.mesh-landing) .site-header {
 
 .mesh-landing-cta {
   position: absolute;
-  inset-block-start: calc(50% + clamp(4.25rem, 8vw, 5.5rem));
+  inset-block-start: calc(50% + clamp(8.5rem, 14vw, 10.25rem));
   inset-inline-start: 50%;
   z-index: 3;
   transform: translateX(-50%);
+}
+
+.mesh-landing-tagline-slot {
+  position: absolute;
+  inset-block-start: calc(50% + clamp(3.25rem, 6vw, 4.5rem));
+  inset-inline-start: 50%;
+  z-index: 2;
+  width: min(90vw, 34rem);
+  opacity: 0;
+  transform: translateX(-50%);
+}
+
+.mesh-landing-tagline-slot[data-ready='true'] {
+  opacity: 1;
+}
+
+.mesh-landing-tagline {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: calc(2 * 1.45em);
+  font-size: clamp(0.9375rem, 2.4vw, 1.125rem);
+  line-height: 1.45;
+  color: #e8eede;
+  text-align: center;
+  text-shadow: 0 0.125rem 0.45rem rgb(0 0 0 / 88%);
+  pointer-events: none;
+  user-select: none;
+}
+
+.mesh-landing-tagline-line {
+  grid-area: 1 / 1;
+}
+
+.mesh-landing-tagline-char,
+.mesh-landing-tagline-word {
+  display: inline-block;
 }
 
 @keyframes mesh-wordmark-flow {
@@ -278,5 +315,29 @@ body:has(.mesh-landing) .site-header {
   .mesh-landing-wordmark {
     animation-duration: 0.01ms;
     animation-iteration-count: 1;
+  }
+}
+
+@media (scripting: none) {
+  .mesh-landing-tagline-slot {
+    opacity: 1;
+  }
+}
+
+@media (height <= 34rem) {
+  .mesh-landing-cutout {
+    display: none;
+  }
+
+  .mesh-landing-tagline-slot {
+    inset-block-start: calc(50% + 2.75rem);
+  }
+
+  .mesh-landing-tagline {
+    font-size: 0.875rem;
+  }
+
+  .mesh-landing-cta {
+    inset-block-start: calc(50% + 7.5rem);
   }
 }
