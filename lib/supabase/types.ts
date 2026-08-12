@@ -900,6 +900,10 @@ export type Database = {
           vocabulary_version: string
         }[]
       }
+      confidence_band: {
+        Args: { p_confidence: number; p_status: string }
+        Returns: string
+      }
       enqueue_library_enrichment_jobs: {
         Args: { p_user_id: string }
         Returns: number
@@ -947,6 +951,7 @@ export type Database = {
       }
       library_search_page: {
         Args: {
+          p_bands?: string[]
           p_genres?: string[]
           p_limit?: number
           p_moods?: string[]
