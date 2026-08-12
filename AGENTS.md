@@ -26,7 +26,7 @@ before editing or reviewing a matching file, read every applicable rule file:
 | `**/*.{html,liquid}`                           | `.claude/rules/accessibility.md`                             |
 | `public/**/*.js`                               | `.claude/rules/browser.md`, `.claude/rules/accessibility.md` |
 | `supabase/**`, `lib/supabase/**`, `scripts/**` | `.claude/rules/database.md`                                  |
-| Creating a commit                              | `.claude/rules/commits.md`                                   |
+| Branching or creating a commit                 | `.claude/rules/commits.md`                                   |
 | Creating a pull request                        | `.claude/rules/pull-requests.md`                             |
 
 When a file matches multiple rule files, follow all of them; more specific rules win on conflict. Match existing patterns in a file or project over these defaults when they diverge.

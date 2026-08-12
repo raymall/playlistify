@@ -2,6 +2,17 @@
 
 Conventional Commits.
 
+## Branching
+
+- **Never create a branch without being asked.** Commit to the branch already
+  checked out — including `main`, which is where this project's history lives.
+- `git checkout -b` / `git branch` require an explicit request for a branch.
+  Generic "don't commit to the default branch" advice does not apply here.
+- If a branch genuinely looks warranted, say so in one line and let the user
+  decide; never create one pre-emptively. An unrequested branch also strands any
+  follow-up commits the user makes on top of it.
+- Commit only when asked, and push only when asked — they are separate requests.
+
 ## Splitting changes
 
 - One logical change per commit. Unrelated changes never share a commit — split them, each with its own header, body, and ticket ref.
