@@ -322,6 +322,11 @@ longest first so the seed drives the trigram index); pills AND across genres
 and moods by relational division. Filter matching is source-agnostic and
 ungated: an AI link the user has not hidden, or the user's own link, on any
 confidence band — clicking a chip you can see always finds the row it was on.
+Confidence band pills go through `confidence_band()`, the one SQL definition of
+the band rule; `get_library_enrichment_counts` and the row badge must agree with
+it, and an expression index over the identical call keeps the predicate
+sargable without a generated column. Bands are a closed set of five, so the bar
+matches them locally with no request and no three-character minimum.
 
 **Chat / selection** — `components/chat-screen.tsx` (`useChat` +
 `DefaultChatTransport`) streams to `POST /api/chat`. The route fetches one
@@ -330,11 +335,6 @@ prompt (`lib/chat/prompt.ts`) and to bound what `search_library` may resolve,
 so the assistant searches exactly the vocabulary it was shown. The tag lists
 in the prompt are **complete, never sampled** — a truncated list is a silently
 unsearchable slice of the library. The empty conversation separately requests
-Confidence band pills go through `confidence_band()`, the one SQL definition of
-the band rule; `get_library_enrichment_counts` and the row badge must agree with
-it, and an expression index over the identical call keeps the predicate
-sargable without a generated column. Bands are a closed set of five, so the bar
-matches them locally with no request and no three-character minimum.
 three ideas grounded in a random bounded sample of those real tags and caches
 them in `sessionStorage`, so they stay stable across reloads in one browser tab.
 Then `streamText` with a `stepCountIs(8)` tool loop. `search_library`
@@ -411,14 +411,6 @@ result never quietly shapes a playlist.
 Stated in the `library_search` migration header and in `HOW-IT-WORKS.md`;
 no verification script asserts it yet (tracked in `IMPROVEMENTS.md`).
 
-**Confidence is rounded before it is thresholded.** `songs.ai_confidence` is
-`numeric(3,2)`, so Postgres rounds to 2dp on write. Thresholding the raw value
-(0.399 → unknown) and then storing it would persist 0.40, contradicting the
-`< 0.4 → unknown` rule. The engine rounds + clamps, _then_ thresholds, then
-writes the rounded value — which keeps the cutoff auditable in SQL and
-`verify:enrichment` truthful.
-
-**The closed vocabulary is prompt-enforced, not schema-enforced.** The zod
 **One Confidence band rule, read by three surfaces.** The row badge
 (`getConfidenceBand`), the panel totals (`get_library_enrichment_counts`), and
 the Library band filter must classify every song identically, or a user filters
@@ -430,6 +422,14 @@ to `('pending', 'enriched', 'unknown')`, which is what makes SQL's
 and the None band silently swallows the new status. Bands OR rather than AND in
 the URL because a song carries exactly one.
 
+**Confidence is rounded before it is thresholded.** `songs.ai_confidence` is
+`numeric(3,2)`, so Postgres rounds to 2dp on write. Thresholding the raw value
+(0.399 → unknown) and then storing it would persist 0.40, contradicting the
+`< 0.4 → unknown` rule. The engine rounds + clamps, _then_ thresholds, then
+writes the rounded value — which keeps the cutoff auditable in SQL and
+`verify:enrichment` truthful.
+
+**The closed vocabulary is prompt-enforced, not schema-enforced.** The zod
 schema still types genres/moods as `z.array(z.string())`. A hard
 `z.enum(approvedNames)` would make off-list output impossible — but also
 invisible, so nothing would reach `unmatched_tags` and the signal for growing
