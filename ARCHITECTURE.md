@@ -158,7 +158,10 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 scope='row'>`, so that control is announced against a song name; one `sr-only`
   paragraph per table carries the shared-result and budget copy for all of them
   via `aria-describedby`, and the control uses `aria-disabled` rather than
-  `disabled` so a mid-request click does not drop focus to `<body>`. URL state is
+  `disabled` so a mid-request click does not drop focus to `<body>`. Once the
+  request settles the control is genuinely gone (queued, or out of tries), so
+  focus moves to the status text that replaced it rather than being lost. URL
+  state is
   `?q=&genre=&genre=&mood=&band=&page=` (repeated params, tag names and band
   slugs as the keys). Bands OR because a song carries exactly one; they still
   AND with text and tags. Only the results suspend, so the

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -57,6 +57,8 @@ export const LibraryRecheckAction = ({
     initialAttemptsRemaining,
   )
   const [announcement, setAnnouncement] = useState('')
+  const statusRef = useRef<HTMLSpanElement>(null)
+  const shouldRestoreFocusRef = useRef(false)
 
   // Two scalars rather than one object: an object prop would change identity on
   // every render and reset local state mid-request.
@@ -76,6 +78,7 @@ export const LibraryRecheckAction = ({
     // aria-disabled leaves the control focusable, so the guard is here rather
     // than on the button — losing focus to <body> mid-request fails WCAG 2.4.3.
     if (isRequesting) return
+    shouldRestoreFocusRef.current = true
     setState('requesting')
     setAnnouncement(`Requesting a new analysis for ${songTitle}.`)
     try {
@@ -138,10 +141,26 @@ export const LibraryRecheckAction = ({
       ? 'Retry'
       : recheckActionLabel(attemptsRemaining, isPending)
 
+  // A settled request removes the control the user just activated — queued, or
+  // out of tries — which would drop focus to <body> (WCAG 2.4.3). Move it to
+  // the status text that took the button's place, so the outcome is where the
+  // focus is. Only after a real request: a prop reset must not steal focus.
+  useEffect(() => {
+    if (!shouldRestoreFocusRef.current || isRequesting) return
+    shouldRestoreFocusRef.current = false
+    if (!canRequest) statusRef.current?.focus()
+  }, [canRequest, isRequesting])
+
   return (
     <div className='mt-1 flex flex-col items-end gap-1'>
       {statusLabel !== null && (
-        <span className='text-xs text-muted-foreground'>{statusLabel}</span>
+        <span
+          ref={statusRef}
+          className='rounded-sm text-xs text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50'
+          tabIndex={-1}
+        >
+          {statusLabel}
+        </span>
       )}
       {canRequest && (
         <Button
