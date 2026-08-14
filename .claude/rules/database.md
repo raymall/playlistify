@@ -12,7 +12,10 @@ The database is a **linked remote Supabase project** (ref lives in
 the verify scripts at that remote — there is no local stack; all work goes
 straight to the remote. `supabase/migrations/` is the **source of truth** for the schema;
 `lib/supabase/types.ts` is generated from it. The CLI is not installed
-globally — always call it via `npx supabase`.
+globally — always call it via `npx supabase`, which resolves the exact version
+pinned in `devDependencies`. Never install it globally or let it float: an
+upstream release shipping no binary for the current platform would otherwise
+break every step below at once.
 
 ## Every schema change runs this full sequence
 
@@ -40,6 +43,8 @@ of it, in order:
      signed-out (anon) client sees zero rows on every table.
    - `npm run verify:import` — import pipeline changes.
    - `npm run verify:enrichment` — enrichment pipeline changes.
+   - `npm run verify:re-enrichment` — recipe, job, attempt, or promotion
+     changes (policy cases plus remote queue invariants).
    - `npm run verify:genres` — genre vocabulary / fuzzy-snapping
      (`lib/vocabulary.ts`) changes.
    - `npm run verify:tokens` — `spotify_tokens` changes.
