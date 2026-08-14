@@ -200,11 +200,12 @@ an auth service that merely blinked is a 503 the client may retry for free:
   batch (`offset: 0` must send `null`) and every later batch echoes it back, so
   one client loop is one sync pass (`app/api/import/route.ts` →
   `lib/spotify/import.ts`).
-- `POST /api/enrich` — enqueue/claim and process one system-selected analysis
-  batch, body `{processedSoFar}`, `maxDuration` 300
+- `POST /api/enrich` — claim and process system-selected analysis: one batch
+  with body `{processedSoFar}` (the panel loop), or one song with body
+  `{songId}` (the row control). `maxDuration` 300
   (`app/api/enrich/route.ts` → `lib/enrichment/engine.ts`).
-- `POST /api/enrichment-requests` — request/coalesce a stronger analysis for
-  one owned Low or None song, body `{songId}`
+- `POST /api/enrichment-requests` — queue/coalesce a re-analysis for one owned
+  song below High, body `{songId}`; queues only, never analyzes
   (`app/api/enrichment-requests/route.ts` → `lib/enrichment/requests.ts`).
 - `POST|DELETE /api/tags` — explicit `add`, `remove`, `hide`, or `show`
   operation for one personal/effective tag
@@ -318,9 +319,22 @@ then `liked_at desc`. `priority` is set at enqueue from the band: never-analyzed
 500/600, None 200 background and 400 explicit, Low/Medium 100 background and 300
 explicit — so a user's first pass always outranks improvement work, and an
 explicit request jumps the background queue without bypassing eligibility,
-attempt budgets, cooldowns, or promotion rules. There is no single-song LLM
-path: a request rides at the head of the next claimed batch.
+attempt budgets, cooldowns, or promotion rules.
 Reach is a prioritization signal only; it never affects promotion.
+
+**A row request analyzes its own song.** `POST /api/enrichment-requests` only
+queues; the row then calls `POST /api/enrich` with a `songId`, which claims that
+one job through `claim_song_enrichment_job` and runs it. Priority alone would
+not have been enough: since the bulk selector and the row control now resolve
+the same population through `next_enrichment_recipe`, a queue-position nudge was
+the _only_ thing separating "re-analyze this one" from "analyze all 138", and
+there is no worker to drain the queue — `/api/enrich` runs solely from the
+client, so a queued song waits for someone to press something. The single-song
+claim narrows selection and nothing else: same recipe, lease, prompt, and
+promotion as a batch, through the shared `runClaimedJobs`, so the two paths
+cannot bill or promote differently. A row already `queued` keeps its control as
+**Analyze now** — its try was spent when it was queued, so running it spends no
+other — while a row genuinely `leased` shows no control at all.
 `library_recheck_states()` reports the per-row state machine
 (`available` / `queued` / `analyzing` / `throttled` / `no_better_recipe` /
 `checked_not_improved` / `improved`, labelled in `lib/enrichment/recheck.ts`)
@@ -425,8 +439,10 @@ Load-bearing rules the code already satisfies. Each is enforced somewhere and
 would break quietly if undone — they are not open work.
 
 **The browser has no enrichment model authority.** `/api/enrich` accepts only
-progress bookkeeping and `/api/enrichment-requests` accepts only an owned song
-id. Database functions choose an enabled default/next recipe; the engine then
+progress bookkeeping or an owned song id, and `/api/enrichment-requests` only an
+owned song id — choosing _which of your own songs_ to run is the sole authority
+the client has, and both the route and `claim_song_enrichment_job` check
+ownership. Database functions choose an enabled default/next recipe; the engine then
 resolves its provider/model snapshot through the server-only
 `lib/ai/providers.ts`. Accepting a client model, recipe, or rank would expose
 unbounded cost and shared-data authority.

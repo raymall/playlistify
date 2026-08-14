@@ -11,6 +11,7 @@ import { recordAndPromoteCandidate } from '@/lib/enrichment/promotion'
 import {
   type ClaimedEnrichmentJob,
   claimEnrichmentJobs,
+  claimSongEnrichmentJob,
   enqueueLibraryEnrichmentJobs,
   type EnrichmentCounts,
   getLibraryEnrichmentCounts,
@@ -46,6 +47,16 @@ export type EnrichBatchResponse =
   | ({ status: 'cap_reached' } & EnrichmentCounts)
   | { status: 'error'; message: string; safeToRetry?: boolean }
 
+export type EnrichSongPayload = {
+  songId: string
+}
+
+export type EnrichSongResponse =
+  /** `skipped` means nothing was queued for the song — never a billed call. */
+  | { status: 'analyzed'; isPromoted: boolean }
+  | { status: 'skipped' }
+  | { status: 'error'; message: string; safeToRetry?: boolean }
+
 const DEFAULT_BATCH_SIZE = 20
 const MIN_BATCH_SIZE = 1
 const MAX_BATCH_SIZE = 50
@@ -68,11 +79,17 @@ If you do not recognize a song with reasonable certainty, set confidence below 0
 
 Return every input song exactly once — same count, same ids.`
 
+type EnrichmentFailure = {
+  status: 'error'
+  message: string
+  safeToRetry: boolean
+}
+
 const fail = (
   step: string,
   message: string,
   safeToRetry = false,
-): EnrichBatchResponse => {
+): EnrichmentFailure => {
   console.error(`[enrich] ${step} failed: ${message}`)
   return { status: 'error', message, safeToRetry }
 }
@@ -225,6 +242,118 @@ const releaseForSafeRetry = async (
   }
 }
 
+type ClaimedRunResult =
+  | { status: 'ok'; promoted: number; rejected: number; omitted: number }
+  | EnrichmentFailure
+
+/**
+ * Prompt, structured-output call, vocabulary match, and promotion for one
+ * claimed same-recipe batch. Shared so the single-song path cannot drift from
+ * the batch path — they must bill and promote identically.
+ */
+const runClaimedJobs = async (
+  admin: ReturnType<typeof createAdminClient>,
+  jobs: ClaimedEnrichmentJob[],
+  firstJob: ClaimedEnrichmentJob,
+): Promise<ClaimedRunResult> => {
+  if (!isSupportedRecipe(firstJob)) {
+    await releaseForSafeRetry(admin, jobs)
+    return fail('recipe resolution', 'Recipe version is not supported', true)
+  }
+
+  const resolvedModel = resolveProviderModel(
+    firstJob.provider,
+    firstJob.modelId,
+  )
+  if (resolvedModel.status === 'error') {
+    await releaseForSafeRetry(admin, jobs)
+    return fail('model resolution', resolvedModel.message, true)
+  }
+
+  const vocabulary = await loadApprovedVocabulary(admin)
+  if (vocabulary.status === 'error') {
+    await releaseForSafeRetry(admin, jobs)
+    return fail('approved vocabulary', vocabulary.message, true)
+  }
+
+  let batch
+  try {
+    const result = await generateText({
+      model: resolvedModel.model,
+      maxRetries: 4,
+      output: Output.object({ schema: enrichmentBatchSchema }),
+      instructions: SYSTEM_PROMPT,
+      prompt: buildUserPrompt(
+        jobs,
+        vocabulary.genreNames,
+        vocabulary.moodNames,
+      ),
+      providerOptions: { openai: { reasoningEffort: 'low' } },
+    })
+    batch = result.output
+  } catch (error) {
+    console.error('[enrich]', error)
+    await recordFailedJobs(admin, jobs)
+    const message =
+      error instanceof Error ? error.message : 'Analysis call failed'
+    return { status: 'error', message, safeToRetry: false }
+  }
+
+  const jobsByTrackId = new Map(jobs.map((job) => [job.spotifyTrackId, job]))
+  const entriesByTrackId = new Map<string, EnrichedSong>()
+  for (const entry of batch.songs) {
+    if (!jobsByTrackId.has(entry.spotify_track_id)) continue
+    if (entriesByTrackId.has(entry.spotify_track_id)) continue
+    entriesByTrackId.set(entry.spotify_track_id, entry)
+  }
+
+  const vocabularyMatches = await matchCandidateVocabulary(admin, [
+    ...entriesByTrackId.values(),
+  ])
+  if (vocabularyMatches.status === 'error') {
+    await recordFailedJobs(admin, jobs)
+    return fail('candidate vocabulary', vocabularyMatches.message)
+  }
+
+  const outcomes = jobs.map((job) => {
+    const entry = entriesByTrackId.get(job.spotifyTrackId)
+    return {
+      job,
+      outcome:
+        entry === undefined
+          ? omittedCandidate()
+          : normalizeCandidate(
+              entry,
+              vocabularyMatches.genres.canonicalByName,
+              vocabularyMatches.moods.canonicalByName,
+            ),
+    }
+  })
+
+  const promotionResults = await Promise.all(
+    outcomes.map(({ job, outcome }) =>
+      recordAndPromoteCandidate(admin, job, outcome),
+    ),
+  )
+  const failedPromotion = promotionResults.find(
+    (result) => result.status === 'error',
+  )
+  if (failedPromotion?.status === 'error') {
+    return fail('candidate promotion', failedPromotion.message)
+  }
+
+  const promoted = promotionResults.filter(
+    (result) => result.status === 'ok' && result.promotion.isPromoted,
+  ).length
+  return {
+    status: 'ok',
+    promoted,
+    rejected: promotionResults.length - promoted,
+    omitted: outcomes.filter(({ outcome }) => outcome.outcome === 'omitted')
+      .length,
+  }
+}
+
 export const enrichLibraryBatch = async (
   userId: string,
   processedSoFar: number,
@@ -283,110 +412,42 @@ export const enrichLibraryBatch = async (
     await releaseForSafeRetry(admin, claim.jobs)
     return fail('job claim', 'Claimed batch mixed recipes or leases', true)
   }
-  if (!isSupportedRecipe(firstJob)) {
-    await releaseForSafeRetry(admin, claim.jobs)
-    return fail('recipe resolution', 'Recipe version is not supported', true)
-  }
-
-  const resolvedModel = resolveProviderModel(
-    firstJob.provider,
-    firstJob.modelId,
-  )
-  if (resolvedModel.status === 'error') {
-    await releaseForSafeRetry(admin, claim.jobs)
-    return fail('model resolution', resolvedModel.message, true)
-  }
-
-  const vocabulary = await loadApprovedVocabulary(admin)
-  if (vocabulary.status === 'error') {
-    await releaseForSafeRetry(admin, claim.jobs)
-    return fail('approved vocabulary', vocabulary.message, true)
-  }
-
-  let batch
-  try {
-    const result = await generateText({
-      model: resolvedModel.model,
-      maxRetries: 4,
-      output: Output.object({ schema: enrichmentBatchSchema }),
-      instructions: SYSTEM_PROMPT,
-      prompt: buildUserPrompt(
-        claim.jobs,
-        vocabulary.genreNames,
-        vocabulary.moodNames,
-      ),
-      providerOptions: { openai: { reasoningEffort: 'low' } },
-    })
-    batch = result.output
-  } catch (error) {
-    console.error('[enrich]', error)
-    await recordFailedJobs(admin, claim.jobs)
-    const message =
-      error instanceof Error ? error.message : 'Analysis call failed'
-    return { status: 'error', message, safeToRetry: false }
-  }
-
-  const jobsByTrackId = new Map(
-    claim.jobs.map((job) => [job.spotifyTrackId, job]),
-  )
-  const entriesByTrackId = new Map<string, EnrichedSong>()
-  for (const entry of batch.songs) {
-    if (!jobsByTrackId.has(entry.spotify_track_id)) continue
-    if (entriesByTrackId.has(entry.spotify_track_id)) continue
-    entriesByTrackId.set(entry.spotify_track_id, entry)
-  }
-
-  const vocabularyMatches = await matchCandidateVocabulary(admin, [
-    ...entriesByTrackId.values(),
-  ])
-  if (vocabularyMatches.status === 'error') {
-    await recordFailedJobs(admin, claim.jobs)
-    return fail('candidate vocabulary', vocabularyMatches.message)
-  }
-
-  const outcomes = claim.jobs.map((job) => {
-    const entry = entriesByTrackId.get(job.spotifyTrackId)
-    return {
-      job,
-      outcome:
-        entry === undefined
-          ? omittedCandidate()
-          : normalizeCandidate(
-              entry,
-              vocabularyMatches.genres.canonicalByName,
-              vocabularyMatches.moods.canonicalByName,
-            ),
-    }
-  })
-
-  const promotionResults = await Promise.all(
-    outcomes.map(({ job, outcome }) =>
-      recordAndPromoteCandidate(admin, job, outcome),
-    ),
-  )
-  const failedPromotion = promotionResults.find(
-    (result) => result.status === 'error',
-  )
-  if (failedPromotion?.status === 'error') {
-    return fail('candidate promotion', failedPromotion.message)
-  }
+  const run = await runClaimedJobs(admin, claim.jobs, firstJob)
+  if (run.status === 'error') return run
 
   const finalCounts = await getCounts(admin, userId)
   if (isErrorResponse(finalCounts)) return finalCounts
-  const batchPromoted = promotionResults.filter(
-    (result) => result.status === 'ok' && result.promotion.isPromoted,
-  ).length
-  const batchRejected = promotionResults.length - batchPromoted
-  const batchOmitted = outcomes.filter(
-    ({ outcome }) => outcome.outcome === 'omitted',
-  ).length
 
   return {
     status: 'progress',
     batchProcessed: claim.jobs.length,
-    batchPromoted,
-    batchRejected,
-    batchOmitted,
+    batchPromoted: run.promoted,
+    batchRejected: run.rejected,
+    batchOmitted: run.omitted,
     ...finalCounts,
   }
+}
+
+/**
+ * Analyzes exactly one song's queued job. The row control's endpoint: same
+ * recipe selection, lease, prompt, and promotion as the batch path — the only
+ * difference is that the claim is narrowed to one song, so requesting one song
+ * does not bill for the rest of the queue.
+ */
+export const enrichSong = async (
+  userId: string,
+  songId: string,
+): Promise<EnrichSongResponse> => {
+  const admin = createAdminClient()
+
+  const claim = await claimSongEnrichmentJob(admin, userId, songId)
+  if (claim.status === 'error') {
+    return fail('song claim', claim.message, true)
+  }
+  const job = claim.jobs.at(0)
+  if (job === undefined) return { status: 'skipped' }
+
+  const run = await runClaimedJobs(admin, claim.jobs, job)
+  if (run.status === 'error') return run
+  return { status: 'analyzed', isPromoted: run.promoted > 0 }
 }

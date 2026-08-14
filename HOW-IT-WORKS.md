@@ -111,6 +111,15 @@ ten seconds of the last one is simply ignored — it does not spend a try. That
 bounds cost to three answers per quality level, not one per click or one per
 user.
 
+**Asking for one song analyzes that one song.** The Library gives you two ways
+in, and they are genuinely different: the button on a row analyzes that
+recording and nothing else, and you see the result in a few seconds; the
+**Analyze & improve** button works through every song below High. Both pick the
+same quality level, spend from the same three tries, and go through the same
+promotion rule — the row is not a weaker or cheaper analysis, only a narrower
+one. Nothing is analyzed in the background: a song waits until you ask, either
+way.
+
 **A candidate is promoted only when it improves the current state.**
 
 - A Pending song may accept a recognized result or an honest None result.

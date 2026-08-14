@@ -1,10 +1,12 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
   isRecheckInFlight,
+  RECHECK_ERROR_LABEL,
   RECHECK_LOCKED_LABEL,
   RECHECK_STATE_LABELS,
   recheckActionLabel,
@@ -23,18 +25,23 @@ type LibraryRecheckActionProps = {
 
 type RequestState = RecheckState | 'requesting' | 'error'
 
-const readRequestState = (value: unknown): RecheckState | null => {
+/**
+ * The queue RPC's own vocabulary, kept unmapped: `already_queued` must stay
+ * distinct from `queued` because only the latter spent one of this song's
+ * tries — both still proceed to the analysis call.
+ */
+type RequestOutcome =
+  'queued' | 'already_queued' | 'analyzing' | 'throttled' | 'no_better_recipe'
+
+const readRequestOutcome = (value: unknown): RequestOutcome | null => {
   if (!isRecord(value)) return null
   switch (value.status) {
     case 'queued':
     case 'already_queued':
-      return 'queued'
     case 'analyzing':
-      return 'analyzing'
     case 'throttled':
-      return 'throttled'
     case 'no_better_recipe':
-      return 'no_better_recipe'
+      return value.status
     default:
       return null
   }
@@ -48,6 +55,7 @@ export const LibraryRecheckAction = ({
   songId,
   songTitle,
 }: LibraryRecheckActionProps) => {
+  const router = useRouter()
   const [state, setState] = useState<RequestState>(initialState)
   const [attemptsRemaining, setAttemptsRemaining] = useState(
     initialAttemptsRemaining,
@@ -77,7 +85,7 @@ export const LibraryRecheckAction = ({
   const handleRequest = async () => {
     // aria-disabled leaves the control focusable, so the guard is here rather
     // than on the button — losing focus to <body> mid-request fails WCAG 2.4.3.
-    if (isRequesting) return
+    if (isRequesting || state === 'analyzing') return
     shouldRestoreFocusRef.current = true
     setState('requesting')
     setAnnouncement(`Requesting a new analysis for ${songTitle}.`)
@@ -88,30 +96,70 @@ export const LibraryRecheckAction = ({
         body: JSON.stringify({ songId }),
       })
       const body: unknown = await response.json()
-      const next = readRequestState(body)
-      if (!response.ok || next === null) {
+      const outcome = readRequestOutcome(body)
+      if (!response.ok || outcome === null) {
         setState('error')
         setAnnouncement(`The analysis for ${songTitle} could not be requested.`)
         return
       }
-      setState(next)
-      // A throttled click never reached the queue, so it never spent a try.
-      // `no_better_recipe` is the server saying nothing would run at all, which
-      // is what zero means here — trust it over the count this page rendered.
+      // A throttled click never reached the queue and an already-queued song
+      // reserved its try earlier, so neither spends one. `no_better_recipe` is
+      // the server saying nothing would run at all, which is what zero means
+      // here — trust it over the count this page rendered.
       const nextRemaining =
-        next === 'queued'
+        outcome === 'queued'
           ? Math.max(0, attemptsRemaining - 1)
-          : next === 'no_better_recipe'
+          : outcome === 'no_better_recipe'
             ? 0
             : attemptsRemaining
       setAttemptsRemaining(nextRemaining)
+
+      if (outcome === 'throttled' || outcome === 'no_better_recipe') {
+        setState(outcome)
+        setAnnouncement(
+          outcome === 'throttled'
+            ? `${songTitle} was just requested — no try was used. ${nextRemaining} left.`
+            : `${songTitle} has no better analysis available yet.`,
+        )
+        return
+      }
+      if (outcome === 'analyzing') {
+        setState('analyzing')
+        setAnnouncement(`${songTitle} is already being analyzed.`)
+        return
+      }
+
+      // Queueing only reserves the work; this second call is what analyzes it,
+      // and only this song — the panel's run is what covers the whole library.
+      setState('analyzing')
+      setAnnouncement(`Analyzing ${songTitle}.`)
+      const analysis = await fetch('/api/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ songId }),
+      })
+      const analysisBody: unknown = await analysis.json()
+      if (!analysis.ok || !isRecord(analysisBody)) {
+        setState('error')
+        setAnnouncement(`${songTitle} could not be analyzed.`)
+        return
+      }
+      if (analysisBody.status === 'skipped') {
+        // Something else claimed it between the two calls; the row's server
+        // state is now the truthful one.
+        router.refresh()
+        return
+      }
+      const isPromoted = analysisBody.isPromoted === true
+      setState(isPromoted ? 'improved' : 'checked_not_improved')
       setAnnouncement(
-        next === 'throttled'
-          ? `${songTitle} was just requested — no try was used. ${nextRemaining} left.`
-          : next === 'no_better_recipe'
-            ? `${songTitle} has no better analysis available yet.`
-            : `${RECHECK_STATE_LABELS[next] ?? 'Requested'} for ${songTitle}. ${nextRemaining} ${nextRemaining === 1 ? 'try' : 'tries'} left.`,
+        isPromoted
+          ? `${songTitle} was improved. ${nextRemaining} ${nextRemaining === 1 ? 'try' : 'tries'} left.`
+          : `${songTitle} did not improve. ${nextRemaining} ${nextRemaining === 1 ? 'try' : 'tries'} left.`,
       )
+      // The badge and tags are server-rendered, so the row needs a refresh to
+      // show what changed.
+      router.refresh()
     } catch {
       setState('error')
       setAnnouncement(`The analysis for ${songTitle} could not be requested.`)
@@ -129,8 +177,10 @@ export const LibraryRecheckAction = ({
     ? RECHECK_STATE_LABELS[settledState]
     : attemptsRemaining === 0
       ? RECHECK_LOCKED_LABEL
-      : state === 'error'
-        ? null
+      : // A failure has to be visible, not only announced — and without it the
+        // focused status text would unmount and drop focus a second time.
+        state === 'error'
+        ? RECHECK_ERROR_LABEL
         : settledState === null
           ? null
           : RECHECK_STATE_LABELS[settledState]
@@ -139,7 +189,11 @@ export const LibraryRecheckAction = ({
     ? 'Requesting…'
     : state === 'error'
       ? 'Retry'
-      : recheckActionLabel(attemptsRemaining, isPending)
+      : recheckActionLabel(
+          attemptsRemaining,
+          isPending,
+          settledState === 'queued',
+        )
 
   // A settled request removes the control the user just activated — queued, or
   // out of tries — which would drop focus to <body> (WCAG 2.4.3). Move it to

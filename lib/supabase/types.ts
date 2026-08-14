@@ -874,6 +874,32 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_song_enrichment_job: {
+        Args: {
+          p_lease_seconds: number
+          p_lease_token: string
+          p_song_id: string
+          p_user_id: string
+        }
+        Returns: {
+          album: string
+          artists: string[]
+          expected_revision: number
+          identity_version: string
+          job_id: string
+          lease_token: string
+          model_id: string
+          prompt_version: string
+          provider: string
+          recipe_id: string
+          recipe_rank: number
+          release_date: string
+          song_id: string
+          spotify_track_id: string
+          title: string
+          vocabulary_version: string
+        }[]
+      }
       claim_song_enrichment_jobs: {
         Args: {
           p_lease_seconds: number

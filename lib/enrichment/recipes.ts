@@ -86,6 +86,45 @@ export const getLibraryEnrichmentCounts = async (
   }
 }
 
+/** Both claim RPCs return the same row shape, so they share one reader. */
+type ClaimedJobRow = {
+  job_id: string
+  lease_token: string
+  song_id: string
+  recipe_id: string
+  expected_revision: number
+  spotify_track_id: string
+  title: string | null
+  artists: string[] | null
+  album: string | null
+  release_date: string | null
+  provider: string
+  model_id: string
+  recipe_rank: number
+  prompt_version: string
+  vocabulary_version: string
+  identity_version: string
+}
+
+const readClaimedJob = (row: ClaimedJobRow): ClaimedEnrichmentJob => ({
+  jobId: row.job_id,
+  leaseToken: row.lease_token,
+  songId: row.song_id,
+  recipeId: row.recipe_id,
+  expectedRevision: row.expected_revision,
+  spotifyTrackId: row.spotify_track_id,
+  title: row.title,
+  artists: row.artists,
+  album: row.album,
+  releaseDate: row.release_date,
+  provider: row.provider,
+  modelId: row.model_id,
+  recipeRank: row.recipe_rank,
+  promptVersion: row.prompt_version,
+  vocabularyVersion: row.vocabulary_version,
+  identityVersion: row.identity_version,
+})
+
 export const claimEnrichmentJobs = async (
   admin: AdminClient,
   userId: string,
@@ -102,27 +141,7 @@ export const claimEnrichmentJobs = async (
     p_lease_token: leaseToken,
   })
   if (error !== null) return { status: 'error', message: error.message }
-  return {
-    status: 'ok',
-    jobs: data.map((row) => ({
-      jobId: row.job_id,
-      leaseToken: row.lease_token,
-      songId: row.song_id,
-      recipeId: row.recipe_id,
-      expectedRevision: row.expected_revision,
-      spotifyTrackId: row.spotify_track_id,
-      title: row.title,
-      artists: row.artists,
-      album: row.album,
-      releaseDate: row.release_date,
-      provider: row.provider,
-      modelId: row.model_id,
-      recipeRank: row.recipe_rank,
-      promptVersion: row.prompt_version,
-      vocabularyVersion: row.vocabulary_version,
-      identityVersion: row.identity_version,
-    })),
-  }
+  return { status: 'ok', jobs: data.map(readClaimedJob) }
 }
 
 /**
@@ -135,6 +154,30 @@ const SUPPORTED_VOCABULARY_VERSIONS = new Set([
   'vocabulary-v1',
   'vocabulary-v2',
 ])
+
+/**
+ * Claims the one queued job for a single song. Same lease-token replay and
+ * eligibility rules as the batch claim; it only narrows the selection, so a
+ * per-row request can be analyzed without draining the whole queue.
+ */
+export const claimSongEnrichmentJob = async (
+  admin: AdminClient,
+  userId: string,
+  songId: string,
+): Promise<
+  | { status: 'ok'; jobs: ClaimedEnrichmentJob[] }
+  | { status: 'error'; message: string }
+> => {
+  const leaseToken = randomUUID()
+  const { data, error } = await admin.rpc('claim_song_enrichment_job', {
+    p_user_id: userId,
+    p_song_id: songId,
+    p_lease_seconds: 600,
+    p_lease_token: leaseToken,
+  })
+  if (error !== null) return { status: 'error', message: error.message }
+  return { status: 'ok', jobs: data.map(readClaimedJob) }
+}
 
 export const isSupportedRecipe = (job: ClaimedEnrichmentJob): boolean =>
   job.promptVersion === 'prompt-v1' &&

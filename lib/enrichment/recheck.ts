@@ -44,18 +44,27 @@ export const RECHECK_STATE_LABELS: Record<RecheckState, string | null> = {
 /** Shown in place of the outcome once a song has no analysis left to run. */
 export const RECHECK_LOCKED_LABEL = 'No better result yet'
 
-/** Nothing can be requested while one of these is in flight. */
-export const isRecheckInFlight = (state: RecheckState) =>
-  state === 'queued' || state === 'analyzing'
+/** A request or analysis that failed; the control stays available to retry. */
+export const RECHECK_ERROR_LABEL = 'Could not analyze'
+
+/**
+ * Only a held lease blocks a request. A merely queued song has reserved its
+ * work without starting it, so it stays actionable — otherwise a row queued by
+ * an interrupted run would have no way to finish from the row itself.
+ */
+export const isRecheckInFlight = (state: RecheckState) => state === 'analyzing'
 
 /**
  * The action label. A song that has never been analyzed is *analyzed*, not
- * re-analyzed, and the remaining count only earns its space once it has moved.
+ * re-analyzed; a queued one has already spent its try and only needs running;
+ * and the remaining count only earns its space once it has moved.
  */
 export const recheckActionLabel = (
   attemptsRemaining: number,
   isPending: boolean,
+  isQueued: boolean,
 ) => {
+  if (isQueued) return 'Analyze now'
   const verb = isPending ? 'Analyze' : 'Re-analyze'
   return attemptsRemaining >= RECHECK_ATTEMPTS_PER_LEVEL
     ? verb

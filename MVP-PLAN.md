@@ -431,7 +431,8 @@ open hardening items are tracked in `IMPROVEMENTS.md`.
     eligibility rule, a budget derived from the append-only attempts log,
     `Medium` made eligible while `High` is left alone, promotion reduced to an
     ordinal band comparison, same-rank retries re-opening their existing job,
-    and a per-row control that shows the tries a song has left.
+    and a per-row control that analyzes one song on its own and shows the tries
+    it has left.
 
 Steps 4–6 and 7–8 are the two halves of the product; each is independently demoable.
 
