@@ -155,11 +155,7 @@ export const releaseClaimedJobs = async (
 }
 
 export type RecheckRequestResult =
-  | 'queued'
-  | 'already_queued'
-  | 'analyzing'
-  | 'already_checked'
-  | 'no_better_recipe'
+  'queued' | 'already_queued' | 'analyzing' | 'throttled' | 'no_better_recipe'
 
 const readRecheckRequestResult = (
   value: string,
@@ -168,7 +164,7 @@ const readRecheckRequestResult = (
     case 'queued':
     case 'already_queued':
     case 'analyzing':
-    case 'already_checked':
+    case 'throttled':
     case 'no_better_recipe':
       return value
     default:

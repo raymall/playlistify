@@ -7,11 +7,18 @@
 import { createClient } from '@supabase/supabase-js'
 
 import {
+  CONFIDENCE_BAND_ORDER,
+  getConfidenceBand,
+} from '@/lib/enrichment/confidence'
+import {
   decidePromotion,
   type PromotionCandidate,
 } from '@/lib/enrichment/policy'
 import { type Database, type Tables } from '@/lib/supabase/types'
 import { requireEnv } from '@/scripts/lib/env.mjs'
+
+/** Mirrors the budget in `enrichment_attempts_remaining_at_rank()`. */
+const ANSWER_BUDGET_PER_RANK = 3
 
 const [url, anonKey, serviceKey] = requireEnv([
   'NEXT_PUBLIC_SUPABASE_URL',
@@ -49,8 +56,14 @@ const cases = [
   ['low + unknown', 'low', unknown, false],
   ['low + medium', 'low', recognized('medium'), true],
   ['low + high', 'low', recognized('high'), true],
-  ['medium + high', 'medium', recognized('high'), false],
+  // Medium is eligible, but only a High result may replace it — a same-band
+  // re-roll would walk the Medium boundary upward without being better.
+  ['medium + high', 'medium', recognized('high'), true],
+  ['medium + medium', 'medium', recognized('medium'), false],
+  ['medium + low', 'medium', recognized('low'), false],
+  ['medium + unknown', 'medium', unknown, false],
   ['high + recognized', 'high', recognized('high'), false],
+  ['high + high', 'high', recognized('high'), false],
   ['omitted candidate', 'pending', omitted, false],
   ['failed candidate', 'pending', modelFailed, false],
 ] as const
@@ -63,6 +76,29 @@ for (const [label, currentBand, candidate, shouldPromote] of cases) {
     highestAttemptedRank: 100,
   })
   hard(`policy: ${label}`, result.shouldPromote === shouldPromote)
+}
+
+// The refusals a Medium song must give, by name — "not promoted" alone would
+// pass even if the wrong branch produced it.
+const refusalReasons = [
+  ['medium + medium', 'medium', recognized('medium'), 'not_better'],
+  ['medium + low', 'medium', recognized('low'), 'would_downgrade'],
+  ['medium + unknown', 'medium', unknown, 'would_downgrade'],
+  ['high + high', 'high', recognized('high'), 'ineligible'],
+] as const
+
+for (const [label, currentBand, candidate, reason] of refusalReasons) {
+  const result = decidePromotion({
+    currentBand,
+    candidate,
+    candidateRank: 200,
+    highestAttemptedRank: 100,
+  })
+  hard(
+    `policy reason: ${label} → ${reason}`,
+    !result.shouldPromote && result.reason === reason,
+    result.reason === reason ? '' : `got=${result.reason}`,
+  )
 }
 
 const superseded = decidePromotion({
@@ -138,7 +174,7 @@ if (jobResult.error !== null) {
 const attemptResult = await service
   .from('song_enrichment_attempts')
   .select(
-    'id, song_id, outcome, decision, decision_reason, decided_at, genre_names, mood_names',
+    'id, song_id, recipe_rank, outcome, confidence, decision, decision_reason, decided_at, genre_names, mood_names',
   )
 if (attemptResult.error !== null) {
   hard('attempt decisions are valid', false, attemptResult.error.message)
@@ -152,6 +188,58 @@ if (attemptResult.error !== null) {
     'attempt decision shapes are valid',
     invalidAttempts.length === 0,
     `invalid=${invalidAttempts.length} attempts=${attemptResult.data.length}`,
+  )
+
+  // The answer budget, read back off the log it is derived from. Only
+  // recognized/unknown consume it; omissions and failures have their own lane
+  // in song_enrichment_jobs.attempt_count.
+  const answersByRank = new Map<string, number>()
+  for (const attempt of attemptResult.data) {
+    if (attempt.outcome !== 'recognized' && attempt.outcome !== 'unknown') {
+      continue
+    }
+    const key = `${attempt.song_id}:${attempt.recipe_rank}`
+    answersByRank.set(key, (answersByRank.get(key) ?? 0) + 1)
+  }
+  const overBudget = [...answersByRank.entries()].filter(
+    ([, count]) => count > ANSWER_BUDGET_PER_RANK,
+  )
+  hard(
+    `no song exceeds ${ANSWER_BUDGET_PER_RANK} answers at one recipe rank`,
+    overBudget.length === 0,
+    `overBudget=${overBudget.length} ranks=${answersByRank.size}`,
+  )
+
+  // Promotion may never move a song down a band, so the promoted attempts of
+  // one song read in decision order are non-decreasing.
+  const promotedBySong = new Map<
+    string,
+    { decidedAt: string; rank: number }[]
+  >()
+  for (const attempt of attemptResult.data) {
+    if (attempt.decision !== 'promoted' || attempt.decided_at === null) continue
+    const band =
+      attempt.outcome === 'unknown'
+        ? 'none'
+        : getConfidenceBand('enriched', attempt.confidence)
+    const promoted = promotedBySong.get(attempt.song_id) ?? []
+    promoted.push({
+      decidedAt: attempt.decided_at,
+      rank: CONFIDENCE_BAND_ORDER.indexOf(band),
+    })
+    promotedBySong.set(attempt.song_id, promoted)
+  }
+  let regressions = 0
+  for (const promoted of promotedBySong.values()) {
+    promoted.sort((a, b) => a.decidedAt.localeCompare(b.decidedAt))
+    for (let index = 1; index < promoted.length; index += 1) {
+      if (promoted[index].rank < promoted[index - 1].rank) regressions += 1
+    }
+  }
+  hard(
+    'promoted bands never regress for a song',
+    regressions === 0,
+    `regressions=${regressions} songs=${promotedBySong.size}`,
   )
 }
 

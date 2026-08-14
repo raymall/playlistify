@@ -904,8 +904,13 @@ export type Database = {
         Args: { p_confidence: number; p_status: string }
         Returns: string
       }
+      confidence_band_rank: { Args: { p_band: string }; Returns: number }
       enqueue_library_enrichment_jobs: {
         Args: { p_user_id: string }
+        Returns: number
+      }
+      enrichment_attempts_remaining_at_rank: {
+        Args: { p_recipe_rank: number; p_song_id: string }
         Returns: number
       }
       get_library_enrichment_counts: {
@@ -945,6 +950,7 @@ export type Database = {
       library_recheck_states: {
         Args: never
         Returns: {
+          attempts_remaining: number
           song_id: string
           state: string
         }[]
@@ -993,6 +999,15 @@ export type Database = {
       log_unmatched_tags: {
         Args: { p_kind: string; p_names: string[] }
         Returns: undefined
+      }
+      next_enrichment_recipe: {
+        Args: {
+          p_ai_confidence: number
+          p_enrichment_status: string
+          p_highest_attempted_rank: number
+          p_song_id: string
+        }
+        Returns: string
       }
       normalize_tag_name: { Args: { p_name: string }; Returns: string }
       playlist_tag_summary: {

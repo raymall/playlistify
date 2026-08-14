@@ -271,24 +271,54 @@ Every claimed song produces an immutable attempt: recognized, unknown,
 omitted, or failed. `promote_song_enrichment_attempt` locks the attempt, job,
 and canonical song, re-evaluates the promotion matrix, and either atomically
 replaces the full canonical attributes/tag snapshot or rejects the candidate
-without touching it. Pending accepts a trustworthy result or honest unknown;
-None accepts a recognized result; Low accepts only Medium/High; Medium/High
-never enter normal re-analysis. Highest-attempted recipe rank advances even on
-rejection, which prevents duplicate billing. Jobs are unique per song/recipe,
-claims use expiring leases, stale lease tokens cannot commit, and omissions
-and provider failures back off before being retired after three tries for that
-recipe.
+without touching it. Pending and None keep their carve-outs (nothing to lose,
+no tags to lose); everything else is one ordinal comparison over
+`confidence_band_rank()`, so a candidate must land in a strictly better band —
+Low accepts Medium/High, Medium accepts only High, High never enters
+re-analysis, and a same-band re-roll is `not_better`. That High branch is the
+last of three gates (`next_enrichment_recipe`, the recheck RPC, then here) and
+the only one under a row lock, so it is what holds when a song turns High
+mid-lease. Highest-attempted recipe rank advances even on rejection, which
+prevents duplicate billing. Jobs are unique per song/recipe, claims use
+expiring leases, stale lease tokens cannot commit, and omissions and provider
+failures back off before being retired after three tries for that recipe.
+
+**Eligibility is one function.** `next_enrichment_recipe(song, status,
+confidence, highest_rank)` returns the recipe that should run next or null, and
+the bulk selector, the recheck RPC, the panel counts, and the per-row state all
+call it. A song may be analyzed **three times per recipe rank** — the budget is
+derived by `enrichment_attempts_remaining_at_rank()` from the append-only
+attempts log, not stored, so it cannot drift; a locked song re-opens for free
+when a higher-ranked recipe is enabled, because a different rank is a different
+count. Only `recognized`/`unknown` attempts spend the budget; omissions and
+provider failures use `song_enrichment_jobs.attempt_count` instead, so a song
+that was skipped twice still gets three real analyses. Ranks below the highest
+already attempted are excluded (promotion would reject them as `superseded`),
+recipes carrying a `failed` job are excluded (they would re-open forever), and
+escalation sorts before a same-rank retry so enabling a stronger recipe moves
+songs up rather than burning their budget where they are.
+
+A same-rank retry **re-opens the existing completed job** rather than creating
+one: `song_enrichment_attempts` is unique on `(job_id, lease_token)`, so many
+attempts per job row were always supported. The re-open bumps `request_count`
+(previously written once and never incremented) and leaves `attempt_count`
+alone — that counter is the omission/failure allowance, and touching it either
+makes the next transient failure terminal or hands out a fresh omission budget.
 
 Queue order is `priority desc`, then reach (how many libraries hold the song),
-then `liked_at desc`. `priority` encodes five classes, set at enqueue:
-never-analyzed 500, explicitly rechecked None 400, explicitly rechecked Low
-300, background None 200, background Low 100 — so a user's first pass always
-outranks improvement work, and an explicit request jumps the background queue
-without bypassing eligibility, attempt caps, cooldowns, or promotion rules.
+then `liked_at desc`. `priority` is set at enqueue from the band: never-analyzed
+500/600, None 200 background and 400 explicit, Low/Medium 100 background and 300
+explicit — so a user's first pass always outranks improvement work, and an
+explicit request jumps the background queue without bypassing eligibility,
+attempt budgets, cooldowns, or promotion rules. There is no single-song LLM
+path: a request rides at the head of the next claimed batch.
 Reach is a prioritization signal only; it never affects promotion.
 `library_recheck_states()` reports the per-row state machine
 (`available` / `queued` / `analyzing` / `no_better_recipe` /
-`checked_not_improved` / `improved`, labelled in `lib/enrichment/recheck.ts`).
+`checked_not_improved` / `improved`, labelled in `lib/enrichment/recheck.ts`)
+alongside `attempts_remaining`. The 10-second cooldown answers `throttled`,
+which used to be one of three unrelated branches returning `already_checked` —
+so a double-click read as a genuine no-improvement result.
 
 The vocabulary remains **closed**: the prompt carries only `is_approved`
 `genres`/`moods`; `matchApprovedVocabulary` snaps or drops output, and
@@ -411,12 +441,15 @@ result never quietly shapes a playlist.
 Stated in the `library_search` migration header and in `HOW-IT-WORKS.md`;
 no verification script asserts it yet (tracked in `IMPROVEMENTS.md`).
 
-**One Confidence band rule, read by three surfaces.** The row badge
-(`getConfidenceBand`), the panel totals (`get_library_enrichment_counts`), and
-the Library band filter must classify every song identically, or a user filters
-by Low and gets rows the badge calls Medium. `public.confidence_band()` is the
-single SQL definition and the filter calls it; `getConfidenceBand` mirrors it in
-TypeScript. The two stay equivalent only because `enrichment_status` is CHECKed
+**One Confidence band rule, read by five surfaces.** The row badge
+(`getConfidenceBand`), the panel totals (`get_library_enrichment_counts`), the
+Library band filter, the promotion matrix, and `library_recheck_states()` must
+classify every song identically, or a user filters by Low and gets rows the
+badge calls Medium — or is offered a re-analysis the promotion rule will always
+refuse. `public.confidence_band()` is the single SQL definition and all four SQL
+readers call it; `getConfidenceBand` mirrors it in TypeScript, and
+`confidence_band_rank()` orders the same five bands for the promotion
+comparison, mirroring `CONFIDENCE_BAND_ORDER`. The two stay equivalent only because `enrichment_status` is CHECKed
 to `('pending', 'enriched', 'unknown')`, which is what makes SQL's
 `<> 'enriched'` and the counts' `= 'unknown'` the same test — widen that CHECK
 and the None band silently swallows the new status. Bands OR rather than AND in

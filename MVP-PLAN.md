@@ -34,8 +34,8 @@ Stated by the user (treat as non-negotiable):
 - Framework: Next.js. Database + auth: Supabase (must support Spotify OAuth). Components: shadcn/ui.
 - Design: neo-Swiss — minimal, grid-driven, strong typography. Light and dark mode from day one.
 - Enrichment is cached globally: each song has one canonical AI result across
-  all users. Normal analysis is bought once; only `None`/`Low` results may be
-  retried, and a retry replaces the canonical result only through the guarded
+  all users. Every band below `High` may be retried, three times per recipe
+  rank, and a retry replaces the canonical result only through the guarded
   promotion policy (product reasoning in `HOW-IT-WORKS.md`, mechanism in
   `ARCHITECTURE.md`).
 - LLM provider must be swappable (OpenAI default, per user's choice).
@@ -116,8 +116,9 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
    free text or genre/mood filter pills, over a paginated table showing title,
    artist, AI/personal mood and genre chips, the Confidence band, and per-track
    controls to add personal tags, hide AI tags privately, and request an
-   eligible recheck for `None`/`Low` songs. Includes Pending / None / Low /
-   Medium / High confidence counts and "Re-sync Liked Songs".
+   eligible re-analysis for any song below `High`, with the tries it has left.
+   Includes Pending / None / Low / Medium / High confidence counts and
+   "Re-sync Liked Songs".
    Serves features 2, 3, 4, 5.
 3. **Chat — `/chat`** (the home screen once imported) — conversation pane with streaming responses and visible tool activity; proposed-playlist panel (track list with album art, per-track rationale, remove buttons); name/description fields; "Create in Spotify" button. Serves features 6, 7, 8.
 4. **Playlists — `/playlists`** — management for created playlists: cached
@@ -423,6 +424,14 @@ open hardening items are tracked in `IMPROVEMENTS.md`.
     generated `songs.search_text`, an ordered `user_songs` index, one RPC that
     filters/counts/orders/pages in Postgres, a library-scoped tag typeahead,
     URL-owned search state, and full pagination.
+
+12. **Capped re-analysis (implemented 2026-08-13)** — a widened mood vocabulary
+    on a `vocabulary-v2` recipe generation, then three answers per recipe rank
+    in place of one attempt per rank: `next_enrichment_recipe` as the single
+    eligibility rule, a budget derived from the append-only attempts log,
+    `Medium` made eligible while `High` is left alone, promotion reduced to an
+    ordinal band comparison, same-rank retries re-opening their existing job,
+    and a per-row control that shows the tries a song has left.
 
 Steps 4–6 and 7–8 are the two halves of the product; each is independently demoable.
 

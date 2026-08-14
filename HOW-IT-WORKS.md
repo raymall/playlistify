@@ -89,34 +89,55 @@ separates an attempted answer from the canonical answer.
 
 **The system chooses the analysis recipe.** A recipe includes the model plus
 the prompt, approved vocabulary, and recording-identification strategy. Users
-request an improvement, not a vendor or capability rank. A song is only queued
-when an enabled recipe exists whose rank is strictly stronger than every recipe
-already attempted for it.
+request an improvement, not a vendor or capability rank.
 
-**Only None and Low songs enter the normal recheck path.** Medium and High
-songs are left alone. Repeated recheck requests coalesce into the same global
-job, and a song remembers a stronger attempt even when the answer was rejected.
-That bounds cost to one attempt per genuine recipe step, not one per click or
-one per user.
+**Every song gets three tries at its current quality level.** The model is not
+deterministic, so a second ask at the same level is a real chance at a better
+answer rather than a replay. After the third answer the song is **locked** and
+waits. Only answers count against the three: a batch that skipped the song, or
+a provider failure, has its own separate allowance and does not spend a try.
+
+**A locked song unlocks by itself when something better arrives.** The budget
+is counted per quality level, so enabling a stronger recipe gives every locked
+song a fresh three tries at the new level — no one has to go and reset
+anything.
+
+**Pending, None, Low, and Medium songs may be re-analyzed. High songs are left
+alone.** A Medium song is included because it can still be wrong, but the bar
+for replacing it is high: only a High result may take its place.
+
+Repeated requests coalesce into the same global job, and a request made within
+ten seconds of the last one is simply ignored — it does not spend a try. That
+bounds cost to three answers per quality level, not one per click or one per
+user.
 
 **A candidate is promoted only when it improves the current state.**
 
 - A Pending song may accept a recognized result or an honest None result.
 - A None song may accept any trustworthy recognized result.
 - A Low song may accept only a Medium or High result.
-- A Medium or High song is not replaced by the normal flow.
-- An unknown, omitted, failed, invalid, or Low retry cannot erase a usable Low
+- A Medium song may accept only a High result.
+- A High song is not replaced by the normal flow.
+- An unknown, omitted, failed, invalid, or weaker retry cannot erase a usable
   result.
+
+The rule underneath all of those is one sentence: **a new answer has to land in
+a better band than the current one.** A more confident answer inside the same
+band is not an improvement — accepting those would slowly drag every band's
+lower edge upward without any song actually being better understood.
 
 Promotion is all-or-nothing: attributes, genres, moods, recognition state, and
 the accepted attempt change as one snapshot. Old AI tags are replaced, not
 accumulated. If two analyses finish out of order, the decision is rechecked
 against the latest shared result before anything changes.
 
-There is deliberately no “redo my whole library” button. Improvement is
-song-by-song, limited to weak results, and only when something genuinely
-stronger is available. A future decision to revisit Medium or High songs would
-be a deliberate operator-run backfill, not a consumer control.
+Improvement is still song-by-song and still capped, but the Library's
+**Analyze & improve** button now covers every song below High, Medium included
+— so one click can re-analyze songs that already have a usable result. What
+keeps that honest is the promotion rule above: a Medium song that gets three
+more Medium answers stays exactly as it was. Revisiting **High** songs remains
+out of reach by design; that would be a deliberate operator-run backfill, not a
+consumer control.
 
 ## Personal tags and hidden AI tags
 

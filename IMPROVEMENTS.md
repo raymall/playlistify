@@ -83,30 +83,51 @@ would duplicate an existing item, contradict one, or make one obsolete:
   Centralize a throwing count helper or require every hard assertion to include
   `error === null`, then apply it to both scripts.
 
-## Weak-song rechecks have no enabled stronger recipe
+## Enabling the rank-300 recipe is still uncanaried
 
-- **In plain terms:** the guarded recheck system works, but the live catalog has
-  no enabled recipe stronger than the one that produced the current weak
-  results. The UI now explains that honestly; enabling a canaried stronger
-  recipe is the remaining operational step.
-- **Severity:** Medium — the feature is safe and truthful, but all 80 current
-  None/Low songs are ineligible for improvement.
-- **Issue:** the live recipe catalog has nano at rank 100, the default mini
-  recipe at rank 200, and the full model at rank 300 disabled. All 80 weak
-  songs (72 None, 8 Low as of 2026-08-11) have already reached rank 200,
-  leaving zero with an enabled stronger recipe. The job/attempt/promotion path
-  has produced four successful promotions, so this is no longer an untested
-  code path or a model-selector bug. `library_enrichment_counts()` and the
-  per-row recheck state correctly report the remaining rows as having no better
-  recipe yet.
-- **Why fix:** so the guarded workflow can improve the remaining weak songs.
-  The remaining rollout steps, carried over from the retired
-  re-enrichment plan: canary attempts and promotions on a small set of existing
-  None/Low songs; compare canonical tags before and after every canary
-  promotion; check the cost per attempt and per successful promotion; then
-  enable the rank-300 recipe (or add another evidence-backed stronger recipe).
-  Rollback is disabling job creation/claiming — canonical reads stay on `songs`
-  and the link tables, and orphaned attempts/jobs are audit-only.
+- **In plain terms:** weak songs can now be improved without it — three tries at
+  the current level replaced the old one-try-per-level rule — but the strongest
+  model in the catalog has still never run against real songs, and turning it on
+  hands every song in the library a fresh budget at once.
+- **Severity:** Medium — no longer blocking any improvement, but the one lever
+  that multiplies cost is also the one nobody has measured.
+- **Issue:** the catalog has nano at rank 100, the default mini recipe at rank
+  200, and the full model at rank 300 disabled. Enabling rank 300 is the
+  documented unlock path for locked songs, and by design it resets the
+  three-answer budget for **every** song below High simultaneously — the one
+  unbounded direction in the re-analysis design. Nothing has measured what a
+  rank-300 attempt costs or how often it actually promotes.
+- **Why fix:** so the unlock lever can be pulled deliberately. The rollout steps
+  carried over from the retired re-enrichment plan still apply: canary attempts
+  and promotions on a small set of existing None/Low songs; compare canonical
+  tags before and after every canary promotion; check the cost per attempt and
+  per successful promotion; then enable rank 300 for real. Rollback is disabling
+  job creation/claiming — canonical reads stay on `songs` and the link tables,
+  and orphaned attempts/jobs are audit-only.
+
+## Recognized-but-unmatched has no outcome of its own
+
+- **In plain terms:** when the model recognizes a song confidently but every tag
+  it returns is outside the approved vocabulary, the song is filed as if it were
+  never recognized at all — and it spends one of its three tries doing it, even
+  though asking again cannot change the answer.
+- **Severity:** Medium — it costs real analyses and it misreports the result. At
+  least four songs sit in this state (0.52–0.74 confidence, all filed None).
+- **Issue:** `normalizeCandidate` in `lib/enrichment/candidates.ts` treats _zero
+  surviving tags_ and _confidence below 0.4_ as the same thing and emits
+  `unknown`. The state is still distinguishable — an `unknown` outcome whose
+  confidence cleared the 0.4 cutoff — but nothing reads it that way:
+  `enrichment_attempts_remaining_at_rank` counts it as an answer, and the
+  Library calls it None. Not charging for it was considered and rejected: with
+  no trigger that re-opens songs when the vocabulary changes, a free retry would
+  re-analyze and re-bill the same song on every run, forever.
+- **Why fix:** a dedicated `unmatched` outcome would let the row say what
+  actually happened and let the budget rule treat it correctly, rather than
+  choosing between over-charging and unbounded charging. It touches the outcome
+  CHECK, the promotion function, `lib/enrichment/policy.ts`, and both verify
+  scripts, so it is a deliberate change rather than a one-line fix — and it only
+  pays off alongside a vocabulary-change re-open policy (see
+  `unmatched_tags` has no review or promotion workflow).
 
 ## High songs keep tags the widened mood vocabulary cannot recover
 
@@ -135,13 +156,13 @@ would duplicate an existing item, contradict one, or make one obsolete:
   running, the song is recorded as having reached that stronger recipe anyway —
   so it loses access to the recipe it was previously eligible for, without ever
   having been analyzed by either.
-- **Severity:** Medium — no wrong data is written, but a song can be locked out
-  of analysis by an attempt that produced no answer at all.
+- **Severity:** Medium — no wrong data is written, and capped re-analysis
+  softened it (the song keeps a full budget at the rank it ratcheted to), but a
+  rank it never answered at still costs it every enabled recipe below.
 - **Issue:** `promote_song_enrichment_attempt` advances
   `songs.highest_attempted_recipe_rank` (migration `20260729225628`, around line 705) before the branch that returns early for `omitted` and `failed`
-  outcomes. Since the selector gate is
-  `enrichment_rank > highest_attempted_recipe_rank`, a single omission at a
-  higher rank permanently retires every rank at or below it.
+  outcomes. `next_enrichment_recipe` then excludes every rank below the
+  ratcheted one, because promotion would reject those as `superseded`.
 - **Why fix:** the ratchet should record ranks that produced an answer.
   Omissions and failures already have their own bounded allowance in
   `song_enrichment_jobs.attempt_count`; they should not also consume rank
