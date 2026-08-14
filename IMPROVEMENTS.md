@@ -330,24 +330,6 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** dead code in the auth path reads as protection that is not
   actually present.
 
-## Recheck never explains that the result is shared
-
-- **In plain terms:** the per-song `Request recheck` button changes analysis
-  every other user of that song sees, and only when the new answer is better.
-  The UI says none of that, so "Checked, not improved" reads like a failure
-  rather than the guard working.
-- **Complexity:** Low — one line of copy near the recheck control, or an
-  addition to the existing Confidence popover.
-- **Issue:** carried over from the retired re-enrichment plan, which specified
-  the copy "We only replace shared analysis when the new result is better.
-  Improvements apply everywhere this song appears." `library-recheck-action.tsx`
-  renders only the state label, and `library-confidence-info.tsx` explains the
-  bands without mentioning sharing or the promotion guard.
-- **Why fix:** the recheck states are truthful but unexplained; a sentence
-  turns a confusing outcome into a visibly deliberate one. Keep the existing
-  rule that ranks, provider names, retry counts, and global request counts stay
-  out of the consumer UI.
-
 ## The live auth token-rotation settings have never been read
 
 - **In plain terms:** the app has evidence that token rotation is currently

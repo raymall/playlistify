@@ -153,7 +153,12 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   database-side search: one combobox that commits free text, AND-combined
   genre/mood filter pills, or OR-combined Confidence band pills, over a
   first/last/numbered paginated table with a Confidence band, private AI-tag
-  hiding, personal tags, and eligible per-song rechecks. URL state is
+  hiding, personal tags, and a per-song re-analysis control on every row below
+  High showing the tries it has left. The row's title cell is its `<th
+scope='row'>`, so that control is announced against a song name; one `sr-only`
+  paragraph per table carries the shared-result and budget copy for all of them
+  via `aria-describedby`, and the control uses `aria-disabled` rather than
+  `disabled` so a mid-request click does not drop focus to `<body>`. URL state is
   `?q=&genre=&genre=&mood=&band=&page=` (repeated params, tag names and band
   slugs as the keys). Bands OR because a song carries exactly one; they still
   AND with text and tags. Only the results suspend, so the
@@ -314,11 +319,15 @@ attempt budgets, cooldowns, or promotion rules. There is no single-song LLM
 path: a request rides at the head of the next claimed batch.
 Reach is a prioritization signal only; it never affects promotion.
 `library_recheck_states()` reports the per-row state machine
-(`available` / `queued` / `analyzing` / `no_better_recipe` /
+(`available` / `queued` / `analyzing` / `throttled` / `no_better_recipe` /
 `checked_not_improved` / `improved`, labelled in `lib/enrichment/recheck.ts`)
 alongside `attempts_remaining`. The 10-second cooldown answers `throttled`,
 which used to be one of three unrelated branches returning `already_checked` —
-so a double-click read as a genuine no-improvement result.
+so a double-click read as a genuine no-improvement result. The last decision
+now sorts **before** availability, because a song that came back "no change"
+usually does have another try left and both facts matter; `attempts_remaining`
+reports 0 whenever no recipe would run, so `> 0` means exactly "clicking will
+analyze something" and is the only thing the row control keys off.
 
 The vocabulary remains **closed**: the prompt carries only `is_approved`
 `genres`/`moods`; `matchApprovedVocabulary` snaps or drops output, and

@@ -102,10 +102,20 @@ export const searchLibrary = async (
   if (rowsResult.error !== null) throw new Error(rowsResult.error.message)
   if (recheckResult.error !== null) throw new Error(recheckResult.error.message)
 
-  const recheckStateBySongId = new Map(
+  const recheckBySongId = new Map(
     recheckResult.data.flatMap((row) => {
       const recheckState = readRecheckState(row.state)
-      return recheckState === null ? [] : [[row.song_id, recheckState]]
+      return recheckState === null
+        ? []
+        : [
+            [
+              row.song_id,
+              {
+                state: recheckState,
+                attemptsRemaining: row.attempts_remaining,
+              },
+            ] as const,
+          ]
     }),
   )
 
@@ -144,7 +154,9 @@ export const searchLibrary = async (
           id: link.mood_id,
           name: link.moods.name,
         })),
-        recheckState: recheckStateBySongId.get(row.songs.id) ?? null,
+        recheckState: recheckBySongId.get(row.songs.id)?.state ?? null,
+        recheckAttemptsRemaining:
+          recheckBySongId.get(row.songs.id)?.attemptsRemaining ?? 0,
       },
     ]),
   )

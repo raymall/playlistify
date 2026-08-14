@@ -13,6 +13,10 @@ import {
   CONFIDENCE_BAND_ORDER,
   CONFIDENCE_BANDS,
 } from '@/lib/enrichment/confidence'
+import {
+  RECHECK_BUDGET_COPY,
+  RECHECK_SHARED_RESULT_COPY,
+} from '@/lib/enrichment/recheck'
 import { cn } from '@/lib/utils'
 
 export const LibraryConfidenceInfo = () => (
@@ -47,6 +51,13 @@ export const LibraryConfidenceInfo = () => (
             </div>
           ))}
         </dl>
+        <div className='flex flex-col gap-1 border-t border-border pt-3'>
+          <PopoverTitle>Re-analyzing</PopoverTitle>
+          <p className='text-xs text-muted-foreground'>
+            {RECHECK_SHARED_RESULT_COPY}
+          </p>
+          <p className='text-xs text-muted-foreground'>{RECHECK_BUDGET_COPY}</p>
+        </div>
       </div>
     </PopoverContent>
   </Popover>

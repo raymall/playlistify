@@ -9,6 +9,10 @@ import {
   type EnrichBatchResponse,
   type EnrichmentCounts,
 } from '@/lib/enrichment/engine'
+import {
+  RECHECK_BUDGET_COPY,
+  RECHECK_SHARED_RESULT_COPY,
+} from '@/lib/enrichment/recheck'
 import { isRecord, readNumber, readString } from '@/lib/json'
 import { wait } from '@/lib/sleep'
 import { createClient } from '@/lib/supabase/client'
@@ -411,8 +415,8 @@ export const LibraryEnrichmentPanel = ({
           Confidence
         </h2>
         <p className='max-w-prose text-sm text-muted-foreground'>
-          Confidence is reported by the model, not measured accuracy. We only
-          replace shared analysis when a new result is better.
+          Confidence is reported by the model, not measured accuracy.{' '}
+          {RECHECK_SHARED_RESULT_COPY} {RECHECK_BUDGET_COPY}
         </p>
       </div>
 
@@ -485,8 +489,10 @@ export const LibraryEnrichmentPanel = ({
       {counts.ineligibleWeak > 0 && !isActive && (
         <p className='text-sm text-muted-foreground tabular-nums'>
           {counts.ineligibleWeak.toLocaleString()}{' '}
-          {counts.ineligibleWeak === 1 ? 'song has' : 'songs have'} no better
-          higher-confidence analysis available yet.
+          {counts.ineligibleWeak === 1 ? 'song has' : 'songs have'} used every
+          try at the current quality level, and{' '}
+          {counts.ineligibleWeak === 1 ? 'waits' : 'wait'} until a better
+          analysis is available.
         </p>
       )}
 

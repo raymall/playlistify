@@ -18,7 +18,13 @@ import {
   type ConfidenceBand,
   getConfidenceBand,
 } from '@/lib/enrichment/confidence'
+import {
+  RECHECK_BUDGET_COPY,
+  RECHECK_SHARED_RESULT_COPY,
+} from '@/lib/enrichment/recheck'
 import { type LibrarySong } from '@/lib/library/song'
+
+const RECHECK_DESCRIPTION_ID = 'library-recheck-description'
 
 type LibraryTableProps = {
   activeBands: ConfidenceBand[]
@@ -141,6 +147,11 @@ export const LibraryTable = ({
 
   return (
     <div>
+      {/* One description for every row button. A per-row popover would add a
+          focusable trigger to all 50 rows, which already carry a tag editor. */}
+      <p className='sr-only' id={RECHECK_DESCRIPTION_ID}>
+        {RECHECK_SHARED_RESULT_COPY} {RECHECK_BUDGET_COPY}
+      </p>
       <Table className='table-fixed'>
         <TableCaption className='sr-only'>
           Your imported Liked Songs, most recently liked first
@@ -189,14 +200,19 @@ export const LibraryTable = ({
                     <div aria-hidden='true' className='size-10 bg-muted' />
                   )}
                 </TableCell>
-                <TableCell className='font-medium text-foreground'>
+                {/* The row's header cell, so "Re-analyze" in the last column
+                    is announced against a song name rather than a bare row. */}
+                <th
+                  className='p-2 text-left align-middle font-medium whitespace-nowrap text-foreground'
+                  scope='row'
+                >
                   <span
                     className='block truncate'
                     title={song.title ?? undefined}
                   >
                     {titleText}
                   </span>
-                </TableCell>
+                </th>
                 <TableCell className='text-muted-foreground'>
                   <span
                     className='block truncate'
@@ -243,7 +259,10 @@ export const LibraryTable = ({
                   </Badge>
                   {song.recheckState !== null && (
                     <LibraryRecheckAction
+                      describedById={RECHECK_DESCRIPTION_ID}
+                      initialAttemptsRemaining={song.recheckAttemptsRemaining}
                       initialState={song.recheckState}
+                      isPending={confidenceBand === 'pending'}
                       songId={song.id}
                       songTitle={titleText}
                     />
