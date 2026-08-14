@@ -155,8 +155,16 @@ expectSnap('space variant', 'afro beat', approvedGenres, 'afrobeat')
 expectSnap('space variant', 'hiphop', approvedGenres, 'hip hop')
 expectSnap('typo', 'regaeton', approvedGenres, 'reggaeton')
 expectSnap('legacy compound', 'dominican dembow', approvedGenres, null)
-expectSnap('short tag, no fuzzy', 'chill', approvedMoods, null)
+expectSnap('short tag, no fuzzy', 'mello', approvedMoods, null)
 expectSnap('space variant', 'up beat', approvedMoods, 'upbeat')
+
+// Names approved as both a genre and a mood must resolve in either vocabulary.
+// The matcher searches one kind at a time, so dual approval is the only thing
+// keeping these off unmatched_tags when the model returns them as moods.
+for (const name of ['melancholic', 'chill', 'dance', 'urban']) {
+  expectSnap('dual-kind', name, approvedMoods, name)
+  expectSnap('dual-kind', name, approvedGenres, name)
+}
 
 console.log('')
 console.log(

@@ -108,6 +108,45 @@ would duplicate an existing item, contradict one, or make one obsolete:
   Rollback is disabling job creation/claiming — canonical reads stay on `songs`
   and the link tables, and orphaned attempts/jobs are audit-only.
 
+## High songs keep tags the widened mood vocabulary cannot recover
+
+- **In plain terms:** the 2026-08-13 vocabulary fix stops good tags being thrown
+  away from here on, but it cannot give back the ones already lost. The songs
+  that lost them are almost all High, and High songs are never re-analyzed — so
+  recovering them needs a deliberate operator pass, not a user-facing control.
+- **Severity:** Medium — nothing is broken and no song is mislabelled; the
+  library is simply missing tags it was told about and discarded.
+- **Issue:** `matchApprovedVocabulary` searches one kind only, so a word
+  approved as a genre was dropped when the model returned it as a mood.
+  `unmatched_tags` recorded 212 drops across 49 names before the fix —
+  `melancholic` alone 57, `sensual` 43, `party` 24 — spread across all
+  enrichment eras, and 1737 of the 1876 songs are High. Only the snapped
+  canonical names are ever persisted; the model's raw output is counted in
+  `unmatched_tags` with no link back to the song, so there is no way to tell
+  which songs lost which tags, and no way to re-match without paying for a new
+  analysis.
+- **Why fix:** these are the tags chat searches. Recovering them means either an
+  operator-triggered re-analysis of a chosen slice, or persisting raw model
+  output going forward so a future vocabulary change can be replayed offline.
+
+## The rank ratchet runs before the omitted/failed early return
+
+- **In plain terms:** if the model skips a song while a stronger recipe is
+  running, the song is recorded as having reached that stronger recipe anyway —
+  so it loses access to the recipe it was previously eligible for, without ever
+  having been analyzed by either.
+- **Severity:** Medium — no wrong data is written, but a song can be locked out
+  of analysis by an attempt that produced no answer at all.
+- **Issue:** `promote_song_enrichment_attempt` advances
+  `songs.highest_attempted_recipe_rank` (migration `20260729225628`, around line 705) before the branch that returns early for `omitted` and `failed`
+  outcomes. Since the selector gate is
+  `enrichment_rank > highest_attempted_recipe_rank`, a single omission at a
+  higher rank permanently retires every rank at or below it.
+- **Why fix:** the ratchet should record ranks that produced an answer.
+  Omissions and failures already have their own bounded allowance in
+  `song_enrichment_jobs.attempt_count`; they should not also consume rank
+  eligibility.
+
 ## Spotify artwork attribution has no brand mark
 
 - **In plain terms:** playlist covers now link directly back to Spotify and are
@@ -229,7 +268,7 @@ would duplicate an existing item, contradict one, or make one obsolete:
   currently 152 genres and 95 moods (2026-08-11).
 - **Issue:** `TAG_LIST_MAX` in `lib/chat/prompt.ts` truncates each kind at 600
   names and appends `', …'`. AI tags come from the closed approved vocabulary
-  (currently 407 genres and 113 moods), but personal tags use the open
+  (currently 407 genres and 140 moods), but personal tags use the open
   `ensureVocabularyIds` path and are unbounded. A sufficiently large personal
   vocabulary would reintroduce a name the search RPC can resolve but the model
   was never shown.
@@ -574,7 +613,7 @@ would duplicate an existing item, contradict one, or make one obsolete:
   through the full migration sequence.
 - **Issue:** `matchApprovedVocabulary` and `ensureVocabularyIds` are
   O(new names × existing names), and the Supabase select path has a default
-  1,000-row response ceiling. The approved set is currently 407 genres and 113
+  1,000-row response ceiling. The approved set is currently 407 genres and 140
   moods, while unapproved personal rows can grow without a bound.
 - **Why fix:** server-side `similarity()`/`%` lookups with trigram indexes avoid
   full-table transfers and remove the hidden 1,000-row ceiling.
@@ -599,13 +638,22 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **In plain terms:** off-list model tags are counted, but approving a useful
   candidate still requires manual SQL. Add a small owner tool or script.
 - **Complexity:** Medium — an owner-only list and promote action, or a focused
-  operational script.
+  operational script, plus a decision on what a vocabulary revision re-opens.
 - **Issue:** `unmatched_tags` records kind, normalized name, occurrence count,
   and timestamps. There is no workflow to review frequent candidates, promote
   one into the approved vocabulary, version that vocabulary change, and decide
-  whether affected songs should be rechecked.
+  whether affected songs should be rechecked. The 2026-08-13 widening did all
+  four by hand — 27 moods promoted by migration, a new `vocabulary-v2` recipe
+  generation cut to carry them, and nothing re-opened — which is what the
+  workflow would have to automate.
 - **Why fix:** the signal is useful only when review is cheap and promotion
-  preserves recipe/vocabulary identity.
+  preserves recipe/vocabulary identity. Cutting a new generation is the settled
+  half; the open half is what a vocabulary revision should do to existing songs.
+  Re-matching without a new model call is currently impossible — only snapped
+  canonical names are persisted, and `unmatched_tags` counts raw output without
+  linking it to a song — so the questions are which songs a `vocabulary_version`
+  change re-opens, and whether that resets the per-rank attempt budget the way a
+  rank increase does.
 
 ## The enrichment queue and promotion path have no metrics
 

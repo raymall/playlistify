@@ -484,6 +484,18 @@ changes create a new recipe instead of mutating old attempt identity. Exactly
 one enabled recipe is the default for pending work. Do not add recurring seed
 migrations that fight Studio edits or resurrect deleted rows.
 
+A vocabulary revision is the one case that reaches the recipe table from a
+migration, because the approved `genres`/`moods` rows it depends on are
+themselves migrated. `20260814003544_widen_mood_vocabulary.sql` is the shape to
+copy: approve the new names, disable the outgoing generation, then insert a
+replacement recipe per model carrying the same rank, prompt and identity at the
+new `vocabulary_version`. Ranks are preserved so no song's eligibility moves,
+and `song_enrichment_attempts` keeps pointing at the recipe it actually ran
+under. Every version the app can still run is listed in `isSupportedRecipe`
+([lib/enrichment/recipes.ts](lib/enrichment/recipes.ts)) — a claimed job naming
+an unlisted version is released rather than guessed at, so that list and the
+catalog must be updated together.
+
 ## Where does new code go
 
 - Page → `app/<route>/page.tsx`; signed-in-only pages also add their prefix

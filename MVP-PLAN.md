@@ -383,8 +383,10 @@ repeated requests still coalesce into the global job.
   scheduled worker.
 - **Model and recipe rows are owner-operational data, not recurring migration
   seeds.** The additive migration took one legacy snapshot. New prompt,
-  vocabulary, or identity revisions create a new recipe in Studio; they do not
-  mutate the identity attached to old attempts.
+  vocabulary, or identity revisions create a new recipe; they do not mutate the
+  identity attached to old attempts. Studio is the usual place for that — the
+  exception is a vocabulary revision, which cuts its replacement generation in
+  the same migration that approves the new names.
 
 ## Implementation Plan
 

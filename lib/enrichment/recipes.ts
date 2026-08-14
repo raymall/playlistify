@@ -125,9 +125,20 @@ export const claimEnrichmentJobs = async (
   }
 }
 
+/**
+ * Both generations run on this code path: the approved lists are read from the
+ * database per batch, so a vocabulary revision changes the prompt's contents
+ * without changing how the prompt is built. A recipe naming an unknown version
+ * is released unclaimed rather than guessed at.
+ */
+const SUPPORTED_VOCABULARY_VERSIONS = new Set([
+  'vocabulary-v1',
+  'vocabulary-v2',
+])
+
 export const isSupportedRecipe = (job: ClaimedEnrichmentJob): boolean =>
   job.promptVersion === 'prompt-v1' &&
-  job.vocabularyVersion === 'vocabulary-v1' &&
+  SUPPORTED_VOCABULARY_VERSIONS.has(job.vocabularyVersion) &&
   job.identityVersion === 'identity-v1'
 
 export const releaseClaimedJobs = async (
