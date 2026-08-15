@@ -11,7 +11,11 @@ export type PromotionPolicyInput = {
   currentBand: ConfidenceBand
   candidate: PromotionCandidate
   candidateRank: number
+  /** `songs.enrichment_rank` — the rank that produced the result on the row. */
+  activeRank: number
   highestAttemptedRank: number
+  /** The candidate recipe's `enrich_all_songs`. */
+  canEnrichAllSongs: boolean
 }
 
 export type PromotionPolicyDecision = {
@@ -21,6 +25,7 @@ export type PromotionPolicyDecision = {
     | 'initial_unknown'
     | 'recognized_after_unknown'
     | 'improved_band'
+    | 'stronger_recipe'
     | 'not_better'
     | 'would_downgrade'
     | 'ineligible'
@@ -33,8 +38,11 @@ const bandRank = (band: ConfidenceBand) => CONFIDENCE_BAND_ORDER.indexOf(band)
 
 /**
  * Mirrors the promotion chain in `public.promote_song_enrichment_attempt()`,
- * which is the authority — this runs first so a candidate that could never be
- * promoted is not billed. Two carve-outs aside, promotion is one ordinal
+ * which is the sole authority — nothing calls this before billing. It exists
+ * so `verify:re-enrichment` can exercise the matrix as pure cases, which means
+ * the two must be edited together or the tests certify the wrong rule.
+ *
+ * Two carve-outs and the High opt-in aside, promotion is one ordinal
  * comparison over `CONFIDENCE_BAND_ORDER`, so a band added later needs no new
  * branch: a Medium song accepting only a High result holds by construction.
  */
@@ -42,7 +50,9 @@ export const decidePromotion = ({
   currentBand,
   candidate,
   candidateRank,
+  activeRank,
   highestAttemptedRank,
+  canEnrichAllSongs,
 }: PromotionPolicyInput): PromotionPolicyDecision => {
   if (candidate.outcome === 'omitted') {
     return { shouldPromote: false, reason: 'omitted' }
@@ -53,8 +63,16 @@ export const decidePromotion = ({
   if (candidateRank < highestAttemptedRank) {
     return { shouldPromote: false, reason: 'superseded' }
   }
+  // High is finished unless the candidate's recipe opted in and genuinely
+  // outranks the one that produced the result being replaced — and even then,
+  // only another High result may take its place.
   if (currentBand === 'high') {
-    return { shouldPromote: false, reason: 'ineligible' }
+    if (!canEnrichAllSongs || candidateRank <= activeRank) {
+      return { shouldPromote: false, reason: 'ineligible' }
+    }
+    return candidate.outcome === 'recognized' && candidate.band === 'high'
+      ? { shouldPromote: true, reason: 'stronger_recipe' }
+      : { shouldPromote: false, reason: 'would_downgrade' }
   }
   // Nothing to lose: a pending song holds no result at all.
   if (currentBand === 'pending') {

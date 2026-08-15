@@ -58,6 +58,7 @@ export type Database = {
           batch_size: number
           created_at: string
           enabled: boolean
+          enrich_all_songs: boolean
           enrichment_rank: number
           id: string
           identity_version: string
@@ -73,6 +74,7 @@ export type Database = {
           batch_size?: number
           created_at?: string
           enabled?: boolean
+          enrich_all_songs?: boolean
           enrichment_rank: number
           id?: string
           identity_version: string
@@ -88,6 +90,7 @@ export type Database = {
           batch_size?: number
           created_at?: string
           enabled?: boolean
+          enrich_all_songs?: boolean
           enrichment_rank?: number
           id?: string
           identity_version?: string
@@ -980,14 +983,6 @@ export type Database = {
           total: number
         }[]
       }
-      library_recheck_states: {
-        Args: never
-        Returns: {
-          attempts_remaining: number
-          song_id: string
-          state: string
-        }[]
-      }
       library_search_page: {
         Args: {
           p_bands?: string[]
@@ -1036,6 +1031,7 @@ export type Database = {
       next_enrichment_recipe: {
         Args: {
           p_ai_confidence: number
+          p_enrichment_rank: number
           p_enrichment_status: string
           p_highest_attempted_rank: number
           p_song_id: string
@@ -1091,10 +1087,6 @@ export type Database = {
       release_song_enrichment_jobs: {
         Args: { p_job_ids: string[]; p_lease_token: string }
         Returns: number
-      }
-      request_song_enrichment_recheck: {
-        Args: { p_song_id: string; p_user_id: string }
-        Returns: string
       }
       retire_disabled_enrichment_jobs: {
         Args: { p_user_id: string }

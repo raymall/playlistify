@@ -73,9 +73,58 @@ for (const [label, currentBand, candidate, shouldPromote] of cases) {
     currentBand,
     candidate,
     candidateRank: 200,
+    activeRank: 100,
     highestAttemptedRank: 100,
+    canEnrichAllSongs: false,
   })
   hard(`policy: ${label}`, result.shouldPromote === shouldPromote)
+}
+
+// The High opt-in. Without enrich_all_songs a High song is untouchable however
+// strong the recipe; with it, only a stronger rank may try, and only another
+// High result may land.
+const highOptIn = [
+  ['stronger recipe, no opt-in', 300, false, recognized('high'), 'ineligible'],
+  ['same-rank recipe, opted in', 200, true, recognized('high'), 'ineligible'],
+  ['stronger recipe, opted in', 300, true, recognized('high'), null],
+  [
+    'opted-in candidate lands medium',
+    300,
+    true,
+    recognized('medium'),
+    'would_downgrade',
+  ],
+  [
+    'opted-in candidate lands low',
+    300,
+    true,
+    recognized('low'),
+    'would_downgrade',
+  ],
+  ['opted-in candidate is unknown', 300, true, unknown, 'would_downgrade'],
+] as const
+
+for (const [
+  label,
+  candidateRank,
+  canEnrichAllSongs,
+  candidate,
+  refusal,
+] of highOptIn) {
+  const result = decidePromotion({
+    currentBand: 'high',
+    candidate,
+    candidateRank,
+    activeRank: 200,
+    highestAttemptedRank: candidateRank,
+    canEnrichAllSongs,
+  })
+  const expected = refusal ?? 'stronger_recipe'
+  hard(
+    `policy: high + ${label} → ${expected}`,
+    result.shouldPromote === (refusal === null) && result.reason === expected,
+    result.reason === expected ? '' : `got=${result.reason}`,
+  )
 }
 
 // The refusals a Medium song must give, by name — "not promoted" alone would
@@ -92,7 +141,9 @@ for (const [label, currentBand, candidate, reason] of refusalReasons) {
     currentBand,
     candidate,
     candidateRank: 200,
+    activeRank: 100,
     highestAttemptedRank: 100,
+    canEnrichAllSongs: false,
   })
   hard(
     `policy reason: ${label} → ${reason}`,
@@ -105,7 +156,9 @@ const superseded = decidePromotion({
   currentBand: 'low',
   candidate: recognized('high'),
   candidateRank: 200,
+  activeRank: 100,
   highestAttemptedRank: 300,
+  canEnrichAllSongs: false,
 })
 hard(
   'policy: weaker reverse-order candidate is superseded',
