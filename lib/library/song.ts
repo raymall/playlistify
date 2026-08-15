@@ -24,4 +24,7 @@ export type LibrarySong = {
   hiddenMoods: LibraryTag[]
   userGenres: LibraryTag[]
   userMoods: LibraryTag[]
+  /** The recipe that produced this song's result; null before any promotion. */
+  recipeLabel: string | null
+  isCurrentRecipe: boolean
 }

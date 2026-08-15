@@ -45,6 +45,8 @@ type LibraryTagEditorProps = {
   aiMoods: LibraryTag[]
   hiddenGenres: LibraryTag[]
   hiddenMoods: LibraryTag[]
+  isCurrentRecipe: boolean
+  recipeLabel: string | null
   songId: string
   songTitle: string
   userGenres: LibraryTag[]
@@ -207,6 +209,8 @@ export const LibraryTagEditor = ({
   aiMoods,
   hiddenGenres,
   hiddenMoods,
+  isCurrentRecipe,
+  recipeLabel,
   songId,
   songTitle,
   userGenres,
@@ -435,6 +439,13 @@ export const LibraryTagEditor = ({
               </div>
             ) : (
               <p className='text-xs text-muted-foreground'>No AI data yet.</p>
+            )}
+            {/* Named only when it differs from the recipe the panel already
+                names, so the common case stays one short word. */}
+            {recipeLabel !== null && (
+              <p className='text-xs text-muted-foreground'>
+                Recipe: {isCurrentRecipe ? 'current' : recipeLabel}
+              </p>
             )}
           </div>
           {(hasVisibleAiTags || hasHiddenAiTags) && (

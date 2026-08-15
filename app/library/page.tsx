@@ -7,6 +7,7 @@ import { LibraryResults } from '@/components/library-results'
 import { LibrarySearchBar } from '@/components/library-search-bar'
 import { LibraryTableSkeleton } from '@/components/library-table-skeleton'
 import { PageSection } from '@/components/page-section'
+import { getLibraryEnrichmentRecipes } from '@/lib/enrichment/recipes'
 import {
   buildLibraryHref,
   type LibrarySearchParams,
@@ -34,7 +35,10 @@ export default async function LibraryPage({
   // Only the authoritative summary blocks this component. The search itself
   // runs inside the boundary below, so the panels paint immediately and an
   // in-flight import or enrichment survives every search navigation.
-  const countsResult = await supabase.rpc('library_enrichment_counts')
+  const [countsResult, recipes] = await Promise.all([
+    supabase.rpc('library_enrichment_counts'),
+    getLibraryEnrichmentRecipes(supabase),
+  ])
   const counts = countsResult.data?.at(0)
   const totalSongs = counts?.total ?? 0
 
@@ -69,6 +73,7 @@ export default async function LibraryPage({
               ineligibleWeak: counts?.ineligible_weak ?? 0,
               eligible: counts?.eligible ?? 0,
             }}
+            recipes={recipes}
           />
         )}
       </div>

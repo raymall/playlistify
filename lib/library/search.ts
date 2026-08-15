@@ -92,11 +92,22 @@ export const searchLibrary = async (
 
   if (songIds.length === 0) return { songs: [], filteredCount, pageCount }
 
-  const rowsResult = await supabase
-    .from('user_songs')
-    .select(SONG_EMBED)
-    .in('song_id', songIds)
+  // The recipe report is scoped to this page's ids. library_song_recipes() is
+  // an inlinable SQL function, so that filter reaches the join as a key lookup
+  // rather than filtering a scan of the whole library.
+  const [rowsResult, recipeResult] = await Promise.all([
+    supabase.from('user_songs').select(SONG_EMBED).in('song_id', songIds),
+    supabase.rpc('library_song_recipes').in('song_id', songIds),
+  ])
   if (rowsResult.error !== null) throw new Error(rowsResult.error.message)
+  if (recipeResult.error !== null) throw new Error(recipeResult.error.message)
+
+  const recipeBySongId = new Map(
+    recipeResult.data.map((row) => [
+      row.song_id,
+      { label: row.label, isCurrent: row.is_current },
+    ]),
+  )
 
   const songBySongId = new Map(
     rowsResult.data.map((row) => [
@@ -133,6 +144,8 @@ export const searchLibrary = async (
           id: link.mood_id,
           name: link.moods.name,
         })),
+        recipeLabel: recipeBySongId.get(row.songs.id)?.label ?? null,
+        isCurrentRecipe: recipeBySongId.get(row.songs.id)?.isCurrent ?? false,
       },
     ]),
   )

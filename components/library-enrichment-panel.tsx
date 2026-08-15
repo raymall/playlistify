@@ -13,12 +13,14 @@ import {
   type EnrichBatchResponse,
   type EnrichmentCounts,
 } from '@/lib/enrichment/engine'
+import { type EnrichmentRecipeSummary } from '@/lib/enrichment/recipes'
 import { isRecord, readNumber, readString } from '@/lib/json'
 import { wait } from '@/lib/sleep'
 import { createClient } from '@/lib/supabase/client'
 
 type LibraryEnrichmentPanelProps = {
   initialCounts: EnrichmentCounts
+  recipes: EnrichmentRecipeSummary[]
 }
 
 type ActiveAnalysisState = {
@@ -143,8 +145,25 @@ const SummaryCount = ({ count, label }: { count: number; label: string }) => (
   </div>
 )
 
+/**
+ * Everything that makes one analysis differ from another, on one line: which
+ * model, how hard it was asked to think, how many songs it weighs at once, and
+ * the three versions that pin the prompt, the vocabulary, and the output shape.
+ */
+const describeRecipe = (recipe: EnrichmentRecipeSummary): string =>
+  [
+    `${recipe.provider}:${recipe.modelId}`,
+    `${recipe.reasoningEffort} effort`,
+    `${recipe.batchSize} songs per call`,
+    `rank ${recipe.enrichmentRank}`,
+    recipe.promptVersion,
+    recipe.vocabularyVersion,
+    recipe.identityVersion,
+  ].join(' · ')
+
 export const LibraryEnrichmentPanel = ({
   initialCounts,
+  recipes,
 }: LibraryEnrichmentPanelProps) => {
   const router = useRouter()
   const [state, setState] = useState<AnalysisState>({
@@ -388,6 +407,10 @@ export const LibraryEnrichmentPanel = ({
   }
 
   const { counts } = state
+  const currentRecipe = recipes.find((recipe) => recipe.isCurrent) ?? null
+  const escalations = recipes.filter(
+    (recipe) => !recipe.isCurrent && recipe.escalatingSongs > 0,
+  )
   const isRunning = state.phase === 'running'
   const isPausing = state.phase === 'pausing'
   const isActive = isRunning || isPausing
@@ -446,6 +469,30 @@ export const LibraryEnrichmentPanel = ({
           </p>
         )}
       </div>
+
+      {currentRecipe !== null && (
+        <div className='flex flex-col gap-0.5 text-xs text-muted-foreground'>
+          <p>
+            Analyzing with{' '}
+            <span className='font-medium text-foreground'>
+              {currentRecipe.label}
+            </span>
+            {currentRecipe.canEnrichAllSongs &&
+              ' — this recipe also revisits High songs'}
+          </p>
+          <p>{describeRecipe(currentRecipe)}</p>
+          {escalations.map((recipe) => (
+            <p key={recipe.recipeId} className='tabular-nums'>
+              {recipe.escalatingSongs.toLocaleString()}{' '}
+              {recipe.escalatingSongs === 1 ? 'song moves' : 'songs move'} up to{' '}
+              <span className='font-medium text-foreground'>
+                {recipe.label}
+              </span>{' '}
+              (rank {recipe.enrichmentRank}) on the next run.
+            </p>
+          ))}
+        </div>
+      )}
 
       {(isActive || state.phase === 'paused' || state.phase === 'error') && (
         <div className='flex flex-col gap-2'>

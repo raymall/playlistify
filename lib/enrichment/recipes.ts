@@ -18,6 +18,57 @@ export type EnrichmentCounts = {
   eligible: number
 }
 
+/**
+ * A recipe as the Library reports it: everything that makes one analysis
+ * different from another, so what is being paid for is legible rather than
+ * inferred from the model name.
+ */
+export type EnrichmentRecipeSummary = {
+  recipeId: string
+  label: string
+  provider: string
+  modelId: string
+  reasoningEffort: string
+  batchSize: number
+  enrichmentRank: number
+  promptVersion: string
+  vocabularyVersion: string
+  identityVersion: string
+  canEnrichAllSongs: boolean
+  isCurrent: boolean
+  /** Songs the next run would send here instead of the current recipe. */
+  escalatingSongs: number
+}
+
+/**
+ * The current recipe plus any escalation, on the caller's RLS client — the
+ * catalog itself is unreadable to it, so this goes through the reporting RPC.
+ */
+export const getLibraryEnrichmentRecipes = async (
+  supabase: SupabaseClient<Database>,
+): Promise<EnrichmentRecipeSummary[]> => {
+  const { data, error } = await supabase.rpc('library_enrichment_recipes')
+  if (error !== null) {
+    console.error(`[library] recipe report failed: ${error.message}`)
+    return []
+  }
+  return data.map((row) => ({
+    recipeId: row.recipe_id,
+    label: row.label,
+    provider: row.provider,
+    modelId: row.model_id,
+    reasoningEffort: row.reasoning_effort,
+    batchSize: row.batch_size,
+    enrichmentRank: row.enrichment_rank,
+    promptVersion: row.prompt_version,
+    vocabularyVersion: row.vocabulary_version,
+    identityVersion: row.identity_version,
+    canEnrichAllSongs: row.enrich_all_songs,
+    isCurrent: row.is_current,
+    escalatingSongs: row.escalating_songs,
+  }))
+}
+
 export type ClaimedEnrichmentJob = {
   jobId: string
   leaseToken: string
