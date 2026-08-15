@@ -17,42 +17,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      enrichment_recheck_limits: {
-        Row: {
-          last_requested_at: string
-          request_count: number
-          song_id: string
-          user_id: string
-        }
-        Insert: {
-          last_requested_at?: string
-          request_count?: number
-          song_id: string
-          user_id: string
-        }
-        Update: {
-          last_requested_at?: string
-          request_count?: number
-          song_id?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: 'enrichment_recheck_limits_song_id_fkey'
-            columns: ['song_id']
-            isOneToOne: false
-            referencedRelation: 'songs'
-            referencedColumns: ['id']
-          },
-          {
-            foreignKeyName: 'enrichment_recheck_limits_user_id_fkey'
-            columns: ['user_id']
-            isOneToOne: false
-            referencedRelation: 'profiles'
-            referencedColumns: ['id']
-          },
-        ]
-      }
       enrichment_recipes: {
         Row: {
           batch_size: number
@@ -883,32 +847,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      claim_song_enrichment_job: {
-        Args: {
-          p_lease_seconds: number
-          p_lease_token: string
-          p_song_id: string
-          p_user_id: string
-        }
-        Returns: {
-          album: string
-          artists: string[]
-          expected_revision: number
-          identity_version: string
-          job_id: string
-          lease_token: string
-          model_id: string
-          prompt_version: string
-          provider: string
-          recipe_id: string
-          recipe_rank: number
-          release_date: string
-          song_id: string
-          spotify_track_id: string
-          title: string
-          vocabulary_version: string
-        }[]
-      }
       claim_song_enrichment_jobs: {
         Args: {
           p_lease_seconds: number
@@ -983,6 +921,24 @@ export type Database = {
           total: number
         }[]
       }
+      library_enrichment_recipes: {
+        Args: never
+        Returns: {
+          batch_size: number
+          enrich_all_songs: boolean
+          enrichment_rank: number
+          escalating_songs: number
+          identity_version: string
+          is_current: boolean
+          label: string
+          model_id: string
+          prompt_version: string
+          provider: string
+          reasoning_effort: string
+          recipe_id: string
+          vocabulary_version: string
+        }[]
+      }
       library_search_page: {
         Args: {
           p_bands?: string[]
@@ -1003,6 +959,15 @@ export type Database = {
         Args: never
         Returns: {
           liked_at: string
+          song_id: string
+        }[]
+      }
+      library_song_recipes: {
+        Args: never
+        Returns: {
+          is_current: boolean
+          label: string
+          recipe_id: string
           song_id: string
         }[]
       }

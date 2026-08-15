@@ -169,7 +169,6 @@ for (const table of [
   'enrichment_recipes',
   'song_enrichment_attempts',
   'song_enrichment_jobs',
-  'enrichment_recheck_limits',
   'user_genre_suppressions',
   'user_mood_suppressions',
 ] as const) {

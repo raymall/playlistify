@@ -109,12 +109,14 @@ the same commit (rule in `AGENTS.md`).
   `spotify_tokens`, `songs`, `genres`, `moods`, AI and personal tag links,
   `user_songs`, `playlists`, `playlist_songs`, `llm_models`, and
   `unmatched_tags`. Guarded re-enrichment adds `enrichment_recipes`,
-  `song_enrichment_jobs`, immutable `song_enrichment_attempts`,
-  `enrichment_recheck_limits`, and private `user_{genre,mood}_suppressions`.
+  `song_enrichment_jobs`, immutable `song_enrichment_attempts`, and private
+  `user_{genre,mood}_suppressions`.
   Service-role RPCs own job enqueue/claim/release, attempt recording, atomic
-  promotion, recheck requests, and outcome counts. Authenticated
-  security-invoker RPCs expose effective tag names, selectable songs, matching
-  song ids, row-level recheck states, the per-playlist effective-tag summary,
+  promotion, and outcome counts. Authenticated
+  RPCs expose effective tag names, selectable songs, matching
+  song ids, the current recipe and where the next run would escalate
+  (`library_enrichment_recipes()`), the recipe behind each song's result
+  (`library_song_recipes()`), the per-playlist effective-tag summary,
   and — added by `library_search`, which also installs `pg_trgm` into the
   `extensions` schema — `library_search_page()` (one filtered, counted,
   ordered page of the library) and `library_tag_suggestions()` (typeahead).
