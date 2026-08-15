@@ -55,6 +55,7 @@ export type Database = {
       }
       enrichment_recipes: {
         Row: {
+          batch_size: number
           created_at: string
           enabled: boolean
           enrichment_rank: number
@@ -64,10 +65,12 @@ export type Database = {
           label: string
           model_id: string
           prompt_version: string
+          reasoning_effort: string
           recipe_key: string
           vocabulary_version: string
         }
         Insert: {
+          batch_size?: number
           created_at?: string
           enabled?: boolean
           enrichment_rank: number
@@ -77,10 +80,12 @@ export type Database = {
           label: string
           model_id: string
           prompt_version: string
+          reasoning_effort?: string
           recipe_key: string
           vocabulary_version: string
         }
         Update: {
+          batch_size?: number
           created_at?: string
           enabled?: boolean
           enrichment_rank?: number
@@ -90,6 +95,7 @@ export type Database = {
           label?: string
           model_id?: string
           prompt_version?: string
+          reasoning_effort?: string
           recipe_key?: string
           vocabulary_version?: string
         }
@@ -917,6 +923,7 @@ export type Database = {
           model_id: string
           prompt_version: string
           provider: string
+          reasoning_effort: string
           recipe_id: string
           recipe_rank: number
           release_date: string
