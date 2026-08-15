@@ -85,23 +85,31 @@ would duplicate an existing item, contradict one, or make one obsolete:
 
 ## Enabling the rank-300 recipe is still uncanaried
 
-- **In plain terms:** weak songs can now be improved without it — three tries at
-  the current level replaced the old one-try-per-level rule — but the strongest
-  model in the catalog has still never run against real songs, and turning it on
-  hands every song in the library a fresh budget at once.
+- **In plain terms:** the strongest model in the catalog has still never run
+  against real songs, and turning it on hands every song in the library a fresh
+  budget at once. With `enrich_all_songs` it can now reach the 1738 High songs
+  as well, which is roughly a fourteen-fold larger bill than the same switch
+  would have cost before.
 - **Severity:** Medium — no longer blocking any improvement, but the one lever
-  that multiplies cost is also the one nobody has measured.
+  that multiplies cost is also the one nobody has measured, and it now has a
+  second setting that multiplies it again.
 - **Issue:** the catalog has nano at rank 100, the default mini recipe at rank
   200, and the full model at rank 300 disabled. Enabling rank 300 is the
   documented unlock path for locked songs, and by design it resets the
-  three-answer budget for **every** song below High simultaneously — the one
-  unbounded direction in the re-analysis design. Nothing has measured what a
-  rank-300 attempt costs or how often it actually promotes.
-- **Why fix:** so the unlock lever can be pulled deliberately. The rollout steps
-  carried over from the retired re-enrichment plan still apply: canary attempts
+  three-answer budget for **every** song below High simultaneously. Setting
+  `enrich_all_songs` on that recipe additionally opens all 1738 High songs, each
+  with its own three tries, and a High song can only ever be _replaced_ — three
+  answers that come back Medium cost full price and change nothing. Nothing has
+  measured what a rank-300 attempt costs or how often it actually promotes, and
+  the High case is the one where the promotion bar is highest.
+- **Why fix:** so the unlock lever can be pulled deliberately, and the two
+  settings pulled separately. The rollout steps carried over from the retired
+  re-enrichment plan still apply: canary attempts
   and promotions on a small set of existing None/Low songs; compare canonical
   tags before and after every canary promotion; check the cost per attempt and
-  per successful promotion; then enable rank 300 for real. Rollback is disabling
+  per successful promotion; then enable rank 300 for real — with
+  `enrich_all_songs` left false. Only once the High→High promotion rate is known
+  from a canary of its own is that flag worth setting. Rollback is disabling
   job creation/claiming — canonical reads stay on `songs` and the link tables,
   and orphaned attempts/jobs are audit-only.
 
@@ -120,7 +128,8 @@ would duplicate an existing item, contradict one, or make one obsolete:
   `enrichment_attempts_remaining_at_rank` counts it as an answer, and the
   Library calls it None. Not charging for it was considered and rejected: with
   no trigger that re-opens songs when the vocabulary changes, a free retry would
-  re-analyze and re-bill the same song on every run, forever.
+  re-analyze and re-bill the same song on every run of **Analyze & improve**,
+  forever — and now that the bulk run is the only way in, that is every run.
 - **Why fix:** a dedicated `unmatched` outcome would let the row say what
   actually happened and let the budget rule treat it correctly, rather than
   choosing between over-charging and unbounded charging. It touches the outcome
@@ -532,27 +541,6 @@ would duplicate an existing item, contradict one, or make one obsolete:
   Candidate improvements include clearer genre-versus-mood guidance and
   examples, while preserving the instruction not to guess unknown recordings.
 
-## Remove legacy model-rank and omission residue
-
-- **In plain terms:** the guarded queue replaced the old selector and omission
-  counter, but dead helpers, columns, comments, and verification checks still
-  describe the retired system. Remove them after rollout compatibility is no
-  longer needed.
-- **Complexity:** Medium — a cleanup migration plus script and documentation
-  updates through the full database-change sequence.
-- **Issue:** `lib/enrichment/rank.ts` still exports unused `outranks` and
-  `MAX_ENRICHMENT_ATTEMPTS`; its comments describe the deleted selector.
-  `songs.enrichment_attempts` and `songs.enrichment_skipped_rank` remain zero
-  while the real brake is `song_enrichment_jobs.attempt_count`.
-  `verify:enrichment` still asserts and reports those legacy fields, and
-  `reset:enrichment` resets them. `llm_models.enrichment_rank` also remains as a
-  rollout compatibility source even though `enrichment_recipes.enrichment_rank`
-  is authoritative. Do not remove the canonical `songs.enrichment_rank` or
-  highest-attempted recipe fields; those still participate in promotion.
-- **Why fix:** stale safeguards are worse than obvious dead code because they
-  imply coverage. Retire the compatibility fields, move any still-useful
-  checks into `verify:re-enrichment`, and leave one recipe-based ranking model.
-
 ## Database CHECK statuses generate as plain strings
 
 - **In plain terms:** database status fields are constrained at runtime, but
@@ -570,14 +558,16 @@ would duplicate an existing item, contradict one, or make one obsolete:
 
 ## Users cannot report incorrect shared analysis
 
-- **In plain terms:** users can hide a tag privately and request a recheck for
-  weak songs, but they still cannot flag a confident shared result as factually
-  wrong. Add a moderated report path that never edits canonical data directly.
+- **In plain terms:** users can hide a tag privately, but they still cannot flag
+  a confident shared result as factually wrong. Add a moderated report path that
+  never edits canonical data directly.
 - **Complexity:** Medium — reasoned report UI, ownership-checked API, RLS table,
   deduplication/rate limits, and an owner review workflow.
-- **Issue:** guarded promotion now exists, but normal user flows still
-  correctly refuse to re-analyze Medium/High rows. A mistaken confident result
-  therefore has no feedback path beyond private suppression. Reports need
+- **Issue:** there is no per-song request of any kind any more — the recipe
+  decides what runs — and a High song is only revisited when an operator enables
+  a stronger recipe with `enrich_all_songs`. A mistaken confident result
+  therefore has no feedback path beyond private suppression, and no way to reach
+  the person who would decide whether a backfill is warranted. Reports need
   reason categories (wrong recording, genre, mood, or attributes), optional
   detail, abuse controls, and aggregation.
 - **Why fix:** reviewed reports would expose high-confidence failures that model
@@ -586,14 +576,18 @@ would duplicate an existing item, contradict one, or make one obsolete:
 
 ## Classify hardcoded constants versus real configuration
 
-- **In plain terms:** two enrichment limits are configurable, while page sizes,
-  retry budgets, leases, and timeouts are spread through code and SQL. Decide
+- **In plain terms:** one enrichment limit is an env var and two more became
+  recipe columns, while page sizes, retry budgets, leases, and timeouts are
+  spread through code and SQL. Decide
   which are operational knobs and which are invariants; do not move them all
   blindly.
 - **Complexity:** Medium — a code/SQL sweep plus documentation for the values
   that remain intentionally fixed.
-- **Issue:** `ENRICHMENT_BATCH_SIZE` and
-  `ENRICHMENT_MAX_SONGS_PER_RUN` use clamped environment variables. Other
+- **Issue:** `ENRICHMENT_MAX_SONGS_PER_RUN` is the one clamped environment
+  variable left; batch size and reasoning effort moved onto
+  `enrichment_recipes`, which is a third category the original sweep did not
+  anticipate — data that belongs to a versioned identity rather than to code or
+  to deployment. Other
   possible tunables remain hardcoded: library/import page sizes, Supabase retry
   ladders, Spotify token expiry buffer, enrichment-panel retry budgets, the
   600-second job lease, and the 3-second queue wait. The refactor also added
@@ -709,19 +703,23 @@ would duplicate an existing item, contradict one, or make one obsolete:
 
 ## Per-run cap and batch size are unmeasured cost/quality knobs
 
-- **In plain terms:** 20 songs per model call and 500 per button run are
-  educated guesses. Jobs now survive a pause safely, but users still need to
-  continue large runs manually and the accuracy/cost tradeoff is unknown.
+- **In plain terms:** 20 songs per model call, `low` reasoning effort, and 500
+  songs per button run are educated guesses. Jobs now survive a pause safely,
+  but users still need to continue large runs manually and the accuracy/cost
+  tradeoff is unknown.
 - **Complexity:** High — requires the eval harness before tuning is defensible.
-- **Issue:** `ENRICHMENT_BATCH_SIZE` defaults to 20 and
-  `ENRICHMENT_MAX_SONGS_PER_RUN` to 500. The queue refactor removed the risk of
-  losing work at the cap, but did not measure whether smaller batches improve
-  recognition/tag quality enough to justify more calls, or whether the run cap
-  is the right spending brake.
-- **Why fix:** benchmark batch sizes, models, and `reasoningEffort` on the same
-  holdout corpus, then retune. With evidence, consider auto-continuing behind a
-  spend ceiling and pausing on quality/cost signals rather than a raw song
-  count alone.
+- **Issue:** batch size and reasoning effort are now `enrichment_recipes`
+  columns (`batch_size` 20, `reasoning_effort` `low`) rather than environment
+  variables, and `ENRICHMENT_MAX_SONGS_PER_RUN` defaults to 500. Moving the
+  first two onto the recipe made them tunable per generation without a deploy
+  and recorded them against the attempts they shaped — but recording a guess
+  does not measure it. Nothing has established whether smaller batches improve
+  recognition/tag quality enough to justify more calls, what a higher effort
+  buys, or whether the run cap is the right spending brake.
+- **Why fix:** benchmark batch sizes, models, and reasoning efforts on the same
+  holdout corpus, then mint recipes at the settings that win. With evidence,
+  consider auto-continuing behind a spend ceiling and pausing on quality/cost
+  signals rather than a raw song count alone.
 
 ## Enrichment evals are the shared blocker
 

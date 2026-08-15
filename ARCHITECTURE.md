@@ -11,13 +11,13 @@ the same commit (rule in `AGENTS.md`).
 - `app/` — App Router pages + route handlers; `app/globals.css` holds the
   theme tokens (light/dark CSS variables).
 - `app/api/` — JSON route handlers for the client-driven batch loops and
-  mutations (import, enrich, enrichment requests, tags) plus the two
+  mutations (import, enrich, tags) plus the two
   per-keystroke read endpoints (prompt ideas, library tag suggestions).
 - `app/auth/` — OAuth callback + signout route handlers.
 - `components/` — React components (kebab-case, one primary per file);
   `library-*.tsx` are the `/library` panels and table — only
   `import-panel`, `enrichment-panel`, `search-bar`, `tag-editor`,
-  `recheck-action`, and `confidence-info` are client components; `chat-screen.tsx`
+  and `confidence-info` are client components; `chat-screen.tsx`
   (chat state owner), `chat-conversation.tsx` (messages + composer), and
   `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI;
   `playlist-status-panel.tsx`, `playlist-actions.tsx`, and
@@ -155,22 +155,21 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   database-side search: one combobox that commits free text, AND-combined
   genre/mood filter pills, or OR-combined Confidence band pills, over a
   first/last/numbered paginated table with a Confidence band, private AI-tag
-  hiding, personal tags, and a per-song re-analysis control on every row below
-  High showing the tries it has left. The row's title cell is its `<th
-scope='row'>`, so that control is announced against a song name; one `sr-only`
-  paragraph per table carries the shared-result and budget copy for all of them
-  via `aria-describedby`, and the control uses `aria-disabled` rather than
-  `disabled` so a mid-request click does not drop focus to `<body>`. Once the
-  request settles the control is genuinely gone (queued, or out of tries), so
-  focus moves to the status text that replaced it rather than being lost. URL
+  hiding, and personal tags. The row's title cell is its `<th scope='row'>`, so
+  the tag editor is announced against a song name. There is **no** per-song
+  analysis control: the panel names the current recipe (model, effort, batch
+  size, versions, rank) beside **Analyze & improve**, plus a line per stronger
+  recipe the next run would escalate to and how many songs move, and each row's
+  tag popover names the recipe behind that song's own result — `Recipe:
+current` when it is the default, otherwise the recipe's label. URL
   state is
   `?q=&genre=&genre=&mood=&band=&page=` (repeated params, tag names and band
   slugs as the keys). Bands OR because a song carries exactly one; they still
   AND with text and tags. Only the results suspend, so the
   panels and the typed query survive every search
   (`app/library/page.tsx`, `app/library/loading.tsx` (instant skeleton
-  streamed while the page's counts query runs) +
-  `components/library-{import-panel,enrichment-panel,search-bar,results,table,table-skeleton,pagination,tag-editor,confidence-info,recheck-action}.tsx`
+  streamed while the page's counts and recipe queries run) +
+  `components/library-{import-panel,enrichment-panel,search-bar,results,table,table-skeleton,pagination,tag-editor,confidence-info}.tsx`
   → `lib/library/*`).
 - `/chat` — describe a playlist; conversation streams beside a live preview
   panel (rename, edit, drop tracks, create). Server-rendered empty states for
@@ -202,13 +201,9 @@ an auth service that merely blinked is a 503 the client may retry for free:
   batch (`offset: 0` must send `null`) and every later batch echoes it back, so
   one client loop is one sync pass (`app/api/import/route.ts` →
   `lib/spotify/import.ts`).
-- `POST /api/enrich` — claim and process system-selected analysis: one batch
-  with body `{processedSoFar}` (the panel loop), or one song with body
-  `{songId}` (the row control). `maxDuration` 300
+- `POST /api/enrich` — claim and process one batch of system-selected analysis,
+  body `{processedSoFar}` and nothing else. `maxDuration` 300
   (`app/api/enrich/route.ts` → `lib/enrichment/engine.ts`).
-- `POST /api/enrichment-requests` — queue/coalesce a re-analysis for one owned
-  song below High, body `{songId}`; queues only, never analyzes
-  (`app/api/enrichment-requests/route.ts` → `lib/enrichment/requests.ts`).
 - `POST|DELETE /api/tags` — explicit `add`, `remove`, `hide`, or `show`
   operation for one personal/effective tag
   (`app/api/tags/route.ts` → `lib/tags.ts`).
@@ -287,18 +282,21 @@ replaces the full canonical attributes/tag snapshot or rejects the candidate
 without touching it. Pending and None keep their carve-outs (nothing to lose,
 no tags to lose); everything else is one ordinal comparison over
 `confidence_band_rank()`, so a candidate must land in a strictly better band —
-Low accepts Medium/High, Medium accepts only High, High never enters
-re-analysis, and a same-band re-roll is `not_better`. That High branch is the
-last of three gates (`next_enrichment_recipe`, the recheck RPC, then here) and
-the only one under a row lock, so it is what holds when a song turns High
+Low accepts Medium/High, Medium accepts only High, and a same-band re-roll is
+`not_better`. High is refused outright unless the candidate's recipe sets
+`enrich_all_songs` **and** outranks `songs.enrichment_rank`, in which case only
+another High result may land (`stronger_recipe`); anything weaker is
+`would_downgrade`, so the canonical band never regresses. That High branch is
+the second of two gates (`next_enrichment_recipe`, then here) and the only one
+under a row lock, so it is what holds when a song turns High
 mid-lease. Highest-attempted recipe rank advances even on rejection, which
 prevents duplicate billing. Jobs are unique per song/recipe, claims use
 expiring leases, stale lease tokens cannot commit, and omissions and provider
 failures back off before being retired after three tries for that recipe.
 
 **Eligibility is one function.** `next_enrichment_recipe(song, status,
-confidence, highest_rank)` returns the recipe that should run next or null, and
-the bulk selector, the recheck RPC, the panel counts, and the per-row state all
+confidence, active_rank, highest_rank)` returns the recipe that should run next
+or null, and the bulk selector, the panel counts, and the recipe report all
 call it. A song may be analyzed **three times per recipe rank** — the budget is
 derived by `enrichment_attempts_remaining_at_rank()` from the append-only
 attempts log, not stored, so it cannot drift; a locked song re-opens for free
@@ -311,49 +309,52 @@ recipes carrying a `failed` job are excluded (they would re-open forever), and
 escalation sorts before a same-rank retry so enabling a stronger recipe moves
 songs up rather than burning their budget where they are.
 
+**The High gate compares the active rank, not the highest attempted one.**
+Promotion bumps `highest_attempted_recipe_rank` on the _first_ attempt at a new
+rank, so a High gate written against it would open for exactly one try and then
+close — while every other band gets three. `songs.enrichment_rank` only moves
+when a candidate is promoted, so it holds still across all three tries and then
+closes the rank for good on a win. It is also the same rank promotion compares,
+which is what keeps the selector from offering work promotion would refuse.
+
 A same-rank retry **re-opens the existing completed job** rather than creating
 one: `song_enrichment_attempts` is unique on `(job_id, lease_token)`, so many
-attempts per job row were always supported. The re-open bumps `request_count`
-(previously written once and never incremented) and leaves `attempt_count`
+attempts per job row were always supported. The re-open leaves `attempt_count`
 alone — that counter is the omission/failure allowance, and touching it either
 makes the next transient failure terminal or hands out a fresh omission budget.
 
 Queue order is `priority desc`, then reach (how many libraries hold the song),
 then `liked_at desc`. `priority` is set at enqueue from the band: never-analyzed
-500/600, None 200 background and 400 explicit, Low/Medium 100 background and 300
-explicit — so a user's first pass always outranks improvement work, and an
-explicit request jumps the background queue without bypassing eligibility,
-attempt budgets, cooldowns, or promotion rules.
-Reach is a prioritization signal only; it never affects promotion.
+500, None 200, everything else 100 — so a user's first pass always outranks
+improvement work. Reach is a prioritization signal only; it never affects
+promotion.
 
-**A row request analyzes its own song.** `POST /api/enrichment-requests` only
-queues; the row then calls `POST /api/enrich` with a `songId`, which claims that
-one job through `claim_song_enrichment_job` and runs it. Priority alone would
-not have been enough: since the bulk selector and the row control now resolve
-the same population through `next_enrichment_recipe`, a queue-position nudge was
-the _only_ thing separating "re-analyze this one" from "analyze all 138", and
-there is no worker to drain the queue — `/api/enrich` runs solely from the
-client, so a queued song waits for someone to press something. The single-song
-claim narrows selection and nothing else: same recipe, lease, prompt, and
-promotion as a batch, through the shared `runClaimedJobs`, so the two paths
-cannot bill or promote differently. A row already `queued` keeps its control as
-**Analyze now** — its try was spent when it was queued, so running it spends no
-other — while a row genuinely `leased` shows no control at all.
-`library_recheck_states()` reports the per-row state machine
-(`available` / `queued` / `analyzing` / `throttled` / `no_better_recipe` /
-`checked_not_improved` / `improved`, labelled in `lib/enrichment/recheck.ts`)
-alongside `attempts_remaining`. The 10-second cooldown answers `throttled`,
-which used to be one of three unrelated branches returning `already_checked` —
-so a double-click read as a genuine no-improvement result. The last decision
-now sorts **before** availability, because a song that came back "no change"
-usually does have another try left and both facts matter; `attempts_remaining`
-reports 0 whenever no recipe would run, so `> 0` means exactly "clicking will
-analyze something" and is the only thing the row control keys off.
+**The recipe is reported, not requested.** There is no per-song analysis path:
+`/api/enrich` accepts only `processedSoFar`, and the sole remaining authority a
+browser has is _when_ to run its own library. Two security-definer RPCs make
+the recipe visible instead — `library_enrichment_recipes()` (the enabled
+default recipe's full identity, plus a row per stronger enabled recipe the next
+run would escalate to and how many songs move) and `library_song_recipes()`
+(the recipe behind each song's current result). Both are scoped to
+`us.user_id = (select auth.uid())` and granted only to `authenticated`, because
+`enrichment_recipes` and `song_enrichment_attempts` have RLS on with zero
+policies and are unreadable to the RLS client.
+
+Two details carry weight. `library_song_recipes()` sources the recipe from
+`active_enrichment_attempt_id` and falls back to `highest_attempted_recipe_id`,
+because atomic promotion arrived after most songs were analyzed and only the
+fallback is populated for them; it is plain inlinable SQL, so the page's
+`.in('song_id', ids)` reaches the join as a key lookup. And the escalation
+count in `library_enrichment_recipes()` sits behind an uncorrelated
+`exists (select 1 from stronger)`, which Postgres resolves to a one-time filter
+— with no stronger recipe enabled, the per-song `next_enrichment_recipe` call
+is never evaluated and the report costs three index lookups instead of a scan
+of the caller's library.
 
 The vocabulary remains **closed**: the prompt carries only `is_approved`
 `genres`/`moods`; `matchApprovedVocabulary` snaps or drops output, and
 `unmatched_tags` records dropped names. Confidence is rounded before the 0.4
-recognition cutoff. Library outcome counts and recheck states come from
+recognition cutoff. Library outcome counts and the recipe report come from
 database RPCs so the panel, rows, and queue share one eligibility definition.
 
 **Personal tags and suppressions** —
@@ -376,7 +377,7 @@ accepts any name, and `ensureVocabularyIds` snaps it onto the existing row.
 put. Inside it, `LibraryResults` → `searchLibrary` → `library_search_page()`
 does all filtering, counting, ordering, and paging in Postgres and returns thin
 ids; the app then hydrates song detail and the six tag embeds with one
-`.in('song_id', ids)` and scopes `library_recheck_states()` to the same ids.
+`.in('song_id', ids)` and scopes `library_song_recipes()` to the same ids.
 Free text ANDs its whitespace-separated terms (each matching title or artist,
 longest first so the seed drives the trigram index); pills AND across genres
 and moods by relational division. Filter matching is source-agnostic and
@@ -442,14 +443,13 @@ server-rendered card.
 Load-bearing rules the code already satisfies. Each is enforced somewhere and
 would break quietly if undone — they are not open work.
 
-**The browser has no enrichment model authority.** `/api/enrich` accepts only
-progress bookkeeping or an owned song id, and `/api/enrichment-requests` only an
-owned song id — choosing _which of your own songs_ to run is the sole authority
-the client has, and both the route and `claim_song_enrichment_job` check
-ownership. Database functions choose an enabled default/next recipe; the engine then
-resolves its provider/model snapshot through the server-only
-`lib/ai/providers.ts`. Accepting a client model, recipe, or rank would expose
-unbounded cost and shared-data authority.
+**The browser has no enrichment authority at all.** `/api/enrich` accepts
+`processedSoFar` and nothing else — not a song id, not a model, not a recipe.
+Deciding _when_ to run your own library is the whole of the client's authority;
+the database picks which songs, under which recipe, at which effort, in batches
+of which size, and the engine resolves the provider/model snapshot through the
+server-only `lib/ai/providers.ts`. Accepting a client model, recipe, rank, or
+even a song id would expose unbounded cost and shared-data authority.
 
 **`ensureVocabularyIds` is the only legal vocabulary write path.**
 `.upsert(..., { onConflict: 'name' })` _without_ `ignoreDuplicates` compiles to
@@ -473,13 +473,13 @@ result never quietly shapes a playlist.
 Stated in the `library_search` migration header and in `HOW-IT-WORKS.md`;
 no verification script asserts it yet (tracked in `IMPROVEMENTS.md`).
 
-**One Confidence band rule, read by five surfaces.** The row badge
+**One Confidence band rule, read by four surfaces.** The row badge
 (`getConfidenceBand`), the panel totals (`get_library_enrichment_counts`), the
-Library band filter, the promotion matrix, and `library_recheck_states()` must
+Library band filter, and the promotion matrix must
 classify every song identically, or a user filters by Low and gets rows the
-badge calls Medium — or is offered a re-analysis the promotion rule will always
-refuse. `public.confidence_band()` is the single SQL definition and all four SQL
-readers call it; `getConfidenceBand` mirrors it in TypeScript, and
+badge calls Medium — or the panel counts as eligible a song the promotion rule
+will always refuse. `public.confidence_band()` is the single SQL definition and
+all three SQL readers call it; `getConfidenceBand` mirrors it in TypeScript, and
 `confidence_band_rank()` orders the same five bands for the promotion
 comparison, mirroring `CONFIDENCE_BAND_ORDER`. The two stay equivalent only because `enrichment_status` is CHECKed
 to `('pending', 'enriched', 'unknown')`, which is what makes SQL's

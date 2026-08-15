@@ -29,11 +29,12 @@ era, prominent instruments, and a few descriptors. Those answers are what the
 chat later searches. A song without trustworthy AI analysis can still be found
 through tags a user adds personally.
 
-**Analysis runs in batches** because one request for about twenty songs is
-faster and cheaper than twenty separate requests. The app keeps starting small
-batches until the eligible part of the library is done or the run reaches its
-spending cap. It is resumable: closing the page or pausing after a batch does
-not discard completed work.
+**Analysis runs in batches** because one request for a couple of dozen songs is
+faster and cheaper than that many separate requests. How many go into one
+request is part of the recipe, not a setting — see below. The app keeps
+starting batches until the eligible part of the library is done or the run
+reaches its spending cap. It is resumable: closing the page or pausing after a
+batch does not discard completed work.
 
 Before a batch begins, each song gets one shared place in the work queue. If
 two people encounter the same song, their requests combine instead of buying
@@ -87,9 +88,18 @@ Improving a shared record helps everyone, but accepting every newer answer
 would let one uncertain response make the product worse. Playlistify therefore
 separates an attempted answer from the canonical answer.
 
-**The system chooses the analysis recipe.** A recipe includes the model plus
-the prompt, approved vocabulary, and recording-identification strategy. Users
-request an improvement, not a vendor or capability rank.
+**The system chooses the analysis recipe.** A recipe is the complete method
+used to analyze a song, not just the model that answered: the model, the
+instructions it was given, the vocabulary it was allowed to choose from, how
+hard it was asked to think, how many songs it weighed in one go, and how the
+recording was described to it. Change any one of those and it is a different
+recipe, because the answer may change with it.
+
+Recipes are never edited. A change mints a new one, so a record of what has
+already been tried on a song stays true instead of quietly coming to mean
+something else. Each recipe carries a rank — its place on a ladder from
+cheapest to strongest — and that rank is what decides when a song has earned
+another look. Users request an improvement, not a vendor or a capability rank.
 
 **Every song gets three tries at its current quality level.** The model is not
 deterministic, so a second ask at the same level is a real chance at a better
@@ -106,19 +116,26 @@ anything.
 alone.** A Medium song is included because it can still be wrong, but the bar
 for replacing it is high: only a High result may take its place.
 
-Repeated requests coalesce into the same global job, and a request made within
-ten seconds of the last one is simply ignored — it does not spend a try. That
-bounds cost to three answers per quality level, not one per click or one per
-user.
+**A recipe may opt in to revisiting High songs.** This is the one exception,
+and it belongs to the recipe rather than to anyone using the app. A recipe can
+declare that it is worth re-examining even the songs that already look
+settled — and if it does, it still has to outrank whatever produced the
+existing result, and its answer still has to come back High. A weaker answer
+from a stronger recipe changes nothing. Turning that on is an operator
+decision, taken once for a recipe, not a button anyone can press per song.
 
-**Asking for one song analyzes that one song.** The Library gives you two ways
-in, and they are genuinely different: the button on a row analyzes that
-recording and nothing else, and you see the result in a few seconds; the
-**Analyze & improve** button works through every song below High. Both pick the
-same quality level, spend from the same three tries, and go through the same
-promotion rule — the row is not a weaker or cheaper analysis, only a narrower
-one. Nothing is analyzed in the background: a song waits until you ask, either
-way.
+**There is one way in: Analyze & improve.** One button works through everything
+eligible, and there is no per-song request. Nothing is analyzed in the
+background either — the library waits until you ask. The reason it is a single
+control is that the recipe already decides what is worth analyzing; a per-song
+button could only ask for the same work in a different order, while making it
+look like some songs could be pushed harder than others.
+
+**The Library shows the recipe it is using.** Beside the button it names the
+current recipe in full — model, effort, batch size, versions, rank — and, if a
+stronger recipe would take some songs on the next run, how many. Each song's
+tag panel names the recipe behind its own result, which is how a row analyzed
+under an older vocabulary is distinguishable from one analyzed under today's.
 
 **A candidate is promoted only when it improves the current state.**
 
@@ -126,7 +143,8 @@ way.
 - A None song may accept any trustworthy recognized result.
 - A Low song may accept only a Medium or High result.
 - A Medium song may accept only a High result.
-- A High song is not replaced by the normal flow.
+- A High song is replaced only by a High result from a stronger recipe that
+  opted in, and never by anything below High.
 - An unknown, omitted, failed, invalid, or weaker retry cannot erase a usable
   result.
 
@@ -140,13 +158,14 @@ the accepted attempt change as one snapshot. Old AI tags are replaced, not
 accumulated. If two analyses finish out of order, the decision is rechecked
 against the latest shared result before anything changes.
 
-Improvement is still song-by-song and still capped, but the Library's
-**Analyze & improve** button now covers every song below High, Medium included
-— so one click can re-analyze songs that already have a usable result. What
-keeps that honest is the promotion rule above: a Medium song that gets three
-more Medium answers stays exactly as it was. Revisiting **High** songs remains
-out of reach by design; that would be a deliberate operator-run backfill, not a
-consumer control.
+Improvement is still capped, but **Analyze & improve** covers every song below
+High, Medium included — so one click can re-analyze songs that already have a
+usable result. What keeps that honest is the promotion rule above: a Medium
+song that gets three more Medium answers stays exactly as it was, having cost
+three answers and changed nothing. Revisiting **High** songs is a deliberate
+backfill rather than a consumer control, which is why it lives on the recipe:
+someone decides once that a particular recipe earns that reach, and the
+promotion rule still has the last word on every individual song.
 
 ## Personal tags and hidden AI tags
 

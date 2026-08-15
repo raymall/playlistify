@@ -35,7 +35,8 @@ Stated by the user (treat as non-negotiable):
 - Design: neo-Swiss — minimal, grid-driven, strong typography. Light and dark mode from day one.
 - Enrichment is cached globally: each song has one canonical AI result across
   all users. Every band below `High` may be retried, three times per recipe
-  rank, and a retry replaces the canonical result only through the guarded
+  rank; `High` only by a stronger recipe that sets `enrich_all_songs`. A retry
+  replaces the canonical result only through the guarded
   promotion policy (product reasoning in `HOW-IT-WORKS.md`, mechanism in
   `ARCHITECTURE.md`).
 - LLM provider must be swappable (OpenAI default, per user's choice).
@@ -78,11 +79,12 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 2. Import Liked Songs into the global songs table + personal library join table, with a visible progress indicator; re-sync on demand to pick up newly liked songs and, once a pass completes, drop songs Spotify confirms are no longer saved.
 3. AI enrichment of every imported track (genres, moods, energy, era,
    descriptors + recognition confidence), batched, cached globally, resumable,
-   with progress shown. The system chooses an owner-curated recipe. Weak global
-   results may be retried once per genuinely stronger recipe; only a better
-   candidate is promoted.
+   with progress shown. The system chooses an owner-curated recipe, which also
+   fixes the reasoning effort and batch size. Weak global results get three
+   tries per recipe rank, and a strictly stronger recipe re-opens that budget;
+   only a better candidate is promoted.
 4. Library view: browse imported tracks with each track's AI attributes,
-   model-reported Confidence band, queue/recheck state, and effective tags.
+   model-reported Confidence band, the recipe behind it, and effective tags.
    Search runs in Postgres: free text over title + artists, AND-combined
    genre/mood filter pills fed by a library-scoped typeahead, exact counts, and
    full pagination. All search state lives in the URL.
@@ -112,11 +114,12 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 
 1. **Landing / Login — `/`** — the Wake animated mesh, Playlistify wordmark, briefly rotating liked-songs tagline, and "Continue with Spotify" button. The alternate Veil mesh remains available at `/v2` for comparison. Serves feature 1. Redirects signed-in users from `/` to `/chat`.
 2. **Import & Library — `/library`** — first-run: import/enrichment progress
-   with system-selected analysis; afterwards: a search bar that commits either
+   with system-selected analysis, which names the recipe it runs; afterwards: a
+   search bar that commits either
    free text or genre/mood filter pills, over a paginated table showing title,
    artist, AI/personal mood and genre chips, the Confidence band, and per-track
-   controls to add personal tags, hide AI tags privately, and request an
-   eligible re-analysis for any song below `High`, with the tries it has left.
+   controls to add personal tags and hide AI tags privately. There is no
+   per-song re-analysis control — the recipe decides what runs.
    Includes Pending / None / Low / Medium / High confidence counts and
    "Re-sync Liked Songs".
    Serves features 2, 3, 4, 5.
@@ -194,17 +197,17 @@ reading of it. The guarded re-enrichment workflow's rationale is in
 | ai_attributes                 | jsonb                       | energy (1–5), tempo_feel, era, instrumentation, descriptors[]               |
 | enrichment_status             | text                        | `pending` \| `enriched` \| `unknown`                                        |
 | enrichment_model              | text                        | provider/model snapshot that produced the canonical row                     |
-| enrichment_rank               | smallint not null default 0 | legacy active-model rank snapshot                                           |
+| enrichment_rank               | smallint not null default 0 | rank of the recipe that produced the canonical row; 0 = never enriched      |
 | enriched_at                   | timestamptz                 |                                                                             |
 | active_enrichment_attempt_id  | uuid nullable               | accepted attempt; null means a legacy canonical result                      |
 | enrichment_revision           | bigint not null default 0   | monotonic canonical snapshot revision                                       |
 | highest_attempted_recipe_id   | uuid nullable               | highest-ranked recipe already attempted                                     |
 | highest_attempted_recipe_rank | smallint not null default 0 | eligibility/cost guard independent of whether the latest candidate promoted |
-| enrichment_attempts           | smallint not null default 0 | legacy omission counter, superseded by `song_enrichment_jobs.attempt_count` |
-| enrichment_skipped_rank       | smallint not null default 0 | legacy give-up marker, superseded by the job queue                          |
 
-The two legacy columns stay zero and are slated for removal — see
-`IMPROVEMENTS.md` → "Remove legacy model-rank and omission residue".
+`enrichment_rank` and `highest_attempted_recipe_rank` answer different
+questions and both are load-bearing: the High opt-in gate compares the
+_active_ rank, so a song keeps its full three tries at a new rank instead of
+being closed out by its own first attempt.
 
 **genres** / **moods** — shared vocabulary tables (identical shape)
 
@@ -287,17 +290,20 @@ gaps can be reviewed deliberately (service-role only)
 **llm_models** — admin-curated provider/model catalog; rows are edited directly
 in Supabase Studio (operational data, not schema)
 
-| column          | type                           | notes                                                                                 |
-| --------------- | ------------------------------ | ------------------------------------------------------------------------------------- |
-| id              | uuid PK                        |                                                                                       |
-| provider        | text not null                  | free text (`openai`, …); adding a provider needs no migration                         |
-| model_id        | text not null                  | AI SDK model string, e.g. `gpt-5-mini`; unique per provider                           |
-| label           | text not null                  | owner-facing display name                                                             |
-| enabled         | boolean not null default true  | whether the model may back an active recipe                                           |
-| is_default      | boolean not null default false | legacy model default, retained for compatibility                                      |
-| sort_order      | smallint not null default 0    | owner-facing ordering                                                                 |
-| enrichment_rank | smallint not null default 0    | legacy rank copied into seeded recipes; recipe rank is authoritative for new attempts |
-| created_at      | timestamptz                    |                                                                                       |
+| column     | type                           | notes                                                         |
+| ---------- | ------------------------------ | ------------------------------------------------------------- |
+| id         | uuid PK                        |                                                               |
+| provider   | text not null                  | free text (`openai`, …); adding a provider needs no migration |
+| model_id   | text not null                  | AI SDK model string, e.g. `gpt-5-mini`; unique per provider   |
+| label      | text not null                  | owner-facing display name                                     |
+| enabled    | boolean not null default true  | whether the model may back an active recipe                   |
+| is_default | boolean not null default false | legacy model default, retained for compatibility              |
+| sort_order | smallint not null default 0    | owner-facing ordering                                         |
+
+Ranking is not here: it is a property of the recipe, because two prompt or
+vocabulary generations of one model can be ordered differently.
+| enrichment_rank | smallint not null default 0 | legacy rank copied into seeded recipes; recipe rank is authoritative for new attempts |
+| created_at | timestamptz | |
 
 **enrichment_recipes** — versioned, owner-curated analysis configurations
 
@@ -310,7 +316,10 @@ in Supabase Studio (operational data, not schema)
 | prompt_version       | text              | prompt revision                             |
 | vocabulary_version   | text              | approved-vocabulary revision                |
 | identity_version     | text              | recording-identity input revision           |
+| reasoning_effort     | text              | `minimal` \| `low` \| `medium` \| `high`    |
+| batch_size           | smallint          | songs per LLM call, 1–50                    |
 | enrichment_rank      | smallint          | authoritative sparse capability ordering    |
+| enrich_all_songs     | boolean           | may this recipe revisit `High` songs        |
 | enabled / is_default | boolean           | one enabled default handles first-pass work |
 | created_at           | timestamptz       |                                             |
 
@@ -321,7 +330,7 @@ in Supabase Studio (operational data, not schema)
 | id                              | uuid PK     |                                                 |
 | song_id / recipe_id             | uuid        | unique work identity                            |
 | status                          | text        | `queued` \| `leased` \| `completed` \| `failed` |
-| priority / request_count        | int         | ordering and coalesced demand                   |
+| priority                        | int         | queue ordering, set at enqueue from the band    |
 | attempt_count / next_attempt_at | int / time  | bounded omission retry and backoff              |
 | lease_token / lease_expires_at  | uuid / time | crash-safe ownership                            |
 | expected_revision               | bigint      | canonical revision observed at claim            |
@@ -342,9 +351,6 @@ in Supabase Studio (operational data, not schema)
 | expected_revision          | bigint      | canonical revision seen when claimed                    |
 | decision / decision_reason | text        | one-way `pending` → `promoted` or `rejected` transition |
 | created_at / decided_at    | timestamptz |                                                         |
-
-**enrichment_recheck_limits** — service-only per-user/song request throttle;
-repeated requests still coalesce into the global job.
 
 ### Schema Notes
 
@@ -401,9 +407,10 @@ open hardening items are tracked in `IMPROVEMENTS.md`.
    overlay tables, RLS policies, RPCs, constraints, and indexes.
 4. **Import** — paginated `/me/tracks` fetch → upsert `songs` (Spotify metadata; the artist-genre lookup degrades to `[]`) + `user_songs`; completed re-syncs remove songs Spotify confirms are no longer liked; progress UI on `/library`.
 5. **Enrichment** — AI SDK structured output; system-selected versioned
-   recipes; globally deduplicated leased jobs; immutable candidate attempts;
+   recipes carrying their own reasoning effort and batch size; globally
+   deduplicated leased jobs; immutable candidate attempts;
    transactional guarded promotion; bounded omissions/backoff; client batch
-   loop and env-var spending caps.
+   loop and an env-var per-run spending cap.
 6. **Personal tags** — Library tag editor for private additions/removals and
    explicit hide/show operations over canonical AI tags; effective-tag reads
    shared by Library and Chat.
@@ -433,6 +440,18 @@ open hardening items are tracked in `IMPROVEMENTS.md`.
     ordinal band comparison, same-rank retries re-opening their existing job,
     and a per-row control that analyzes one song on its own and shows the tries
     it has left.
+
+13. **Recipe-driven enrichment (implemented 2026-08-15)** — the recipe becomes
+    the only thing that decides what is analyzed and when. Reasoning effort and
+    batch size move onto `enrichment_recipes` and are resolved inside the claim,
+    so the browser has no enrichment authority beyond _when_ to run;
+    `enrich_all_songs` lets a strictly stronger recipe revisit `High`, and only
+    another `High` result may replace one. The per-song re-analysis control,
+    its route, its single-song claim, and the request throttle are removed
+    entirely, and the space they vacated is where the recipe becomes visible:
+    `library_enrichment_recipes()` names the current one and any escalation,
+    `library_song_recipes()` names the one behind each row. The legacy
+    model-rank and omission columns are dropped.
 
 Steps 4–6 and 7–8 are the two halves of the product; each is independently demoable.
 
