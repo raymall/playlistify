@@ -6,13 +6,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import {
+  ANALYSIS_BUDGET_COPY,
+  ANALYSIS_SHARED_RESULT_COPY,
+} from '@/lib/enrichment/confidence'
+import {
   type EnrichBatchResponse,
   type EnrichmentCounts,
 } from '@/lib/enrichment/engine'
-import {
-  RECHECK_BUDGET_COPY,
-  RECHECK_SHARED_RESULT_COPY,
-} from '@/lib/enrichment/recheck'
 import { isRecord, readNumber, readString } from '@/lib/json'
 import { wait } from '@/lib/sleep'
 import { createClient } from '@/lib/supabase/client'
@@ -416,7 +416,7 @@ export const LibraryEnrichmentPanel = ({
         </h2>
         <p className='max-w-prose text-sm text-muted-foreground'>
           Confidence is reported by the model, not measured accuracy.{' '}
-          {RECHECK_SHARED_RESULT_COPY} {RECHECK_BUDGET_COPY}
+          {ANALYSIS_SHARED_RESULT_COPY} {ANALYSIS_BUDGET_COPY}
         </p>
       </div>
 

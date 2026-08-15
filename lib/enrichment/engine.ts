@@ -11,7 +11,6 @@ import { recordAndPromoteCandidate } from '@/lib/enrichment/promotion'
 import {
   type ClaimedEnrichmentJob,
   claimEnrichmentJobs,
-  claimSongEnrichmentJob,
   enqueueLibraryEnrichmentJobs,
   type EnrichmentCounts,
   getLibraryEnrichmentCounts,
@@ -45,16 +44,6 @@ export type EnrichBatchResponse =
   | ({ status: 'waiting'; retryAfterMs: number } & EnrichmentCounts)
   | ({ status: 'done' } & EnrichmentCounts)
   | ({ status: 'cap_reached' } & EnrichmentCounts)
-  | { status: 'error'; message: string; safeToRetry?: boolean }
-
-export type EnrichSongPayload = {
-  songId: string
-}
-
-export type EnrichSongResponse =
-  /** `skipped` means nothing was queued for the song — never a billed call. */
-  | { status: 'analyzed'; isPromoted: boolean }
-  | { status: 'skipped' }
   | { status: 'error'; message: string; safeToRetry?: boolean }
 
 const DEFAULT_BATCH_SIZE = 20
@@ -248,8 +237,7 @@ type ClaimedRunResult =
 
 /**
  * Prompt, structured-output call, vocabulary match, and promotion for one
- * claimed same-recipe batch. Shared so the single-song path cannot drift from
- * the batch path — they must bill and promote identically.
+ * claimed same-recipe batch.
  */
 const runClaimedJobs = async (
   admin: ReturnType<typeof createAdminClient>,
@@ -426,28 +414,4 @@ export const enrichLibraryBatch = async (
     batchOmitted: run.omitted,
     ...finalCounts,
   }
-}
-
-/**
- * Analyzes exactly one song's queued job. The row control's endpoint: same
- * recipe selection, lease, prompt, and promotion as the batch path — the only
- * difference is that the claim is narrowed to one song, so requesting one song
- * does not bill for the rest of the queue.
- */
-export const enrichSong = async (
-  userId: string,
-  songId: string,
-): Promise<EnrichSongResponse> => {
-  const admin = createAdminClient()
-
-  const claim = await claimSongEnrichmentJob(admin, userId, songId)
-  if (claim.status === 'error') {
-    return fail('song claim', claim.message, true)
-  }
-  const job = claim.jobs.at(0)
-  if (job === undefined) return { status: 'skipped' }
-
-  const run = await runClaimedJobs(admin, claim.jobs, job)
-  if (run.status === 'error') return run
-  return { status: 'analyzed', isPromoted: run.promoted > 0 }
 }

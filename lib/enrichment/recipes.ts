@@ -86,7 +86,6 @@ export const getLibraryEnrichmentCounts = async (
   }
 }
 
-/** Both claim RPCs return the same row shape, so they share one reader. */
 type ClaimedJobRow = {
   job_id: string
   lease_token: string
@@ -155,30 +154,6 @@ const SUPPORTED_VOCABULARY_VERSIONS = new Set([
   'vocabulary-v2',
 ])
 
-/**
- * Claims the one queued job for a single song. Same lease-token replay and
- * eligibility rules as the batch claim; it only narrows the selection, so a
- * per-row request can be analyzed without draining the whole queue.
- */
-export const claimSongEnrichmentJob = async (
-  admin: AdminClient,
-  userId: string,
-  songId: string,
-): Promise<
-  | { status: 'ok'; jobs: ClaimedEnrichmentJob[] }
-  | { status: 'error'; message: string }
-> => {
-  const leaseToken = randomUUID()
-  const { data, error } = await admin.rpc('claim_song_enrichment_job', {
-    p_user_id: userId,
-    p_song_id: songId,
-    p_lease_seconds: 600,
-    p_lease_token: leaseToken,
-  })
-  if (error !== null) return { status: 'error', message: error.message }
-  return { status: 'ok', jobs: data.map(readClaimedJob) }
-}
-
 export const isSupportedRecipe = (job: ClaimedEnrichmentJob): boolean =>
   job.promptVersion === 'prompt-v1' &&
   SUPPORTED_VOCABULARY_VERSIONS.has(job.vocabularyVersion) &&
@@ -195,42 +170,4 @@ export const releaseClaimedJobs = async (
     p_lease_token: firstJob.leaseToken,
   })
   return error
-}
-
-export type RecheckRequestResult =
-  'queued' | 'already_queued' | 'analyzing' | 'throttled' | 'no_better_recipe'
-
-const readRecheckRequestResult = (
-  value: string,
-): RecheckRequestResult | null => {
-  switch (value) {
-    case 'queued':
-    case 'already_queued':
-    case 'analyzing':
-    case 'throttled':
-    case 'no_better_recipe':
-      return value
-    default:
-      return null
-  }
-}
-
-export const requestSongRecheck = async (
-  admin: AdminClient,
-  userId: string,
-  songId: string,
-): Promise<
-  | { status: 'ok'; result: RecheckRequestResult }
-  | { status: 'error'; message: string }
-> => {
-  const { data, error } = await admin.rpc('request_song_enrichment_recheck', {
-    p_user_id: userId,
-    p_song_id: songId,
-  })
-  if (error !== null) return { status: 'error', message: error.message }
-  const result = readRecheckRequestResult(data)
-  if (result === null) {
-    return { status: 'error', message: 'Unexpected recheck state' }
-  }
-  return { status: 'ok', result }
 }

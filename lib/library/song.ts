@@ -2,7 +2,6 @@
 // component so the server-only data layer (lib/library/search.ts) can build
 // them without importing from a component module.
 
-import { type RecheckState } from '@/lib/enrichment/recheck'
 import { type SongAIAttributes } from '@/lib/enrichment/schema'
 
 /** One vocabulary row as it appears on a song: the shared id plus its name. */
@@ -25,11 +24,4 @@ export type LibrarySong = {
   hiddenMoods: LibraryTag[]
   userGenres: LibraryTag[]
   userMoods: LibraryTag[]
-  recheckState: RecheckState | null
-  /**
-   * Analyses still available at the level that would run next, or 0 when none
-   * would. Kept as a scalar beside the state rather than bundled into an object
-   * so the row control can reset on either without a new identity every render.
-   */
-  recheckAttemptsRemaining: number
 }

@@ -9,7 +9,6 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { readRecheckState } from '@/lib/enrichment/recheck'
 import { readSongAIAttributes } from '@/lib/enrichment/schema'
 import {
   LIBRARY_PAGE_SIZE,
@@ -93,31 +92,11 @@ export const searchLibrary = async (
 
   if (songIds.length === 0) return { songs: [], filteredCount, pageCount }
 
-  // Recheck state is scoped to this page's ids; the whole-library variant used
-  // to be fetched on every render and then read 50 rows deep.
-  const [rowsResult, recheckResult] = await Promise.all([
-    supabase.from('user_songs').select(SONG_EMBED).in('song_id', songIds),
-    supabase.rpc('library_recheck_states').in('song_id', songIds),
-  ])
+  const rowsResult = await supabase
+    .from('user_songs')
+    .select(SONG_EMBED)
+    .in('song_id', songIds)
   if (rowsResult.error !== null) throw new Error(rowsResult.error.message)
-  if (recheckResult.error !== null) throw new Error(recheckResult.error.message)
-
-  const recheckBySongId = new Map(
-    recheckResult.data.flatMap((row) => {
-      const recheckState = readRecheckState(row.state)
-      return recheckState === null
-        ? []
-        : [
-            [
-              row.song_id,
-              {
-                state: recheckState,
-                attemptsRemaining: row.attempts_remaining,
-              },
-            ] as const,
-          ]
-    }),
-  )
 
   const songBySongId = new Map(
     rowsResult.data.map((row) => [
@@ -154,9 +133,6 @@ export const searchLibrary = async (
           id: link.mood_id,
           name: link.moods.name,
         })),
-        recheckState: recheckBySongId.get(row.songs.id)?.state ?? null,
-        recheckAttemptsRemaining:
-          recheckBySongId.get(row.songs.id)?.attemptsRemaining ?? 0,
       },
     ]),
   )

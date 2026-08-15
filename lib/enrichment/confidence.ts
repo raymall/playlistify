@@ -1,6 +1,19 @@
 // Model-reported recognition confidence bands shown in the Library. Confidence
 // is not measured accuracy, so the help copy keeps that distinction explicit.
 
+/** Mirrors the budget in `enrichment_attempts_remaining_at_rank()`. */
+export const ANALYSES_PER_RECIPE_RANK = 3
+
+/**
+ * The two things the Confidence panel cannot explain on its own: that the
+ * result is shared, and that tries are finite. Kept beside the band rule so
+ * every surface describing analysis quality reads from one place.
+ */
+export const ANALYSIS_SHARED_RESULT_COPY =
+  'We only replace shared analysis when the new result is better. Improvements apply everywhere this song appears.'
+
+export const ANALYSIS_BUDGET_COPY = `Each song gets up to ${ANALYSES_PER_RECIPE_RANK} tries at the current quality level. After that it waits until a stronger recipe is enabled.`
+
 /** Top of the Low band, inclusive. */
 export const LOW_MAX_CONFIDENCE = 0.5
 
