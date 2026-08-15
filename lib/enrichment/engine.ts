@@ -46,9 +46,6 @@ export type EnrichBatchResponse =
   | ({ status: 'cap_reached' } & EnrichmentCounts)
   | { status: 'error'; message: string; safeToRetry?: boolean }
 
-const DEFAULT_BATCH_SIZE = 20
-const MIN_BATCH_SIZE = 1
-const MAX_BATCH_SIZE = 50
 const DEFAULT_MAX_SONGS_PER_RUN = 500
 const MIN_MAX_SONGS_PER_RUN = 1
 const MAX_MAX_SONGS_PER_RUN = 5000
@@ -276,7 +273,9 @@ const runClaimedJobs = async (
         vocabulary.genreNames,
         vocabulary.moodNames,
       ),
-      providerOptions: { openai: { reasoningEffort: 'low' } },
+      providerOptions: {
+        openai: { reasoningEffort: firstJob.reasoningEffort },
+      },
     })
     batch = result.output
   } catch (error) {
@@ -346,12 +345,6 @@ export const enrichLibraryBatch = async (
   userId: string,
   processedSoFar: number,
 ): Promise<EnrichBatchResponse> => {
-  const batchSize = readEnvInt(
-    'ENRICHMENT_BATCH_SIZE',
-    DEFAULT_BATCH_SIZE,
-    MIN_BATCH_SIZE,
-    MAX_BATCH_SIZE,
-  )
   const runCap = readEnvInt(
     'ENRICHMENT_MAX_SONGS_PER_RUN',
     DEFAULT_MAX_SONGS_PER_RUN,
@@ -374,10 +367,13 @@ export const enrichLibraryBatch = async (
     return { status: 'cap_reached', ...initialCounts }
   }
 
+  // Only what is left of this run's spend cap. The claim takes the smaller of
+  // that and the chosen recipe's own batch size, so how many songs go into one
+  // call is the recipe's decision and never the deployment's.
   const claim = await claimEnrichmentJobs(
     admin,
     userId,
-    Math.min(batchSize, runCap - processedSoFar),
+    runCap - processedSoFar,
   )
   if (claim.status === 'error') {
     return fail('job claim', claim.message, true)

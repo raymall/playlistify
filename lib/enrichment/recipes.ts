@@ -35,6 +35,7 @@ export type ClaimedEnrichmentJob = {
   promptVersion: string
   vocabularyVersion: string
   identityVersion: string
+  reasoningEffort: string
 }
 
 export const enqueueLibraryEnrichmentJobs = async (
@@ -103,6 +104,7 @@ type ClaimedJobRow = {
   prompt_version: string
   vocabulary_version: string
   identity_version: string
+  reasoning_effort: string
 }
 
 const readClaimedJob = (row: ClaimedJobRow): ClaimedEnrichmentJob => ({
@@ -122,6 +124,7 @@ const readClaimedJob = (row: ClaimedJobRow): ClaimedEnrichmentJob => ({
   promptVersion: row.prompt_version,
   vocabularyVersion: row.vocabulary_version,
   identityVersion: row.identity_version,
+  reasoningEffort: row.reasoning_effort,
 })
 
 export const claimEnrichmentJobs = async (
@@ -154,10 +157,23 @@ const SUPPORTED_VOCABULARY_VERSIONS = new Set([
   'vocabulary-v2',
 ])
 
+/**
+ * The recipe chooses the effort, so an unrecognized value is released with the
+ * rest of the identity checks rather than guessed at — silently substituting a
+ * default would bill an answer the recipe never asked for.
+ */
+const SUPPORTED_REASONING_EFFORTS = new Set([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+])
+
 export const isSupportedRecipe = (job: ClaimedEnrichmentJob): boolean =>
   job.promptVersion === 'prompt-v1' &&
   SUPPORTED_VOCABULARY_VERSIONS.has(job.vocabularyVersion) &&
-  job.identityVersion === 'identity-v1'
+  job.identityVersion === 'identity-v1' &&
+  SUPPORTED_REASONING_EFFORTS.has(job.reasoningEffort)
 
 export const releaseClaimedJobs = async (
   admin: AdminClient,

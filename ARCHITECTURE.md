@@ -269,8 +269,10 @@ works).
 `POST /api/enrich` with only `processedSoFar`; the browser supplies no model,
 recipe, or rank authority. `lib/enrichment/engine.ts` asks Postgres to create
 or coalesce eligible jobs, then lease one same-recipe batch for songs in the
-caller's library (env caps `ENRICHMENT_BATCH_SIZE` /
-`ENRICHMENT_MAX_SONGS_PER_RUN`). The server generates the lease token before
+caller's library. The engine passes only what is left of
+`ENRICHMENT_MAX_SONGS_PER_RUN`; the claim narrows that to the chosen recipe's
+own `batch_size`, so batch size and reasoning effort are recipe identity rather
+than deployment config. The server generates the lease token before
 the claim RPC; replaying a lost HTTP response with that same token returns the
 already-leased batch instead of reserving another. The server-selected recipe
 resolves through `lib/ai/providers.ts`, and one AI SDK v7 `generateText` +
@@ -513,8 +515,9 @@ truncating the JSON. The engine sets neither; `reasoningEffort` via
 
 **`maxDuration` is a ceiling, not a target.** `/api/enrich` exports
 `maxDuration = 300` (Vercel Fluid ceiling on Hobby), but legacy non-Fluid
-projects cap at 60s — so `ENRICHMENT_BATCH_SIZE` must keep one call under ~60s
-or runs die mid-batch on those deploys.
+projects cap at 60s — so a recipe's `batch_size` (and the `reasoning_effort` it
+pairs with) must keep one call under ~60s or runs die mid-batch on those
+deploys.
 
 **zod must stay a direct `^4` dependency.** It also exists transitively via
 shadcn with a `^3` range; if the explicit `^4` pin in `package.json` is dropped,
