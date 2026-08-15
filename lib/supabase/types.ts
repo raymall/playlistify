@@ -101,7 +101,6 @@ export type Database = {
         Row: {
           created_at: string
           enabled: boolean
-          enrichment_rank: number
           id: string
           is_default: boolean
           label: string
@@ -112,7 +111,6 @@ export type Database = {
         Insert: {
           created_at?: string
           enabled?: boolean
-          enrichment_rank?: number
           id?: string
           is_default?: boolean
           label: string
@@ -123,7 +121,6 @@ export type Database = {
         Update: {
           created_at?: string
           enabled?: boolean
-          enrichment_rank?: number
           id?: string
           is_default?: boolean
           label?: string
@@ -351,7 +348,6 @@ export type Database = {
           next_attempt_at: string
           priority: number
           recipe_id: string
-          request_count: number
           result_attempt_id: string | null
           song_id: string
           status: string
@@ -367,7 +363,6 @@ export type Database = {
           next_attempt_at?: string
           priority?: number
           recipe_id: string
-          request_count?: number
           result_attempt_id?: string | null
           song_id: string
           status?: string
@@ -383,7 +378,6 @@ export type Database = {
           next_attempt_at?: string
           priority?: number
           recipe_id?: string
-          request_count?: number
           result_attempt_id?: string | null
           song_id?: string
           status?: string
@@ -485,11 +479,9 @@ export type Database = {
           artists_search: string | null
           duration_ms: number | null
           enriched_at: string | null
-          enrichment_attempts: number
           enrichment_model: string | null
           enrichment_rank: number
           enrichment_revision: number
-          enrichment_skipped_rank: number
           enrichment_status: string
           explicit: boolean | null
           highest_attempted_recipe_id: string | null
@@ -513,11 +505,9 @@ export type Database = {
           artists_search?: string | null
           duration_ms?: number | null
           enriched_at?: string | null
-          enrichment_attempts?: number
           enrichment_model?: string | null
           enrichment_rank?: number
           enrichment_revision?: number
-          enrichment_skipped_rank?: number
           enrichment_status?: string
           explicit?: boolean | null
           highest_attempted_recipe_id?: string | null
@@ -541,11 +531,9 @@ export type Database = {
           artists_search?: string | null
           duration_ms?: number | null
           enriched_at?: string | null
-          enrichment_attempts?: number
           enrichment_model?: string | null
           enrichment_rank?: number
           enrichment_revision?: number
-          enrichment_skipped_rank?: number
           enrichment_status?: string
           explicit?: boolean | null
           highest_attempted_recipe_id?: string | null

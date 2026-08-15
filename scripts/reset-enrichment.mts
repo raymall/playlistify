@@ -4,6 +4,12 @@
 // unapproved vocabulary rows onto their approved canonical where one snaps,
 // and deletes unapproved vocabulary rows nothing references anymore.
 //
+// It also clears each reset song's jobs and attempts, which is not optional.
+// The three-answers-per-rank budget is derived from song_enrichment_attempts
+// and the omission allowance lives on song_enrichment_jobs, so a song set back
+// to 'pending' while either survives is locked the moment it is reset: its
+// budget reads as spent and a terminally failed job excludes its recipe.
+//
 // Never touches user_songs, songs metadata, the status of 'unknown' songs,
 // or any personal tag it cannot confidently remap (stale AI links found on
 // non-enriched songs are cleared — unknown songs must carry no tags).
@@ -15,13 +21,15 @@
 // Usage: node --env-file=.env.local --import tsx scripts/reset-enrichment.mts [--apply]
 import { createClient } from '@supabase/supabase-js'
 
-import { NO_RANK } from '../lib/enrichment/rank'
 import { fetchWithRetries } from '../lib/supabase/fetch'
 import type { Database } from '../lib/supabase/types'
 import { snapToExistingName } from '../lib/vocabulary'
 import { requireEnv } from './lib/env.mjs'
 
 const isApply = process.argv.includes('--apply')
+
+/** `songs.enrichment_rank` for a row no recipe has written yet. */
+const NEVER_ENRICHED_RANK = 0
 
 const [url, serviceKey] = requireEnv(
   ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
@@ -74,6 +82,23 @@ const countRows = async (table: 'song_genres' | 'song_moods') => {
   return result.count ?? 0
 }
 
+/** `.in()` over the full id list would exceed the URL limit — count in chunks. */
+const countForSongs = async (
+  table: 'song_enrichment_jobs' | 'song_enrichment_attempts',
+  ids: string[],
+) => {
+  let total = 0
+  for (const batch of chunk(ids, 100)) {
+    const result = await service
+      .from(table)
+      .select('*', { count: 'exact', head: true })
+      .in('song_id', batch)
+    if (result.error) abort(`${table} count: ${result.error.message}`)
+    total += result.count ?? 0
+  }
+  return total
+}
+
 // ── Approved vocabulary guard ────────────────────────────────────────────
 
 const approvedNamesOf = async (table: 'genres' | 'moods') => {
@@ -116,6 +141,11 @@ const staleLinkScan = async (table: 'song_genres' | 'song_moods') => {
 
 const staleGenres = await staleLinkScan('song_genres')
 const staleMoods = await staleLinkScan('song_moods')
+const jobsToClear = await countForSongs('song_enrichment_jobs', enrichedIds)
+const attemptsToClear = await countForSongs(
+  'song_enrichment_attempts',
+  enrichedIds,
+)
 
 interface UserLinkPlan {
   /** Links whose row snaps onto an approved name: old id → new id. */
@@ -247,6 +277,9 @@ console.log(
 console.log(
   `  ai mood links to delete: ${aiMoodLinks} (${staleMoods.links} stale on non-enriched songs)`,
 )
+console.log(
+  `  queue rows to delete: jobs=${jobsToClear} attempts=${attemptsToClear}`,
+)
 for (const [label, plan] of [
   ['user genre links', genrePlan],
   ['user mood links', moodPlan],
@@ -282,11 +315,46 @@ for (const [table, staleIds] of [
   console.log(`DONE  ${table} cleared`)
 }
 
-// 2. Enriched songs back to pending with every enrichment column cleared —
-// all eight, not just the visible five. A row left at a non-zero
-// enrichment_rank contradicts the column's "0 = never enriched" meaning, and a
-// stale enrichment_skipped_rank would silently keep the selector from ever
-// sending this supposedly-fresh song to a weaker model again.
+// 2. Detach both foreign keys into song_enrichment_attempts before the
+// attempts go — songs.active_enrichment_attempt_id and
+// song_enrichment_jobs.result_attempt_id are ON DELETE RESTRICT, so the
+// deletes below fail outright while either still points at a row.
+for (const ids of chunk(enrichedIds, 100)) {
+  const detached = await service
+    .from('songs')
+    .update({
+      active_enrichment_attempt_id: null,
+      highest_attempted_recipe_id: null,
+    })
+    .in('id', ids)
+  if (detached.error) abort(`songs detach: ${detached.error.message}`)
+  const unlinked = await service
+    .from('song_enrichment_jobs')
+    .update({ result_attempt_id: null })
+    .in('song_id', ids)
+  if (unlinked.error) abort(`job result unlink: ${unlinked.error.message}`)
+}
+console.log('DONE  attempt references detached')
+
+// 3. The queue itself. Attempts are where the three-answers-per-rank budget is
+// counted from, and a job left `failed` excludes its recipe permanently — so a
+// song reset to pending on top of either is locked before it is ever offered.
+for (const table of [
+  'song_enrichment_attempts',
+  'song_enrichment_jobs',
+] as const) {
+  for (const ids of chunk(enrichedIds, 100)) {
+    const removed = await service.from(table).delete().in('song_id', ids)
+    if (removed.error) abort(`${table} delete: ${removed.error.message}`)
+  }
+  console.log(`DONE  ${table} cleared`)
+}
+
+// 4. Enriched songs back to pending with every enrichment column cleared. Both
+// ranks go to zero: a row left at a non-zero enrichment_rank contradicts the
+// column's "0 = never enriched" meaning, and a stale
+// highest_attempted_recipe_rank would keep the selector from ever offering
+// this supposedly-fresh song a recipe below it.
 const reset = await service
   .from('songs')
   .update({
@@ -294,16 +362,15 @@ const reset = await service
     ai_attributes: null,
     enrichment_status: 'pending',
     enrichment_model: null,
-    enrichment_rank: NO_RANK,
-    enrichment_attempts: 0,
-    enrichment_skipped_rank: NO_RANK,
+    enrichment_rank: NEVER_ENRICHED_RANK,
+    highest_attempted_recipe_rank: NEVER_ENRICHED_RANK,
     enriched_at: null,
   })
   .eq('enrichment_status', 'enriched')
 if (reset.error) abort(`songs reset: ${reset.error.message}`)
 console.log(`DONE  ${enrichedIds.length} songs reset to pending`)
 
-// 3. Re-point personal tags whose row snapped onto an approved canonical.
+// 5. Re-point personal tags whose row snapped onto an approved canonical.
 for (const remap of genrePlan.remaps) {
   const moved = await service
     .from('user_genres')
@@ -340,7 +407,7 @@ console.log(
   `DONE  personal tags remapped (genres=${genrePlan.remaps.length}, moods=${moodPlan.remaps.length})`,
 )
 
-// 4. Unapproved vocabulary rows nothing references anymore. Zero-reference
+// 6. Unapproved vocabulary rows nothing references anymore. Zero-reference
 // only, so the FK cascade never eats a link this script chose to keep.
 if (deletableGenres.length > 0) {
   const removed = await service
@@ -371,5 +438,9 @@ if (pendingAfter.error !== null || unknownAfter.error !== null) {
   abort('post-apply recount failed')
 }
 console.log(
-  `\nRESET OK: pending=${pendingAfter.count} unknown=${unknownAfter.count} ai_genre_links=${await countRows('song_genres')} ai_mood_links=${await countRows('song_moods')}`,
+  `\nRESET OK: pending=${pendingAfter.count} unknown=${unknownAfter.count} ` +
+    `ai_genre_links=${await countRows('song_genres')} ` +
+    `ai_mood_links=${await countRows('song_moods')} ` +
+    `jobs=${await countForSongs('song_enrichment_jobs', enrichedIds)} ` +
+    `attempts=${await countForSongs('song_enrichment_attempts', enrichedIds)}`,
 )

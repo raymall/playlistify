@@ -61,13 +61,13 @@ the same commit (rule in `AGENTS.md`).
 - `lib/landing/` — client-safe landing-page copy and the never-repeat random
   tagline picker.
 - `lib/enrichment/` — `engine.ts` (enqueue/claim loop + structured-output
-  call), `recipes.ts` (system recipe, queue, lease, counts, and recheck RPC
-  contracts), `candidates.ts` (per-song normalization), `promotion.ts`
-  (attempt + atomic promotion calls), `policy.ts` (pure promotion matrix),
-  `requests.ts` (service-role recheck entry point), `confidence.ts` /
-  `recheck.ts` (client-safe confidence-band and recheck copy), `schema.ts` (zod output
-  schema, confidence threshold, `ai_attributes` parser), and `rank.ts`
-  (legacy reset-script rank constants).
+  call), `recipes.ts` (recipe, queue, lease, and counts RPC contracts, plus the
+  `EnrichmentRecipeSummary` the Library reports), `candidates.ts` (per-song
+  normalization), `promotion.ts` (attempt + atomic promotion calls),
+  `policy.ts` (pure promotion matrix, mirrored from SQL for
+  `verify:re-enrichment`), `confidence.ts` (client-safe confidence bands, the
+  per-rank answer budget, and the shared-result/budget copy), and `schema.ts`
+  (zod output schema, confidence threshold, `ai_attributes` parser).
 - `lib/spotify/` — `api.ts` (typed Web API client), `import.ts` (Liked Songs
   batch import), `token.ts` (Spotify access-token refresh).
 - `lib/playlists/` — playlist creation and post-creation management:
