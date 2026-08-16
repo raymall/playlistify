@@ -83,6 +83,29 @@ would duplicate an existing item, contradict one, or make one obsolete:
   Centralize a throwing count helper or require every hard assertion to include
   `error === null`, then apply it to both scripts.
 
+## `verify:re-enrichment` silently checks only the first 1000 rows
+
+- **In plain terms:** the re-enrichment verifier fetches jobs and attempts with
+  a plain select, so PostgREST caps it at 1000 rows and it checks a slice while
+  reporting as though it checked everything. It passed on 2026-08-15 printing
+  `attempts=1000` when the table held 1059.
+- **Severity:** Medium — the invariants it guards (three answers per rank, no
+  band regression, active attempt promoted) are exactly the ones a bug would
+  break on the _newest_ rows, which are the ones outside the window.
+- **Issue:** `scripts/verify-re-enrichment.mts` calls
+  `service.from('song_enrichment_attempts').select(...)` and
+  `.from('song_enrichment_jobs').select(...)` with no range paging.
+  `scripts/reset-enrichment.mts` and `verify-enrichment.mjs` both already page
+  in 1000-row loops (`fetchEnrichedSongIds`, the zero-tag scan), so the pattern
+  exists in the repo and was simply not applied here. The counts it derives —
+  `answersByRank`, `promotedBySong` — are aggregates over the truncated set, so
+  a violation on row 1001 reads as a pass. A full-table SQL check confirmed the
+  invariants genuinely held at the time; only the coverage was short.
+- **Why fix:** an assertion that quietly narrows its own scope as the table
+  grows is worse than no assertion, because the PASS line gets more reassuring
+  exactly as coverage drops. Page both selects, or move the aggregates into SQL
+  and assert on the returned scalars.
+
 ## Enabling the rank-300 recipe is still uncanaried
 
 - **In plain terms:** the strongest model in the catalog has still never run
