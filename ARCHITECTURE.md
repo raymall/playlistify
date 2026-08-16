@@ -112,7 +112,8 @@ the same commit (rule in `AGENTS.md`).
   `song_enrichment_jobs`, immutable `song_enrichment_attempts`, and private
   `user_{genre,mood}_suppressions`.
   Service-role RPCs own job enqueue/claim/release, attempt recording, atomic
-  promotion, and outcome counts. Authenticated
+  promotion, outcome counts, and the one sanctioned history purge
+  (`purge_song_enrichment_history()`). Authenticated
   RPCs expose effective tag names, selectable songs, matching
   song ids, the current recipe and where the next run would escalate
   (`library_enrichment_recipes()`), the recipe behind each song's result
@@ -509,6 +510,17 @@ attempt and invokes `promote_song_enrichment_attempt`, which updates the song,
 AI genres, AI moods, job, and decision in one transaction. A new service-role
 write to those canonical columns or link tables would bypass downgrade and
 lease protection.
+
+**The attempts log is append-only, with exactly one door.**
+`song_enrichment_attempts_immutable` refuses every DELETE and allows only the
+one-way `pending` → `promoted`/`rejected` update. That is what makes the
+three-answers-per-rank budget enforceable: the budget is _derived_ from this
+log, so a writer that could erase it could hand a song unlimited analyses.
+`reset:enrichment` still has to clear it — a song returned to `pending` on top
+of a spent budget is locked the instant it is reset — so the trigger yields to
+a transaction-local GUC that only `purge_song_enrichment_history()` sets. Use
+that RPC; a direct `.delete()` aborts, including from the service role. Never
+relax the trigger itself, and never set the GUC anywhere else.
 
 **gpt-5 models reject non-default `temperature`,** and a small
 `maxOutputTokens` starves reasoning tokens (they count against the cap),

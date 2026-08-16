@@ -1009,6 +1009,13 @@ export type Database = {
           reason: string
         }[]
       }
+      purge_song_enrichment_history: {
+        Args: { p_song_ids: string[] }
+        Returns: {
+          attempts_deleted: number
+          jobs_deleted: number
+        }[]
+      }
       record_song_enrichment_attempt: {
         Args: {
           p_ai_attributes: Json

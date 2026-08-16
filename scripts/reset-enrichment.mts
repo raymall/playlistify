@@ -315,42 +315,34 @@ for (const [table, staleIds] of [
   console.log(`DONE  ${table} cleared`)
 }
 
-// 2. Detach both foreign keys into song_enrichment_attempts before the
-// attempts go — songs.active_enrichment_attempt_id and
-// song_enrichment_jobs.result_attempt_id are ON DELETE RESTRICT, so the
-// deletes below fail outright while either still points at a row.
+// 2. The queue history. Attempts are where the three-answers-per-rank budget
+// is counted from, and a job left `failed` excludes its recipe permanently —
+// so a song reset to pending on top of either is locked before it is ever
+// offered.
+//
+// This goes through purge_song_enrichment_history rather than a plain delete:
+// song_enrichment_attempts is append-only by trigger, so a direct
+// `.delete()` aborts, and the RPC is the one place the trigger yields. It also
+// detaches the two ON DELETE RESTRICT references in the same transaction as
+// the delete, which a client-side sequence cannot promise.
+let purgedAttempts = 0
+let purgedJobs = 0
 for (const ids of chunk(enrichedIds, 100)) {
-  const detached = await service
-    .from('songs')
-    .update({
-      active_enrichment_attempt_id: null,
-      highest_attempted_recipe_id: null,
-    })
-    .in('id', ids)
-  if (detached.error) abort(`songs detach: ${detached.error.message}`)
-  const unlinked = await service
-    .from('song_enrichment_jobs')
-    .update({ result_attempt_id: null })
-    .in('song_id', ids)
-  if (unlinked.error) abort(`job result unlink: ${unlinked.error.message}`)
-}
-console.log('DONE  attempt references detached')
-
-// 3. The queue itself. Attempts are where the three-answers-per-rank budget is
-// counted from, and a job left `failed` excludes its recipe permanently — so a
-// song reset to pending on top of either is locked before it is ever offered.
-for (const table of [
-  'song_enrichment_attempts',
-  'song_enrichment_jobs',
-] as const) {
-  for (const ids of chunk(enrichedIds, 100)) {
-    const removed = await service.from(table).delete().in('song_id', ids)
-    if (removed.error) abort(`${table} delete: ${removed.error.message}`)
+  const purged = await service.rpc('purge_song_enrichment_history', {
+    p_song_ids: ids,
+  })
+  if (purged.error) abort(`queue purge: ${purged.error.message}`)
+  else {
+    const row = purged.data.at(0)
+    purgedAttempts += row?.attempts_deleted ?? 0
+    purgedJobs += row?.jobs_deleted ?? 0
   }
-  console.log(`DONE  ${table} cleared`)
 }
+console.log(
+  `DONE  queue history purged (attempts=${purgedAttempts}, jobs=${purgedJobs})`,
+)
 
-// 4. Enriched songs back to pending with every enrichment column cleared. Both
+// 3. Enriched songs back to pending with every enrichment column cleared. Both
 // ranks go to zero: a row left at a non-zero enrichment_rank contradicts the
 // column's "0 = never enriched" meaning, and a stale
 // highest_attempted_recipe_rank would keep the selector from ever offering
@@ -370,7 +362,7 @@ const reset = await service
 if (reset.error) abort(`songs reset: ${reset.error.message}`)
 console.log(`DONE  ${enrichedIds.length} songs reset to pending`)
 
-// 5. Re-point personal tags whose row snapped onto an approved canonical.
+// 4. Re-point personal tags whose row snapped onto an approved canonical.
 for (const remap of genrePlan.remaps) {
   const moved = await service
     .from('user_genres')
@@ -407,7 +399,7 @@ console.log(
   `DONE  personal tags remapped (genres=${genrePlan.remaps.length}, moods=${moodPlan.remaps.length})`,
 )
 
-// 6. Unapproved vocabulary rows nothing references anymore. Zero-reference
+// 5. Unapproved vocabulary rows nothing references anymore. Zero-reference
 // only, so the FK cascade never eats a link this script chose to keep.
 if (deletableGenres.length > 0) {
   const removed = await service
