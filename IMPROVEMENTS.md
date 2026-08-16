@@ -106,35 +106,38 @@ would duplicate an existing item, contradict one, or make one obsolete:
   exactly as coverage drops. Page both selects, or move the aggregates into SQL
   and assert on the returned scalars.
 
-## Enabling the rank-300 recipe is still uncanaried
+## Rank 300 is measured on weak songs but not on a full High backfill
 
-- **In plain terms:** the strongest model in the catalog has still never run
-  against real songs, and turning it on hands every song in the library a fresh
-  budget at once. With `enrich_all_songs` it can now reach the 1738 High songs
-  as well, which is roughly a fourteen-fold larger bill than the same switch
-  would have cost before.
-- **Severity:** Medium — no longer blocking any improvement, but the one lever
-  that multiplies cost is also the one nobody has measured, and it now has a
-  second setting that multiplies it again.
-- **Issue:** the catalog has nano at rank 100, the default mini recipe at rank
-  200, and the full model at rank 300 disabled. Enabling rank 300 is the
-  documented unlock path for locked songs, and by design it resets the
-  three-answer budget for **every** song below High simultaneously. Setting
-  `enrich_all_songs` on that recipe additionally opens all 1738 High songs, each
-  with its own three tries, and a High song can only ever be _replaced_ — three
-  answers that come back Medium cost full price and change nothing. Nothing has
-  measured what a rank-300 attempt costs or how often it actually promotes, and
-  the High case is the one where the promotion bar is highest.
-- **Why fix:** so the unlock lever can be pulled deliberately, and the two
-  settings pulled separately. The rollout steps carried over from the retired
-  re-enrichment plan still apply: canary attempts
-  and promotions on a small set of existing None/Low songs; compare canonical
-  tags before and after every canary promotion; check the cost per attempt and
-  per successful promotion; then enable rank 300 for real — with
-  `enrich_all_songs` left false. Only once the High→High promotion rate is known
-  from a canary of its own is that flag worth setting. Rollback is disabling
-  job creation/claiming — canonical reads stay on `songs` and the link tables,
-  and orphaned attempts/jobs are audit-only.
+- **In plain terms:** the strongest recipe has now run against real songs, and
+  the numbers say it earns its cost on songs that are already good and not on
+  the ones the mini recipe gave up on — the opposite of the intuition that
+  motivated enabling it. What is still unmeasured is a backfill run to
+  completion.
+- **Severity:** Medium — the lever is no longer unknown, but the measured shape
+  is counter-intuitive enough that acting on the old intuition would waste
+  real money.
+- **Issue:** measured 2026-08-15 on the pre-reset library, rank 300 =
+  `openai:gpt-5.4`, effort `low`, batch 20:
+  - **Below-High songs** (48 None / 5 Low / 26 Medium, all locked after three
+    tries at rank 200): **3 promotions from 235 attempts — 1.3%**. These are
+    songs the mini recipe could not recognize, and the full model mostly could
+    not either. Escalation is close to worthless here.
+  - **High songs** with `enrich_all_songs = true`: 244 songs tried, **128
+    promoted — 52.5%**, at **2.05 calls per song** (127 `stronger_recipe`, 460
+    `would_downgrade` refusals, 0 downgrades reaching canonical). Roughly half
+    of High rows do get a better High answer from the stronger recipe.
+  - The run was stopped at 244 of 1793 High songs; the remaining ~3,200 calls
+    were not spent, so the 52.5% rests on a 14% sample and the full-backfill
+    cost is still an extrapolation.
+- **Why fix:** the two settings want opposite decisions, which the single
+  "enable rank 300" framing hides. Enabling rank 300 alone mostly buys 1.3%
+  promotions on hopeless songs; `enrich_all_songs` is where the value is, and
+  it is also the expensive half. Before a real backfill: widen the High sample
+  beyond 244, price 2.05 calls/song across the library, and decide whether a
+  52.5% band-preserving re-roll is worth it at all — a High song that stays
+  High gains nothing a user can see, only fresher tags under the current
+  vocabulary. Rollback is disabling job creation/claiming; canonical reads stay
+  on `songs` and the link tables, and orphaned attempts/jobs are audit-only.
 
 ## Recognized-but-unmatched has no outcome of its own
 
