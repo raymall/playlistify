@@ -40,30 +40,23 @@ export const normalizeCandidateTagList = (names: string[]): string[] => {
 export const roundRecognitionConfidence = (value: number): number =>
   Math.min(1, Math.max(0, Math.round(value * 100) / 100))
 
-const resolveCanonicalNames = (
-  names: string[],
-  canonicalByName: Map<string, string>,
-) => [
-  ...new Set(
-    names
-      .map((name) => canonicalByName.get(name))
-      .filter((name): name is string => name !== undefined),
-  ),
-]
+/** Off-list names are dropped outright — matching is exact, never snapped. */
+const keepApproved = (names: string[], approved: Set<string>) =>
+  names.filter((name) => approved.has(name))
 
 export const normalizeCandidate = (
   entry: EnrichedSong,
-  canonicalGenres: Map<string, string>,
-  canonicalMoods: Map<string, string>,
+  approvedGenres: Set<string>,
+  approvedMoods: Set<string>,
 ): CandidateOutcome => {
   const confidence = roundRecognitionConfidence(entry.confidence)
-  const genreNames = resolveCanonicalNames(
+  const genreNames = keepApproved(
     normalizeCandidateTagList(entry.genres),
-    canonicalGenres,
+    approvedGenres,
   )
-  const moodNames = resolveCanonicalNames(
+  const moodNames = keepApproved(
     normalizeCandidateTagList(entry.moods),
-    canonicalMoods,
+    approvedMoods,
   )
 
   if (

@@ -106,10 +106,11 @@ type TagKindEditorProps = {
 
 /**
  * One independently floating combobox per tag kind, over the same debounced
- * typeahead the library filter bar uses. Free entry works by injecting the
- * normalized query as the first item when it isn't among the matches — the
- * write path then snaps it onto the shared vocabulary, so a name that exists
- * but isn't in this library yet still resolves to the same row.
+ * typeahead the library filter bar uses. Suggestions are a convenience, not a
+ * gate: free entry works by injecting the normalized query as the first item
+ * when it isn't among the matches, and the write path saves whatever the user
+ * typed. A name that already exists resolves to that row; anything else
+ * becomes a new one.
  */
 const TagKindEditor = ({
   kind,

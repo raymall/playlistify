@@ -70,9 +70,15 @@ const ownsSong = async (
 }
 
 /**
- * Personal tags run entirely on the RLS client: the vocabulary tables allow
- * authenticated INSERT, and user_genres/user_moods are owner-scoped FOR ALL —
- * no service role involved.
+ * Personal tags are free-form: whatever the user types is accepted, with no
+ * approved-list gate and no snapping onto a similar-looking existing tag. The
+ * name is normalized only because `genres`/`moods` are unique by name, and an
+ * unrecognized one becomes a new `is_approved = false` row — invisible to
+ * enrichment, which reads approved rows only.
+ *
+ * It all runs on the RLS client: the vocabulary tables allow authenticated
+ * INSERT, and user_genres/user_moods are owner-scoped FOR ALL — no service
+ * role involved.
  */
 export const addUserTag = async (
   supabase: SupabaseClient<Database>,
@@ -96,9 +102,6 @@ export const addUserTag = async (
   const vocabulary = await ensureVocabularyIds(supabase, table, [normalized])
   if (vocabulary.status === 'error') return vocabulary
   const tagId = vocabulary.idsByName.get(normalized)
-  // Near-duplicate spellings snap onto the existing vocabulary, so echo the
-  // canonical name the tag actually landed on rather than the raw input.
-  const canonicalName = vocabulary.canonicalByName.get(normalized) ?? normalized
   if (tagId === undefined) {
     return { status: 'error', message: 'Tag could not be created' }
   }
@@ -119,7 +122,7 @@ export const addUserTag = async (
           )
   if (link.error) return { status: 'error', message: link.error.message }
 
-  return { status: 'ok', tag: { id: tagId, name: canonicalName } }
+  return { status: 'ok', tag: { id: tagId, name: normalized } }
 }
 
 export const removeUserTag = async (

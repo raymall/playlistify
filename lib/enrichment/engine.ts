@@ -22,10 +22,7 @@ import {
   enrichmentBatchSchema,
 } from '@/lib/enrichment/schema'
 import { createAdminClient } from '@/lib/supabase/admin'
-import {
-  matchApprovedVocabulary,
-  type VocabularyResult,
-} from '@/lib/vocabulary'
+import { matchApprovedVocabulary } from '@/lib/vocabulary'
 
 export type EnrichBatchPayload = {
   processedSoFar: number
@@ -161,11 +158,7 @@ const matchCandidateVocabulary = async (
   admin: ReturnType<typeof createAdminClient>,
   entries: EnrichedSong[],
 ): Promise<
-  | {
-      status: 'ok'
-      genres: Extract<VocabularyResult, { status: 'ok' }>
-      moods: Extract<VocabularyResult, { status: 'ok' }>
-    }
+  | { status: 'ok'; genres: Set<string>; moods: Set<string> }
   | { status: 'error'; message: string }
 > => {
   const genreNames = normalizeCandidateTagList(
@@ -184,7 +177,11 @@ const matchCandidateVocabulary = async (
     logUnmatchedTags(admin, 'genre', genres.unmatched),
     logUnmatchedTags(admin, 'mood', moods.unmatched),
   ])
-  return { status: 'ok', genres, moods }
+  return {
+    status: 'ok',
+    genres: new Set(genres.matched),
+    moods: new Set(moods.matched),
+  }
 }
 
 const getCounts = async (
@@ -311,8 +308,8 @@ const runClaimedJobs = async (
           ? omittedCandidate()
           : normalizeCandidate(
               entry,
-              vocabularyMatches.genres.canonicalByName,
-              vocabularyMatches.moods.canonicalByName,
+              vocabularyMatches.genres,
+              vocabularyMatches.moods,
             ),
     }
   })

@@ -20,7 +20,7 @@ import {
   type SelectableIndexEntry,
 } from '@/lib/chat/library-search'
 import type { Database } from '@/lib/supabase/types'
-import { normalizeTagName, snapToExistingName } from '@/lib/vocabulary'
+import { normalizeTagName } from '@/lib/vocabulary'
 
 type Client = SupabaseClient<Database>
 
@@ -83,24 +83,24 @@ const normalizeNames = (raw: string[]): string[] => {
 }
 
 /**
- * Resolve requested tag names against the vocabulary the model was shown, with
- * the same snapping order as the enrichment path (exact → space-insensitive →
- * trigram) via `snapToExistingName`. Deliberately NOT `matchApprovedVocabulary`:
- * the library's vocabulary includes the user's own tags, which may be
- * unapproved, and every name the prompt lists has to be searchable. An
- * unapproved id simply finds nothing in song_genres/song_moods, which is right.
+ * Resolve requested tag names against the vocabulary the model was shown —
+ * exact match on the normalized name, no snapping. The prompt lists every name
+ * verbatim and instructs the model to copy them, so anything that misses here
+ * was invented, and inventing is what `unmatchedTags` reports back.
+ *
+ * Deliberately NOT `matchApprovedVocabulary`: the library's vocabulary includes
+ * the user's own free-form tags, which are unapproved by construction, and
+ * every name the prompt lists has to be searchable.
  */
 const resolveTags = (
   names: string[],
   vocabulary: LibraryTag[],
 ): { ids: string[]; unmatched: string[] } => {
   const idByName = new Map(vocabulary.map((tag) => [tag.name, tag.id]))
-  const existingNames = vocabulary.map((tag) => tag.name)
   const ids = new Set<string>()
   const unmatched: string[] = []
   for (const name of names) {
-    const canonical = snapToExistingName(name, existingNames)
-    const id = canonical === null ? undefined : idByName.get(canonical)
+    const id = idByName.get(name)
     if (id === undefined) unmatched.push(name)
     else ids.add(id)
   }

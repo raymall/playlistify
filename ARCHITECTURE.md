@@ -84,12 +84,14 @@ the same commit (rule in `AGENTS.md`).
   (public connection env guard), `types.ts` (generated — regenerate with
   `npm run gen:types`, never edit).
 - `lib/tags.ts` / `lib/vocabulary.ts` — personal-tag mutations / shared
-  genre-mood vocabulary (normalize, validate, fuzzy-snap, name→id). Three
-  match paths: `matchApprovedVocabulary` (closed, `is_approved` rows only —
-  enrichment), `ensureVocabularyIds` (open, inserts — personal tags), and
-  chat's `resolveTags` (`lib/chat/tools.ts`), which snaps via
-  `snapToExistingName` against the library's own tags — approved or not — so
-  the assistant can search every name the prompt showed it.
+  genre-mood vocabulary (normalize, validate, name→id). **All matching is
+  exact on the normalized name; there is no fuzzy or near-duplicate snapping
+  anywhere.** Three match paths: `matchApprovedVocabulary` (closed,
+  `is_approved` rows only — enrichment; off-list names drop and are logged),
+  `ensureVocabularyIds` (open, inserts whatever the user typed — personal
+  tags), and chat's `resolveTags` (`lib/chat/tools.ts`), which looks up the
+  library's own tags — approved or not — so the assistant can search every
+  name the prompt showed it.
 - `lib/json.ts` / `lib/sleep.ts` / `lib/utils.ts` — shared JSON narrowing
   guards / abort-aware sleep / the shadcn `cn()` class merger (all importable
   from server and client code).
@@ -353,8 +355,12 @@ is never evaluated and the report costs three index lookups instead of a scan
 of the caller's library.
 
 The vocabulary remains **closed**: the prompt carries only `is_approved`
-`genres`/`moods`; `matchApprovedVocabulary` snaps or drops output, and
-`unmatched_tags` records dropped names. Confidence is rounded before the 0.4
+`genres`/`moods`; `matchApprovedVocabulary` keeps exact matches and drops
+everything else, and `unmatched_tags` records the dropped names. The gate is
+enforced twice — app-side there, and again in SQL, where
+`promote_song_enrichment_attempt` resolves names to ids through an
+`is_approved` join, so a link to an unapproved row cannot be written even by a
+caller that skipped the matcher. Confidence is rounded before the 0.4
 recognition cutoff. Library outcome counts and the recipe report come from
 database RPCs so the panel, rows, and queue share one eligibility definition.
 
@@ -368,8 +374,14 @@ minus that user's suppressions, union personal tags; a same-name personal tag
 wins. A personal tag can make an unrecognized song selectable, but absent AI
 attributes still cannot satisfy energy/era filters. The editor's two comboboxes
 suggest from `GET /api/library/tag-suggestions` (three-character minimum,
-debounced) rather than preloading the whole shared vocabulary; free entry still
-accepts any name, and `ensureVocabularyIds` snaps it onto the existing row.
+debounced) rather than preloading the whole shared vocabulary. Suggestions are
+a convenience, never a gate: **personal tags are free-form**, so free entry
+accepts any name and `ensureVocabularyIds` stores it as typed — matching an
+existing row when the normalized name is identical, and inserting a new
+`is_approved = false` row otherwise. Nothing is snapped onto a similar name,
+and nothing is rejected for being off-list. The two policies are deliberately
+opposite: enrichment is closed because its output is shared; personal tags are
+open because they are private to one user's link rows.
 
 **Library search** — `app/library/page.tsx` parses the URL through
 `lib/library/search-params.ts` and renders `LibrarySearchBar` plus a
@@ -401,8 +413,9 @@ three ideas grounded in a random bounded sample of those real tags and caches
 them in `sessionStorage`, so they stay stable across reloads in one browser tab.
 Then `streamText` with a `stepCountIs(8)` tool loop. `search_library`
 (`lib/chat/tools.ts`) resolves requested tags
-against that vocabulary (`resolveTags`, fuzzy-snapping via
-`snapToExistingName`), resolves effective matching ids through
+against that vocabulary (`resolveTags`, exact match on the normalized name —
+the prompt lists every name verbatim, so a miss means the model invented one
+and `unmatchedTags` says so), resolves effective matching ids through
 `library_effective_tagged_songs`, intersects across kinds and with the
 selectable index (recency), scans ≤1000, TS-post-filters by
 energy/era/exclude, and returns ≤80 candidates. Low AI tags stay visible
@@ -451,6 +464,15 @@ the database picks which songs, under which recipe, at which effort, in batches
 of which size, and the engine resolves the provider/model snapshot through the
 server-only `lib/ai/providers.ts`. Accepting a client model, recipe, rank, or
 even a song id would expose unbounded cost and shared-data authority.
+
+**Personal tags and enrichment run opposite policies on one table.** `genres`
+and `moods` hold both, told apart only by `is_approved`. Enrichment reads
+`is_approved = true` and writes nothing; personal tagging writes
+`is_approved = false` rows freely and reads its own. Any change that makes one
+path "consistent" with the other breaks the product rule: gating personal tags
+on approval removes free-form tagging, and letting enrichment see unapproved
+rows lets one user's invented word into everyone's shared analysis. Asserted by
+`verify:genres`.
 
 **`ensureVocabularyIds` is the only legal vocabulary write path.**
 `.upsert(..., { onConflict: 'name' })` _without_ `ignoreDuplicates` compiles to

@@ -185,6 +185,18 @@ just a note to self.
 Browsing the Library uses a deliberately wider rule, described under _Finding
 songs in the library_ below.
 
+**Personal tags are free-form.** Whatever a user types is what gets saved — no
+approved list, no suggestion they are obliged to pick from, and no quiet
+correction onto a similar-looking tag that already exists. Typing “regaeton”
+saves “regaeton,” not “reggaeton.” The only thing the app does to the text is
+lowercase and trim it, so the same tag typed twice is one tag rather than two.
+The typeahead in the tag editor is there to save keystrokes and to help people
+converge on names they already use; ignoring it entirely is a supported way to
+tag. This is the exact opposite of the rule enrichment follows, and
+deliberately so: the AI may only use vetted names because its output is shared
+with everyone, while a personal tag is one person's own word for their own
+song.
+
 Adding a personal genre or mood changes only that user's experience. Hiding an
 AI tag also changes only that user; the shared song is untouched and another
 user still sees and searches the canonical tag. Hidden preferences persist
