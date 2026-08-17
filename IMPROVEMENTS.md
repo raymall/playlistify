@@ -346,24 +346,6 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** clean migration output is easier to trust at a glance, and the
   local catalog cache is restored when the daemon is available.
 
-## `purge_song_enrichment_history()` has no caller
-
-- **In plain terms:** the database keeps a special, tightly-guarded door for
-  wiping a song's analysis history. The only tool that ever used it was deleted,
-  so the door now exists with nobody walking through it.
-- **Severity:** Low — an unused service-role RPC is inert, and it is the
-  designed escape hatch rather than an accident. Logged so it is a decision
-  rather than drift.
-- **Issue:** `purge_song_enrichment_history()` (migration `20260816003822`) is
-  the only writer allowed past the `song_enrichment_attempts_immutable`
-  append-only trigger, via a transaction-local GUC. It was added on 2026-08-16
-  for `scripts/reset-enrichment.mts`, which was deleted the same day. Nothing
-  in the app or in `scripts/` calls it now.
-- **Why fix:** decide deliberately — keep it as the sanctioned door for a future
-  reset tool (and say so, which `ARCHITECTURE.md` now does), or drop it and the
-  GUC branch of the trigger together in one migration. Dropping it means any
-  future reset needs the whole mechanism designed again.
-
 ---
 
 # Deferred

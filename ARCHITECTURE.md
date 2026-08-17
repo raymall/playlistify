@@ -113,8 +113,7 @@ the same commit (rule in `AGENTS.md`).
   `song_enrichment_jobs`, immutable `song_enrichment_attempts`, and private
   `user_{genre,mood}_suppressions`.
   Service-role RPCs own job enqueue/claim/release, attempt recording, atomic
-  promotion, outcome counts, and the one sanctioned history purge
-  (`purge_song_enrichment_history()`). Authenticated
+  promotion, and outcome counts. Authenticated
   RPCs expose effective tag names, selectable songs, matching
   song ids, the current recipe and where the next run would escalate
   (`library_enrichment_recipes()`), the recipe behind each song's result
@@ -549,18 +548,22 @@ AI genres, AI moods, job, and decision in one transaction. A new service-role
 write to those canonical columns or link tables would bypass downgrade and
 lease protection.
 
-**The attempts log is append-only, with exactly one door.**
-`song_enrichment_attempts_immutable` refuses every DELETE and allows only the
-one-way `pending` → `promoted`/`rejected` update. That is what makes the
-three-answers-per-rank budget enforceable: the budget is _derived_ from this
-log, so a writer that could erase it could hand a song unlimited analyses. Any
-operation that returns a song to `pending` still has to clear it — a song reset
-on top of a spent budget is locked the instant it is reset — so the trigger
-yields to a transaction-local GUC that only `purge_song_enrichment_history()`
-sets. That RPC is currently uncalled (the reset script it was written for was
-deleted on 2026-08-16) and kept as the one sanctioned door; use it rather than
-adding another. A direct `.delete()` aborts, including from the service role.
-Never relax the trigger itself, and never set the GUC anywhere else.
+**The attempts log is append-only, with no door at all.**
+`song_enrichment_attempts_immutable` refuses every DELETE — from anyone, for
+any reason, service role included — and allows only the one-way `pending` →
+`promoted`/`rejected` update. That is what makes the three-answers-per-rank
+budget enforceable: the budget is _derived_ from this log, so a writer that
+could erase it could hand a song unlimited analyses.
+
+A `purge_song_enrichment_history()` RPC and a matching GUC escape hatch existed
+briefly (added `20260816003822`, removed `20260817013813`) for the reset script,
+which is also gone. Both halves were removed together on purpose: the function
+without the GUC branch cannot work, and the GUC branch without the function is
+an unguarded bypass any service-role caller could set for itself. A future
+operation that must return a song to `pending` has to clear this log — a song
+reset on top of a spent budget is locked the instant it is reset — so it
+reintroduces a door deliberately, as one reviewed migration. Do not relax the
+trigger to get there.
 
 **gpt-5 models reject non-default `temperature`,** and a small
 `maxOutputTokens` starves reasoning tokens (they count against the cap),
