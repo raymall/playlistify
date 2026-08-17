@@ -96,8 +96,7 @@ the same commit (rule in `AGENTS.md`).
   guards / abort-aware sleep / the shadcn `cn()` class merger (all importable
   from server and client code).
 - `scripts/` — Node ops + verification scripts (`npm run verify:*`,
-  `gen:types`, `reset:enrichment`); each file's header comment says what it
-  proves. `verify-re-enrichment.mts` runs the promotion matrix as pure policy
+  `gen:types`); each file's header comment says what it proves. `verify-re-enrichment.mts` runs the promotion matrix as pure policy
   tests, then checks the remote queue/attempt/canonical and RLS invariants —
   it is the executable form of the guarded-re-enrichment test matrix.
   `verify-playlists.mts` live-checks Spotify playlist create, list, add,
@@ -537,12 +536,14 @@ lease protection.
 `song_enrichment_attempts_immutable` refuses every DELETE and allows only the
 one-way `pending` → `promoted`/`rejected` update. That is what makes the
 three-answers-per-rank budget enforceable: the budget is _derived_ from this
-log, so a writer that could erase it could hand a song unlimited analyses.
-`reset:enrichment` still has to clear it — a song returned to `pending` on top
-of a spent budget is locked the instant it is reset — so the trigger yields to
-a transaction-local GUC that only `purge_song_enrichment_history()` sets. Use
-that RPC; a direct `.delete()` aborts, including from the service role. Never
-relax the trigger itself, and never set the GUC anywhere else.
+log, so a writer that could erase it could hand a song unlimited analyses. Any
+operation that returns a song to `pending` still has to clear it — a song reset
+on top of a spent budget is locked the instant it is reset — so the trigger
+yields to a transaction-local GUC that only `purge_song_enrichment_history()`
+sets. That RPC is currently uncalled (the reset script it was written for was
+deleted on 2026-08-16) and kept as the one sanctioned door; use it rather than
+adding another. A direct `.delete()` aborts, including from the service role.
+Never relax the trigger itself, and never set the GUC anywhere else.
 
 **gpt-5 models reject non-default `temperature`,** and a small
 `maxOutputTokens` starves reasoning tokens (they count against the cap),

@@ -95,9 +95,8 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Issue:** `scripts/verify-re-enrichment.mts` calls
   `service.from('song_enrichment_attempts').select(...)` and
   `.from('song_enrichment_jobs').select(...)` with no range paging.
-  `scripts/reset-enrichment.mts` and `verify-enrichment.mjs` both already page
-  in 1000-row loops (`fetchEnrichedSongIds`, the zero-tag scan), so the pattern
-  exists in the repo and was simply not applied here. The counts it derives —
+  `verify-enrichment.mjs` already pages in a 1000-row loop (the zero-tag scan),
+  so the pattern exists in the repo and was simply not applied here. The counts it derives —
   `answersByRank`, `promotedBySong` — are aggregates over the truncated set, so
   a violation on row 1001 reads as a pass. A full-table SQL check confirmed the
   invariants genuinely held at the time; only the coverage was short.
@@ -370,24 +369,23 @@ would duplicate an existing item, contradict one, or make one obsolete:
   such tag". Cheapest mitigation is a second shortlist arm seeded from the
   caller's own tag ids, unioned before the limit.
 
-## `reset:enrichment` has outlived the cutover it was written for
+## `purge_song_enrichment_history()` has no caller
 
-- **In plain terms:** the reset script exists to perform a one-time migration
-  onto the approved vocabulary, which already happened. What remains of it is a
-  general "re-analyze everything" button that no longer matches its own name or
-  header.
-- **Severity:** Low — it is dry-run by default and operator-only, so nothing
-  runs it by accident.
-- **Issue:** `scripts/reset-enrichment.mts` still frames itself as the
-  approved-vocabulary cutover. Its personal-tag remap step was removed when
-  tags became free-form, leaving an unapproved-vocabulary garbage collector
-  (step 4) whose only remaining job is deleting rows nothing links to, plus
-  `approvedNamesOf`, which now fetches every approved name solely to check the
-  list is non-empty and print its length.
-- **Why fix:** decide whether this is a retired one-time script (delete it) or
-  the project's re-analysis tool (rename it, drop the cutover framing, and make
-  the vocabulary GC a separate concern). Leaving it half-way means the next
-  operator reads a header describing work the script no longer does.
+- **In plain terms:** the database keeps a special, tightly-guarded door for
+  wiping a song's analysis history. The only tool that ever used it was deleted,
+  so the door now exists with nobody walking through it.
+- **Severity:** Low — an unused service-role RPC is inert, and it is the
+  designed escape hatch rather than an accident. Logged so it is a decision
+  rather than drift.
+- **Issue:** `purge_song_enrichment_history()` (migration `20260816003822`) is
+  the only writer allowed past the `song_enrichment_attempts_immutable`
+  append-only trigger, via a transaction-local GUC. It was added on 2026-08-16
+  for `scripts/reset-enrichment.mts`, which was deleted the same day. Nothing
+  in the app or in `scripts/` calls it now.
+- **Why fix:** decide deliberately — keep it as the sanctioned door for a future
+  reset tool (and say so, which `ARCHITECTURE.md` now does), or drop it and the
+  GUC branch of the trigger together in one migration. Dropping it means any
+  future reset needs the whole mechanism designed again.
 
 ---
 
@@ -526,14 +524,17 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **In plain terms:** personal tags can leave unapproved global vocabulary rows
   behind after their last user link disappears. Add a safe periodic cleanup or
   fold it into the review workflow.
-- **Complexity:** Low — reuse the remap/delete logic already present in
-  `scripts/reset-enrichment.mts`.
+- **Complexity:** Low — a zero-reference delete: unapproved rows with no
+  `user_genres`/`user_moods` link. Never delete a referenced row; a free-form
+  tag is the user's own word.
 - **Issue:** the live database currently has two unapproved genre rows (one
   still referenced by a personal tag, one orphaned) and one unapproved mood row
   (still referenced). Nothing rechecks these rows when a personal tag is
-  removed or when the approved vocabulary grows.
+  removed. `scripts/reset-enrichment.mts` was the only code that ever swept
+  them and it was deleted on 2026-08-16, so there is now no cleanup at all —
+  while free-form tagging means every distinct string a user types adds a row.
 - **Why fix:** without a sweep, the shared vocabulary accumulates unused
-  unapproved rows indefinitely.
+  unapproved rows indefinitely, and nothing bounds the rate any more.
 
 ## Large proposals are echoed into model context
 
