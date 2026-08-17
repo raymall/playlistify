@@ -121,7 +121,9 @@ the same commit (rule in `AGENTS.md`).
   (`library_song_recipes()`), the per-playlist effective-tag summary,
   and — added by `library_search`, which also installs `pg_trgm` into the
   `extensions` schema — `library_search_page()` (one filtered, counted,
-  ordered page of the library) and `library_tag_suggestions()` (typeahead).
+  ordered page of the library) and `library_tag_suggestions()` (typeahead,
+  whose 50-row candidate pool is gated to the approved list plus the caller's
+  own linked rows — see the sharp edge below).
   Those two apply **no** `ai_confidence` gate, unlike
   `library_effective_tagged_songs()`: they filter what the Library displays,
   not what the assistant may build from. `songs.search_text` is a generated
@@ -463,6 +465,18 @@ the database picks which songs, under which recipe, at which effort, in batches
 of which size, and the engine resolves the provider/model snapshot through the
 server-only `lib/ai/providers.ts`. Accepting a client model, recipe, rank, or
 even a song id would expose unbounded cost and shared-data authority.
+
+**The typeahead's candidate pool is gated, not just its results.**
+`library_tag_suggestions` shortlists 50 rows _before_ it counts anything, and
+that shortlist is restricted to `is_approved` rows plus rows this caller
+personally linked. Results were always caller-scoped — every counting arm
+filters on `auth.uid()` and the query ends `where c.total > 0` — so a
+stranger's tag was never displayable. The gate exists for a different failure:
+without it, foreign free-form tags could fill all 50 slots on a common
+substring, count 0, get dropped, and leave the caller an empty dropdown while a
+tag they own went unsuggested. Free-form personal tags removed the only bound
+on how fast that pool grows, so widening the shortlist back to the whole shared
+vocabulary reintroduces silent under-suggestion at scale.
 
 **Personal tags and enrichment run opposite policies on one table.** `genres`
 and `moods` hold both, told apart only by `is_approved`. Enrichment reads

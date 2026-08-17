@@ -346,29 +346,6 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** clean migration output is easier to trust at a glance, and the
   local catalog cache is restored when the daemon is available.
 
-## Tag suggestions shortlist the global vocabulary, not the caller's
-
-- **In plain terms:** the tag typeahead picks 50 candidate names from the
-  shared vocabulary before it checks which ones the user actually has. Now that
-  anyone can invent a tag, a common substring could fill all 50 slots with
-  other people's tags and show the user nothing — even though their own
-  matching tag exists.
-- **Severity:** Low — needs a much larger global vocabulary than today's to
-  bite, and it degrades to an empty suggestion list rather than a wrong one.
-  Logged because free-form personal tags removed the only thing bounding that
-  vocabulary's growth.
-- **Issue:** `library_tag_suggestions` (migration `20260811183040`) shortlists
-  from `public.genres` / `public.moods` ordered by prefix-first, then length,
-  then alphabetically — none of which relate to the caller — `limit 50`, and
-  only then counts each candidate against the caller's library, dropping
-  zero-count rows with `where c.total > 0`. The shortlist is deliberately
-  vocabulary-first for cost reasons (the header explains why the inverse is
-  worse), so this is a trade-off that got sharper, not an oversight.
-- **Why fix:** the failure is silent — a user types a tag they know they have
-  and gets no suggestion, with no signal distinguishing that from "you have no
-  such tag". Cheapest mitigation is a second shortlist arm seeded from the
-  caller's own tag ids, unioned before the limit.
-
 ## `purge_song_enrichment_history()` has no caller
 
 - **In plain terms:** the database keeps a special, tightly-guarded door for
