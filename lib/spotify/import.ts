@@ -58,9 +58,10 @@ const STALE_LIBRARY_PAGE_SIZE = 1000
 const DELETE_CHUNK_SIZE = 100
 
 /**
- * The nine Spotify-sourced metadata columns every song row always sets — the
- * mirror image of `EnrichmentWrite` in `lib/enrichment/engine.ts`. Between the
- * two, neither writer can reach the other's columns without a compile error.
+ * The nine Spotify-sourced metadata columns every song row always sets.
+ * Enrichment never writes `songs` from TypeScript (canonical writes happen
+ * inside `promote_song_enrichment_attempt`), so the two writers cannot
+ * collide.
  */
 type SongMetadata = Pick<
   TablesInsert<'songs'>,
@@ -368,8 +369,8 @@ export const importLikedSongsBatch = async (
 
   // Invariant: song payloads carry ONLY the nine metadata keys (+ spotify_genres
   // for the needsGenres group), which `SongMetadata` enforces at compile time.
-  // They never include any of the eight enrichment columns (`EnrichmentWrite`
-  // in lib/enrichment/engine.ts), nor apple_music_id or id. Omitted columns are
+  // They never include any enrichment column (those are written only by the
+  // promote_song_enrichment_attempt RPC), nor apple_music_id or id. Omitted columns are
   // untouched on conflict-update and take their defaults on insert — so new
   // songs land 'pending' and a re-sync can never reset an already-enriched song.
   const songIdByTrackId = new Map<string, string>()

@@ -15,7 +15,7 @@ A user can log in with Spotify, watch their Liked Songs import and enrich, chat 
 - **Next.js (App Router, TypeScript)** — user's chosen framework; route handlers serve the API, server components keep the library views fast.
 - **Tailwind CSS + shadcn/ui** — user's chosen component layer; shadcn's CSS-variable theming gives light/dark mode and the neo-Swiss look with one token file.
 - **Supabase (Postgres + Auth)** — user's chosen backend; Auth natively supports Spotify OAuth, Postgres holds the global songs table and per-user library, RLS isolates user data.
-- **Vercel AI SDK 7 (`ai` + `@ai-sdk/react`)** — recommended over hand-rolling the chat layer; see Schema Notes → "Why AI SDK" below.
+- **Vercel AI SDK 7 (`ai` + `@ai-sdk/react`)** — recommended over hand-rolling the chat layer; see "Chat Layer Decision" below.
 
 ### Other
 
@@ -86,7 +86,8 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 4. Library view: browse imported tracks with each track's AI attributes,
    model-reported Confidence band, the recipe behind it, and effective tags.
    Search runs in Postgres: free text over title + artists, AND-combined
-   genre/mood filter pills fed by a library-scoped typeahead, exact counts, and
+   genre/mood filter pills fed by a library-scoped typeahead, OR-combined
+   Confidence-band pills, exact counts, and
    full pagination. All search state lives in the URL.
 5. Personal tags: add/remove your own moods and genres on any song in your
    library, and privately suppress an AI tag that should not affect your own
@@ -104,8 +105,9 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 **Owner/operational (single developer — no admin UI, but must exist):**
 
 11. Graceful Spotify re-auth: on `invalid_grant` / expired provider tokens, prompt the user to sign in with Spotify again (refresh tokens now expire after 6 months of inactivity).
-12. Enrichment cost guardrails: batch size + per-run cap configurable via env
-    vars; globally deduplicated jobs; bounded per-recipe omission attempts;
+12. Enrichment cost guardrails: per-run cap configurable via env var, batch
+    size and reasoning effort fixed by the recipe; globally deduplicated jobs;
+    bounded per-recipe omission attempts;
     enrichment progress and failures observable in Vercel logs / Supabase
     tables. Model/recipe catalogs remain owner-curated operational data in
     Supabase Studio — no admin UI.
@@ -115,15 +117,16 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 1. **Landing / Login — `/`** — the Wake animated mesh, Playlistify wordmark, briefly rotating liked-songs tagline, and "Continue with Spotify" button. The alternate Veil mesh remains available at `/v2` for comparison. Serves feature 1. Redirects signed-in users from `/` to `/chat`.
 2. **Import & Library — `/library`** — first-run: import/enrichment progress
    with system-selected analysis, which names the recipe it runs; afterwards: a
-   search bar that commits either
-   free text or genre/mood filter pills, over a paginated table showing title,
+   search bar that commits
+   free text, genre/mood filter pills, or Confidence-band pills, over a
+   paginated table showing title,
    artist, AI/personal mood and genre chips, the Confidence band, and per-track
    controls to add personal tags and hide AI tags privately. There is no
    per-song re-analysis control — the recipe decides what runs.
    Includes Pending / None / Low / Medium / High confidence counts and
    "Re-sync Liked Songs".
    Serves features 2, 3, 4, 5.
-3. **Chat — `/chat`** (the home screen once imported) — conversation pane with streaming responses and visible tool activity; proposed-playlist panel (track list with album art, per-track rationale, remove buttons); name/description fields; "Create in Spotify" button. Serves features 6, 7, 8.
+3. **Chat — `/chat`** (the home screen once imported) — conversation pane with streaming responses and visible tool activity; proposed-playlist panel (track list with album art, per-track rationale, remove buttons); name/description fields; "Create playlist" button. Serves features 6, 7, 8.
 4. **Playlists — `/playlists`** — management for created playlists: cached
    Spotify reachability and metadata with manual refresh, cover images,
    title/description editing, delete/unfollow, recreation from the stored
@@ -245,7 +248,8 @@ privately by one user (identical shape)
 | created_at         | timestamptz         |           |
 
 **unmatched_tags** — off-list enrichment output, counted so real vocabulary
-gaps can be reviewed deliberately (service-role only)
+gaps can be reviewed deliberately (readable by any signed-in user; writes only
+via the service-role `log_unmatched_tags` RPC)
 
 | column                 | type        | notes                                  |
 | ---------------------- | ----------- | -------------------------------------- |
@@ -300,10 +304,10 @@ in Supabase Studio (operational data, not schema)
 | is_default | boolean not null default false | legacy model default, retained for compatibility              |
 | sort_order | smallint not null default 0    | owner-facing ordering                                         |
 
+| created_at | timestamptz | |
+
 Ranking is not here: it is a property of the recipe, because two prompt or
 vocabulary generations of one model can be ordered differently.
-| enrichment_rank | smallint not null default 0 | legacy rank copied into seeded recipes; recipe rank is authoritative for new attempts |
-| created_at | timestamptz | |
 
 **enrichment_recipes** — versioned, owner-curated analysis configurations
 
@@ -370,7 +374,7 @@ vocabulary generations of one model can be ordered differently.
   private removals from the user's effective AI view. Personal additions win
   over same-name suppressions.
 - **Shared cache is readable; operational evidence and private overlays are
-  isolated by RLS.** Recipes, jobs, attempts, throttles, and Spotify tokens are
+  isolated by RLS.** Recipes, jobs, attempts, and Spotify tokens are
   service-role-only. User library/tag/suppression/playlist rows are locked to
   `user_id = auth.uid()`.
 - **`ai_attributes` is jsonb on purpose**: the descriptor set will evolve; genres, moods, and confidence are promoted out of it because they're the SQL filter/cleanup targets.
@@ -397,7 +401,7 @@ vocabulary generations of one model can be ordered differently.
 
 ## Implementation Plan
 
-Status: steps 1–8, 10, and 11 are shipped. Step 9 (hardening + deploy) is the
+Status: steps 1–8 and 10–13 are shipped. Step 9 (hardening + deploy) is the
 only remaining MVP work — the app has never been deployed to Vercel, and the
 open hardening items are tracked in `IMPROVEMENTS.md`.
 

@@ -57,9 +57,9 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Severity:** Medium — the last observed set included high-severity
   advisories, but the install summary did not separate production dependencies
   from development tools.
-- **Issue:** the GSAP dependency install on 2026-08-11 reported 12 advisories
-  (3 moderate, 9 high), down from the 14 reported on 2026-07-29. The install
-  summary still does not classify production reachability. No broad
+- **Issue:** as of 2026-08-16 `npm audit` reports 11 advisories (2 moderate,
+  9 high), down from the 12 reported at the 2026-08-11 GSAP install and 14 on
+  2026-07-29. Nothing classifies production reachability. No broad
   `npm audit fix` has been run.
 - **Why fix:** determine which advisories are reachable in production, dismiss
   irrelevant development-only paths explicitly, and apply compatible upgrades
@@ -74,14 +74,16 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Severity:** Medium — a green verification result can hide the exact
   transport or permission failure the script is supposed to expose.
 - **Issue:** `scripts/verify-import.mjs` and
-  `scripts/verify-enrichment.mjs` share the same `headCount` shape:
-  `{ count: count ?? 0, error }`. Many hard assertions compare only
+  `scripts/verify-enrichment.mjs` share one `headCount` helper in
+  `scripts/lib/verify.mjs` that returns `{ count: count ?? 0, error }` and
+  leaves the error check to callers. Many hard assertions compare only
   `row.count === 0` and never inspect `row.error`. During a live
   `TypeError: fetch failed` streak on 2026-07-29, `verify:import` printed
   `IMPORT OK` while its service-role counts had collapsed to zero.
 - **Why fix:** verification must distinguish an empty result from no result.
-  Centralize a throwing count helper or require every hard assertion to include
-  `error === null`, then apply it to both scripts.
+  The helper is now centralized in `scripts/lib/verify.mjs` but does not
+  throw; make it throw on a non-null `error`, or require every hard assertion
+  to include `error === null`.
 
 ## `verify:re-enrichment` silently checks only the first 1000 rows
 
@@ -144,8 +146,10 @@ would duplicate an existing item, contradict one, or make one obsolete:
   it returns is outside the approved vocabulary, the song is filed as if it were
   never recognized at all — and it spends one of its three tries doing it, even
   though asking again cannot change the answer.
-- **Severity:** Medium — it costs real analyses and it misreports the result. At
-  least four songs sit in this state (0.52–0.74 confidence, all filed None).
+- **Severity:** Medium — it costs real analyses and it misreports the result.
+  Any confidently recognized song whose tags all fall outside the approved
+  vocabulary lands in this state and is filed None (the pre-reset library held
+  at least four; the re-imported library has none yet as of 2026-08-16).
 - **Issue:** `normalizeCandidate` in `lib/enrichment/candidates.ts` treats _zero
   surviving tags_ and _confidence below 0.4_ as the same thing and emits
   `unknown`. The state is still distinguishable — an `unknown` outcome whose
@@ -163,27 +167,6 @@ would duplicate an existing item, contradict one, or make one obsolete:
   pays off alongside a vocabulary-change re-open policy (see
   `unmatched_tags` has no review or promotion workflow).
 
-## High songs keep tags the widened mood vocabulary cannot recover
-
-- **In plain terms:** the 2026-08-13 vocabulary fix stops good tags being thrown
-  away from here on, but it cannot give back the ones already lost. The songs
-  that lost them are almost all High, and High songs are never re-analyzed — so
-  recovering them needs a deliberate operator pass, not a user-facing control.
-- **Severity:** Medium — nothing is broken and no song is mislabelled; the
-  library is simply missing tags it was told about and discarded.
-- **Issue:** `matchApprovedVocabulary` searches one kind only, so a word
-  approved as a genre was dropped when the model returned it as a mood.
-  `unmatched_tags` recorded 212 drops across 49 names before the fix —
-  `melancholic` alone 57, `sensual` 43, `party` 24 — spread across all
-  enrichment eras, and 1737 of the 1876 songs are High. Only the approved names
-  that matched are ever persisted; the model's raw output is counted in
-  `unmatched_tags` with no link back to the song, so there is no way to tell
-  which songs lost which tags, and no way to re-match without paying for a new
-  analysis.
-- **Why fix:** these are the tags chat searches. Recovering them means either an
-  operator-triggered re-analysis of a chosen slice, or persisting raw model
-  output going forward so a future vocabulary change can be replayed offline.
-
 ## The rank ratchet runs before the omitted/failed early return
 
 - **In plain terms:** if the model skips a song while a stronger recipe is
@@ -194,7 +177,9 @@ would duplicate an existing item, contradict one, or make one obsolete:
   softened it (the song keeps a full budget at the rank it ratcheted to), but a
   rank it never answered at still costs it every enabled recipe below.
 - **Issue:** `promote_song_enrichment_attempt` advances
-  `songs.highest_attempted_recipe_rank` (migration `20260729225628`, around line 705) before the branch that returns early for `omitted` and `failed`
+  `songs.highest_attempted_recipe_rank` (current definition in migration
+  `20260815231831_drop_legacy_rank_and_omission_columns.sql`, around line 175)
+  before the branches that return early for `omitted` and `failed`
   outcomes. `next_enrichment_recipe` then excludes every rank below the
   ratcheted one, because promotion would reject those as `superseded`.
 - **Why fix:** the ratchet should record ranks that produced an answer.
@@ -319,8 +304,8 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **In plain terms:** chat shows the model at most 600 genres and 600 moods. The
   current libraries are far below that ceiling, but an unbounded personal
   vocabulary could eventually hide valid searchable tags from the model.
-- **Severity:** Low — the largest live effective library vocabulary is
-  currently 152 genres and 95 moods (2026-08-11).
+- **Severity:** Low — live effective library vocabularies sit far below the
+  ceiling (the whole approved vocabulary is 407 genres and 140 moods).
 - **Issue:** `TAG_LIST_MAX` in `lib/chat/prompt.ts` truncates each kind at 600
   names and appends `', …'`. AI tags come from the closed approved vocabulary
   (currently 407 genres and 140 moods), but personal tags are free-form through
@@ -415,8 +400,9 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Complexity:** Low — recognize a playlist-specific not-found response and
   update that row's cached reachability without broadening every 403 into the
   same case.
-- **Issue:** `spotify_status` is intentionally written only by the bulk
-  `/me/playlists` sync. Mutation calls do not opportunistically mark one row
+- **Issue:** `spotify_status` is written only by the bulk `/me/playlists`
+  sync (plus recreate, which resets a row to `present` after re-creating the
+  playlist). Mutation calls do not opportunistically mark one row
   missing when Spotify returns 404, so a just-unfollowed playlist can look
   reachable until the next sync.
 - **Why fix:** targeted 404 handling would shorten the stale window while
@@ -486,12 +472,13 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Complexity:** Low — a zero-reference delete: unapproved rows with no
   `user_genres`/`user_moods` link. Never delete a referenced row; a free-form
   tag is the user's own word.
-- **Issue:** the live database currently has two unapproved genre rows (one
-  still referenced by a personal tag, one orphaned) and one unapproved mood row
-  (still referenced). Nothing rechecks these rows when a personal tag is
-  removed. `scripts/reset-enrichment.mts` was the only code that ever swept
-  them and it was deleted on 2026-08-16, so there is now no cleanup at all —
-  while free-form tagging means every distinct string a user types adds a row.
+- **Issue:** the live database currently has three unapproved rows — two
+  genres and one mood, all orphaned since the 2026-08-16 reset wiped the
+  personal-tag links that referenced them. Nothing rechecks these rows when a
+  personal tag is removed. `scripts/reset-enrichment.mts` was the only code
+  that ever swept them and it was deleted on 2026-08-16, so there is now no
+  cleanup at all — while free-form tagging means every distinct string a user
+  types adds a row.
 - **Why fix:** without a sweep, the shared vocabulary accumulates unused
   unapproved rows indefinitely, and nothing bounds the rate any more.
 
@@ -517,7 +504,9 @@ would duplicate an existing item, contradict one, or make one obsolete:
   session. Choose one source deliberately.
 - **Complexity:** Low — remove one pair or accept the duplication knowingly.
 - **Issue:** `.claude/rules/{commits,pull-requests}.md` and the corresponding
-  `~/.claude/rules/` files differ only by Markdown blank lines and have no
+  `~/.claude/rules/` files carry the same rules — `pull-requests.md` identical
+  modulo blank lines, `commits.md` with minor wording differences (voice, one
+  extra branching bullet in the project copy) — and have no
   `paths` frontmatter. Dropping the project copies would also remove shared
   conventions for collaborators; dropping the personal copies would remove the
   rules from repositories that do not carry their own.
@@ -681,8 +670,9 @@ would duplicate an existing item, contradict one, or make one obsolete:
   recordings, not winning a general coding leaderboard. Rank future providers
   on the app's own holdout set.
 - **Complexity:** Medium once the shared eval harness exists.
-- **Issue:** `enrichment_recipes.enrichment_rank` is authoritative. The live
-  catalog currently contains only three OpenAI recipes, whose within-provider
+- **Issue:** `enrichment_recipes.enrichment_rank` is authoritative. The
+  catalog contains only OpenAI recipes — three current vocabulary-v2 rows plus
+  the retired vocabulary-v1 generation — whose within-provider
   ordering is understandable. A future Claude/Grok/other recipe cannot be
   placed defensibly by reputation because general benchmarks do not measure
   music-recognition recall or tag quality.

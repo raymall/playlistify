@@ -189,7 +189,8 @@ songs in the library_ below.
 approved list, no suggestion they are obliged to pick from, and no quiet
 correction onto a similar-looking tag that already exists. Typing “regaeton”
 saves “regaeton,” not “reggaeton.” The only thing the app does to the text is
-lowercase and trim it, so the same tag typed twice is one tag rather than two.
+lowercase it and tidy the spacing — trimming the ends and collapsing doubled
+spaces — so the same tag typed twice is one tag rather than two.
 The typeahead in the tag editor is there to save keystrokes and to help people
 converge on names they already use; ignoring it entirely is a supported way to
 tag. This is the exact opposite of the rule enrichment follows, and
@@ -219,7 +220,10 @@ a suggested genre or mood adds it as a filter pill.
 
 **Everything narrows.** Several typed words must all match the same song's
 title or artist, not merely one of them. Several pills must all be on the song.
-Text and pills apply together. No part of a search widens it.
+Text and pills apply together and only ever narrow. The one exception is the
+Confidence filter: a song sits in exactly one band, so picking several bands
+reads as a choice between them — they widen against each other while still
+narrowing against text and tags.
 
 **Suggestions come from the user's own library**, so a genre that would return
 nothing is never offered, and each suggestion carries the number of songs
@@ -265,8 +269,9 @@ If nothing on the list is close to the request, the assistant says so rather
 than quietly substituting something else.
 
 **Multiple criteria narrow rather than widen.** Ask for a genre _and_ a mood
-and the result must carry both. Energy, era, tempo, and exclusion conditions
-are applied on top.
+and the result must carry both. Energy, era, and exclusion conditions are
+applied on top; tempo is shown with each candidate for the assistant to weigh
+when hand-picking, not applied as a filter.
 
 What comes back is a proposal, not an action. The user sees the tracks first,
 can rename the playlist and remove anything unwanted, and only then creates it
@@ -293,7 +298,8 @@ Spotify’s image links are temporary, Playlistify refreshes the cached link as
 part of every check.
 
 Recreate uses the stored song order rather than asking the assistant to make a
-new selection. Songs no longer in the user's Liked Songs are skipped, and the
+new selection. Songs no longer in the user's library are skipped — the library
+only drops a song after a completed re-sync confirms the unlike — and the
 result reports how many of the original songs were restored. A changed title or
 description becomes the title or description of the recreated playlist.
 

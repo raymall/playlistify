@@ -11,8 +11,8 @@ the same commit (rule in `AGENTS.md`).
 - `app/` — App Router pages + route handlers; `app/globals.css` holds the
   theme tokens (light/dark CSS variables).
 - `app/api/` — JSON route handlers for the client-driven batch loops and
-  mutations (import, enrich, tags) plus the two
-  per-keystroke read endpoints (prompt ideas, library tag suggestions).
+  mutations (import, enrich, tags) plus the two read endpoints
+  (once-per-session prompt ideas, per-keystroke library tag suggestions).
 - `app/auth/` — OAuth callback + signout route handlers.
 - `components/` — React components (kebab-case, one primary per file);
   `library-*.tsx` are the `/library` panels and table — only
@@ -27,16 +27,17 @@ the same commit (rule in `AGENTS.md`).
   copy. Shared chrome: `site-header.tsx`,
   `nav-links.tsx`, `account-menu{,-client}.tsx`, `theme-toggle.tsx`,
   `spotify-sign-in-button.tsx`, and `page-section.tsx` (the standard page
-  container every route renders into).
+  container the signed-in routes render into; the `/` and `/v2` landing
+  pages render the mesh directly).
 - `components/ui/` — shadcn/ui primitives, built on `@base-ui/react` (not
   Radix), including the `dialog` and destructive-confirmation `alert-dialog`.
   Touch only to restyle a primitive; add new ones via the shadcn CLI.
 - `public/` — static assets, including the Chandler hugging cutout shown on the
   `/` landing page.
 - `lib/ai/` — `providers.ts` (server-only provider → AI SDK factory map;
-  `resolveProviderModel` non-throwing + `resolveLanguageModel` throwing
-  wrapper), `chat-model.ts` (resolves the chat model from the `CHAT_MODEL`
-  env var, not the catalog).
+  `resolveProviderModel`, non-throwing — callers map its error variant to
+  their own failure path), `chat-model.ts` (resolves the chat model from the
+  `CHAT_MODEL` env var, not the catalog).
 - `lib/api/` — `route-helpers.ts`: shared JSON error response + `requireUser`,
   the auth gate every `/api/*` handler uses (server-only).
 - `lib/auth/` — `spotify.ts` (browser-side OAuth kick-off; scopes live here),
@@ -262,9 +263,9 @@ removal candidates; `/me/library/contains` confirms each candidate is no
 longer saved before its private `user_songs` row is deleted. Partial imports
 never prune, and the confirmation keeps offset drift or overlapping tabs from
 deleting a current song. The `SongMetadata` alias pins that payload to the nine
-Spotify columns, and `EnrichmentWrite` (`lib/enrichment/engine.ts`) pins the
-other side — the two writers cannot reach each other's columns without a
-compile error. Artist-genre lookup degrades to `[]` on failure — the
+Spotify columns; the enrichment side never writes `songs` from TypeScript at
+all — canonical enrichment columns are only written inside
+`promote_song_enrichment_attempt` — so the two writers cannot collide. Artist-genre lookup degrades to `[]` on failure — the
 batch `/artists` endpoint 403s for this app (divergence: MVP-PLAN assumes it
 works).
 
@@ -348,9 +349,9 @@ policies and are unreadable to the RLS client.
 
 Two details carry weight. `library_song_recipes()` sources the recipe from
 `active_enrichment_attempt_id` and falls back to `highest_attempted_recipe_id`,
-because atomic promotion arrived after most songs were analyzed and only the
-fallback is populated for them; it is plain inlinable SQL, so the page's
-`.in('song_id', ids)` reaches the join as a key lookup. And the escalation
+which covers songs whose result predates atomic promotion; the page scopes
+the call to its own `.in('song_id', ids)` id set, so it stays one bounded
+query over the caller's library. And the escalation
 count in `library_enrichment_recipes()` sits behind an uncorrelated
 `exists (select 1 from stronger)`, which Postgres resolves to a one-time filter
 — with no stronger recipe enabled, the per-song `next_enrichment_recipe` call
@@ -369,10 +370,12 @@ database RPCs so the panel, rows, and queue share one eligibility definition.
 
 **Personal tags and suppressions** —
 `components/library-tag-editor.tsx` → `/api/tags` → `lib/tags.ts` on the RLS
-client. Every operation proves `user_songs` ownership. Personal additions use
+client. Add, hide, and show prove `user_songs` ownership; remove needs no
+proof — it deletes only link rows already scoped to the caller's own
+`user_id`. Personal additions use
 the open `ensureVocabularyIds` path and private `user_genres`/`user_moods`;
-`hide`/`show` only add or remove private suppression rows for tags that are
-actually on the canonical song. Effective tags are canonical Medium/High AI tags
+`hide` adds a private suppression row only for a tag actually on the
+canonical song, and `show` simply removes the caller's suppression row. Effective tags are canonical Medium/High AI tags
 minus that user's suppressions, union personal tags; a same-name personal tag
 wins. A personal tag can make an unrecognized song selectable, but absent AI
 attributes still cannot satisfy energy/era filters. The editor's two comboboxes
@@ -410,8 +413,10 @@ matches them locally with no request and no three-character minimum.
 `getLibraryTagSummary` and uses it twice: to build the library-grounded system
 prompt (`lib/chat/prompt.ts`) and to bound what `search_library` may resolve,
 so the assistant searches exactly the vocabulary it was shown. The tag lists
-in the prompt are **complete, never sampled** — a truncated list is a silently
-unsearchable slice of the library. The empty conversation separately requests
+in the prompt are **complete up to a 600-name-per-kind safety cap
+(`TAG_LIST_MAX`), never sampled** — a truncated list is a silently
+unsearchable slice of the library, and `verify:chat-prompt` asserts the cap
+has not been hit. The empty conversation separately requests
 three ideas grounded in a random bounded sample of those real tags and caches
 them in `sessionStorage`, so they stay stable across reloads in one browser tab.
 Then `streamText` with a `stepCountIs(8)` tool loop. `search_library`
