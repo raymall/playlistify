@@ -467,7 +467,10 @@ even a song id would expose unbounded cost and shared-data authority.
 **Personal tags and enrichment run opposite policies on one table.** `genres`
 and `moods` hold both, told apart only by `is_approved`. Enrichment reads
 `is_approved = true` and writes nothing; personal tagging writes
-`is_approved = false` rows freely and reads its own. Any change that makes one
+`is_approved = false` rows freely and reads its own. The insert policies carry
+`with check (not is_approved)`, so a client cannot self-approve a row into the
+vocabulary the enrichment prompt is built from — approval is only ever granted
+by a migration running as the service role. Any change that makes one
 path "consistent" with the other breaks the product rule: gating personal tags
 on approval removes free-form tagging, and letting enrichment see unapproved
 rows lets one user's invented word into everyone's shared analysis. Asserted by
