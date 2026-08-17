@@ -105,7 +105,7 @@ the same commit (rule in `AGENTS.md`).
   generated cover metadata, details-update, and unfollow endpoints;
   `verify-rls.mjs`, `verify-import.mjs`, `verify-enrichment.mjs`,
   `verify-genres.mts`, and `verify-chat-prompt.mts` cover their own domains,
-  and `check-tokens.mjs` / `exercise-refresh.mts` probe the Spotify token
+  and `exercise-refresh.mts` probes the Spotify token
   path. `check-node-version.mjs` enforces Node 24 before dev and build; the
   shared env guard lives in `scripts/lib/env.mjs` and the shared PASS/FAIL
   checker + head-count helper in `scripts/lib/verify.mjs`.

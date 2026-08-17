@@ -48,8 +48,7 @@ of it, in order:
    - `npm run verify:genres` — genre/mood vocabulary (`lib/vocabulary.ts`)
      changes: approved-list reachability, the AI-link approval gate, and the
      free-form personal-tag path.
-   - `npm run verify:tokens` — `spotify_tokens` changes.
-   - `npm run verify:refresh` — token-refresh flow changes.
+   - `npm run verify:refresh` — `spotify_tokens` or token-refresh flow changes.
 7. **`npm run typecheck`** — regenerated types often surface code the new schema
    broke. Fix before committing.
 8. **Commit the migration file and the regenerated `types.ts` together**, as
