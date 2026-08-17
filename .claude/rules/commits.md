@@ -2,8 +2,13 @@
 
 Conventional Commits.
 
-## Branching
+## Branching and committing — ask first
 
+- **Branching, committing, and pushing each need the user's explicit approval,
+  every time.** Ask, then wait for a clear yes; one approval never covers the
+  next step or the next commit.
+- Finishing the work is not a signal to commit it. Leave the changes in the
+  working tree and say what's ready.
 - **Never create a branch without being asked.** Commit to the branch already
   checked out — including `main`, which is where this project's history lives.
 - `git checkout -b` / `git branch` require an explicit request for a branch.
@@ -11,7 +16,6 @@ Conventional Commits.
 - If a branch genuinely looks warranted, say so in one line and let the user
   decide; never create one pre-emptively. An unrequested branch also strands any
   follow-up commits the user makes on top of it.
-- Commit only when asked, and push only when asked — they are separate requests.
 
 ## Splitting changes
 
