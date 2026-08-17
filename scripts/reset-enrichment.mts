@@ -1,8 +1,7 @@
 // One-time reset for the approved-vocabulary cutover: clears every AI tag
 // link + enrichment column on enriched songs (back to 'pending') so the
-// closed-vocabulary engine can re-enrich them, re-points personal tags on
-// unapproved vocabulary rows onto their approved canonical where one snaps,
-// and deletes unapproved vocabulary rows nothing references anymore.
+// closed-vocabulary engine can re-enrich them, and deletes unapproved
+// vocabulary rows nothing references anymore.
 //
 // It also clears each reset song's jobs and attempts, which is not optional.
 // The three-answers-per-rank budget is derived from song_enrichment_attempts
@@ -10,11 +9,16 @@
 // to 'pending' while either survives is locked the moment it is reset: its
 // budget reads as spent and a terminally failed job excludes its recipe.
 //
-// Never touches user_songs, songs metadata, the status of 'unknown' songs,
-// or any personal tag it cannot confidently remap (stale AI links found on
-// non-enriched songs are cleared — unknown songs must carry no tags).
-// Everything it deletes is regenerable by re-running enrichment. Prints
-// counts only, never song or user values.
+// Personal tags are never rewritten. They are free-form by policy, so an
+// unapproved vocabulary row a user linked is that user's tag, exactly as they
+// typed it — not a near-miss to be corrected onto an approved name. Only
+// unapproved rows with zero personal links are collected.
+//
+// Never touches user_songs, songs metadata, the status of 'unknown' songs, or
+// any personal tag link (stale AI links found on non-enriched songs are
+// cleared — unknown songs must carry no tags). Everything it deletes is
+// regenerable by re-running enrichment. Prints counts only, never song or user
+// values.
 //
 // Dry-run report by default; pass --apply to execute.
 //
@@ -23,7 +27,6 @@ import { createClient } from '@supabase/supabase-js'
 
 import { fetchWithRetries } from '../lib/supabase/fetch'
 import type { Database } from '../lib/supabase/types'
-import { snapToExistingName } from '../lib/vocabulary'
 import { requireEnv } from './lib/env.mjs'
 
 const isApply = process.argv.includes('--apply')
@@ -147,33 +150,27 @@ const attemptsToClear = await countForSongs(
   enrichedIds,
 )
 
-interface UserLinkPlan {
-  /** Links whose row snaps onto an approved name: old id → new id. */
-  remaps: { userId: string; songId: string; fromId: string; toId: string }[]
-  /** Distinct unapproved vocab ids that stay referenced (snap failed). */
+type UserLinkPlan = {
+  /** Distinct unapproved vocab ids a personal link still points at. */
   keptVocabIds: Set<string>
-  /** Links staying on an unapproved row (snap failed — user's own tag). */
+  /** Links on an unapproved row — free-form personal tags, all kept. */
   keptLinks: number
   total: number
   onApproved: number
 }
 
+/**
+ * Which unapproved vocabulary rows a personal link still holds open. Every
+ * such link is kept — a free-form tag is the user's own word, and the only
+ * reason to look at all is so the cleanup below cannot delete a row out from
+ * under one.
+ */
 const planUserGenreLinks = async (): Promise<UserLinkPlan> => {
   const links = await service
     .from('user_genres')
-    .select('user_id, song_id, genre_id, genres!inner(name, is_approved)')
+    .select('genre_id, genres!inner(is_approved)')
   if (links.error) abort(`user_genres read: ${links.error.message}`)
-  const approvedIdByName = new Map<string, string>()
-  const approvedRows = await service
-    .from('genres')
-    .select('id, name')
-    .eq('is_approved', true)
-  if (approvedRows.error) abort(`genres read: ${approvedRows.error.message}`)
-  for (const row of approvedRows.data ?? []) {
-    approvedIdByName.set(row.name, row.id)
-  }
   const plan: UserLinkPlan = {
-    remaps: [],
     keptVocabIds: new Set(),
     keptLinks: 0,
     total: 0,
@@ -185,20 +182,8 @@ const planUserGenreLinks = async (): Promise<UserLinkPlan> => {
       plan.onApproved += 1
       continue
     }
-    const canonical = snapToExistingName(link.genres.name, approvedGenres)
-    const toId =
-      canonical === null ? undefined : approvedIdByName.get(canonical)
-    if (toId === undefined) {
-      plan.keptVocabIds.add(link.genre_id)
-      plan.keptLinks += 1
-    } else {
-      plan.remaps.push({
-        userId: link.user_id,
-        songId: link.song_id,
-        fromId: link.genre_id,
-        toId,
-      })
-    }
+    plan.keptVocabIds.add(link.genre_id)
+    plan.keptLinks += 1
   }
   return plan
 }
@@ -206,19 +191,9 @@ const planUserGenreLinks = async (): Promise<UserLinkPlan> => {
 const planUserMoodLinks = async (): Promise<UserLinkPlan> => {
   const links = await service
     .from('user_moods')
-    .select('user_id, song_id, mood_id, moods!inner(name, is_approved)')
+    .select('mood_id, moods!inner(is_approved)')
   if (links.error) abort(`user_moods read: ${links.error.message}`)
-  const approvedIdByName = new Map<string, string>()
-  const approvedRows = await service
-    .from('moods')
-    .select('id, name')
-    .eq('is_approved', true)
-  if (approvedRows.error) abort(`moods read: ${approvedRows.error.message}`)
-  for (const row of approvedRows.data ?? []) {
-    approvedIdByName.set(row.name, row.id)
-  }
   const plan: UserLinkPlan = {
-    remaps: [],
     keptVocabIds: new Set(),
     keptLinks: 0,
     total: 0,
@@ -230,20 +205,8 @@ const planUserMoodLinks = async (): Promise<UserLinkPlan> => {
       plan.onApproved += 1
       continue
     }
-    const canonical = snapToExistingName(link.moods.name, approvedMoods)
-    const toId =
-      canonical === null ? undefined : approvedIdByName.get(canonical)
-    if (toId === undefined) {
-      plan.keptVocabIds.add(link.mood_id)
-      plan.keptLinks += 1
-    } else {
-      plan.remaps.push({
-        userId: link.user_id,
-        songId: link.song_id,
-        fromId: link.mood_id,
-        toId,
-      })
-    }
+    plan.keptVocabIds.add(link.mood_id)
+    plan.keptLinks += 1
   }
   return plan
 }
@@ -285,7 +248,7 @@ for (const [label, plan] of [
   ['user mood links', moodPlan],
 ] as const) {
   console.log(
-    `  ${label}: total=${plan.total} on-approved=${plan.onApproved} remap=${plan.remaps.length} kept-unapproved=${plan.keptLinks}`,
+    `  ${label}: total=${plan.total} on-approved=${plan.onApproved} kept-free-form=${plan.keptLinks}`,
   )
 }
 console.log(
@@ -362,45 +325,8 @@ const reset = await service
 if (reset.error) abort(`songs reset: ${reset.error.message}`)
 console.log(`DONE  ${enrichedIds.length} songs reset to pending`)
 
-// 4. Re-point personal tags whose row snapped onto an approved canonical.
-for (const remap of genrePlan.remaps) {
-  const moved = await service
-    .from('user_genres')
-    .upsert(
-      { user_id: remap.userId, song_id: remap.songId, genre_id: remap.toId },
-      { onConflict: 'user_id,song_id,genre_id', ignoreDuplicates: true },
-    )
-  if (moved.error) abort(`user_genres remap: ${moved.error.message}`)
-  const dropped = await service
-    .from('user_genres')
-    .delete()
-    .eq('user_id', remap.userId)
-    .eq('song_id', remap.songId)
-    .eq('genre_id', remap.fromId)
-  if (dropped.error) abort(`user_genres old link: ${dropped.error.message}`)
-}
-for (const remap of moodPlan.remaps) {
-  const moved = await service
-    .from('user_moods')
-    .upsert(
-      { user_id: remap.userId, song_id: remap.songId, mood_id: remap.toId },
-      { onConflict: 'user_id,song_id,mood_id', ignoreDuplicates: true },
-    )
-  if (moved.error) abort(`user_moods remap: ${moved.error.message}`)
-  const dropped = await service
-    .from('user_moods')
-    .delete()
-    .eq('user_id', remap.userId)
-    .eq('song_id', remap.songId)
-    .eq('mood_id', remap.fromId)
-  if (dropped.error) abort(`user_moods old link: ${dropped.error.message}`)
-}
-console.log(
-  `DONE  personal tags remapped (genres=${genrePlan.remaps.length}, moods=${moodPlan.remaps.length})`,
-)
-
-// 5. Unapproved vocabulary rows nothing references anymore. Zero-reference
-// only, so the FK cascade never eats a link this script chose to keep.
+// 4. Unapproved vocabulary rows nothing references anymore. Zero-reference
+// only, so the FK cascade never eats a free-form tag someone is still using.
 if (deletableGenres.length > 0) {
   const removed = await service
     .from('genres')
