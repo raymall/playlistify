@@ -176,8 +176,8 @@ would duplicate an existing item, contradict one, or make one obsolete:
   approved as a genre was dropped when the model returned it as a mood.
   `unmatched_tags` recorded 212 drops across 49 names before the fix —
   `melancholic` alone 57, `sensual` 43, `party` 24 — spread across all
-  enrichment eras, and 1737 of the 1876 songs are High. Only the snapped
-  canonical names are ever persisted; the model's raw output is counted in
+  enrichment eras, and 1737 of the 1876 songs are High. Only the approved names
+  that matched are ever persisted; the model's raw output is counted in
   `unmatched_tags` with no link back to the song, so there is no way to tell
   which songs lost which tags, and no way to re-match without paying for a new
   analysis.
@@ -324,10 +324,10 @@ would duplicate an existing item, contradict one, or make one obsolete:
   currently 152 genres and 95 moods (2026-08-11).
 - **Issue:** `TAG_LIST_MAX` in `lib/chat/prompt.ts` truncates each kind at 600
   names and appends `', …'`. AI tags come from the closed approved vocabulary
-  (currently 407 genres and 140 moods), but personal tags use the open
-  `ensureVocabularyIds` path and are unbounded. A sufficiently large personal
-  vocabulary would reintroduce a name the search RPC can resolve but the model
-  was never shown.
+  (currently 407 genres and 140 moods), but personal tags are free-form through
+  the open `ensureVocabularyIds` path and are unbounded — every distinct string
+  a user types is a new row. A sufficiently large personal vocabulary would
+  reintroduce a name the search RPC can resolve but the model was never shown.
 - **Why fix:** keep `verify:chat-prompt`'s no-truncation assertion. If it ever
   trips, bound or redesign personal-tag discovery rather than simply raising a
   prompt-size cap indefinitely.
@@ -346,6 +346,48 @@ would duplicate an existing item, contradict one, or make one obsolete:
   unreachable.
 - **Why fix:** clean migration output is easier to trust at a glance, and the
   local catalog cache is restored when the daemon is available.
+
+## Tag suggestions shortlist the global vocabulary, not the caller's
+
+- **In plain terms:** the tag typeahead picks 50 candidate names from the
+  shared vocabulary before it checks which ones the user actually has. Now that
+  anyone can invent a tag, a common substring could fill all 50 slots with
+  other people's tags and show the user nothing — even though their own
+  matching tag exists.
+- **Severity:** Low — needs a much larger global vocabulary than today's to
+  bite, and it degrades to an empty suggestion list rather than a wrong one.
+  Logged because free-form personal tags removed the only thing bounding that
+  vocabulary's growth.
+- **Issue:** `library_tag_suggestions` (migration `20260811183040`) shortlists
+  from `public.genres` / `public.moods` ordered by prefix-first, then length,
+  then alphabetically — none of which relate to the caller — `limit 50`, and
+  only then counts each candidate against the caller's library, dropping
+  zero-count rows with `where c.total > 0`. The shortlist is deliberately
+  vocabulary-first for cost reasons (the header explains why the inverse is
+  worse), so this is a trade-off that got sharper, not an oversight.
+- **Why fix:** the failure is silent — a user types a tag they know they have
+  and gets no suggestion, with no signal distinguishing that from "you have no
+  such tag". Cheapest mitigation is a second shortlist arm seeded from the
+  caller's own tag ids, unioned before the limit.
+
+## `reset:enrichment` has outlived the cutover it was written for
+
+- **In plain terms:** the reset script exists to perform a one-time migration
+  onto the approved vocabulary, which already happened. What remains of it is a
+  general "re-analyze everything" button that no longer matches its own name or
+  header.
+- **Severity:** Low — it is dry-run by default and operator-only, so nothing
+  runs it by accident.
+- **Issue:** `scripts/reset-enrichment.mts` still frames itself as the
+  approved-vocabulary cutover. Its personal-tag remap step was removed when
+  tags became free-form, leaving an unapproved-vocabulary garbage collector
+  (step 4) whose only remaining job is deleting rows nothing links to, plus
+  `approvedNamesOf`, which now fetches every approved name solely to check the
+  list is non-empty and print its length.
+- **Why fix:** decide whether this is a retired one-time script (delete it) or
+  the project's re-analysis tool (rename it, drop the cutover framing, and make
+  the vocabulary GC a separate concern). Leaving it half-way means the next
+  operator reads a header describing work the script no longer does.
 
 ---
 
@@ -437,19 +479,6 @@ would duplicate an existing item, contradict one, or make one obsolete:
   instruction, or the expected empty-filter shape.
 - **Why fix:** provider or model changes can break tool calling while all local
   TypeScript and database verification remains green.
-
-## Vocabulary snapping is silent
-
-- **In plain terms:** near-duplicate tag names are silently rewritten to an
-  existing name. If the similarity threshold ever merges two genuinely
-  different tags, there is no runtime signal.
-- **Complexity:** Low — log or count each successful rewrite.
-- **Issue:** `matchApprovedVocabulary` and `ensureVocabularyIds` in
-  `lib/vocabulary.ts` record full misses through `unmatched_tags`, but successful
-  fuzzy snaps do not record the input, canonical result, or score.
-  `verify:genres` checks today's catalog only.
-- **Why fix:** a from/to/score signal makes false merges and threshold drift
-  observable without waiting for users to notice strange tags.
 
 ## Chat rebuilds the tag summary on every message
 
@@ -625,22 +654,6 @@ would duplicate an existing item, contradict one, or make one obsolete:
   code/SQL, and document every new environment variable in `.env.example` and
   `ARCHITECTURE.md`.
 
-## Fuzzy vocabulary snapping reads the whole vocabulary per write
-
-- **In plain terms:** every saved tag loads a whole genre or mood vocabulary
-  and scans it in JavaScript. Fine today; move matching into indexed SQL if the
-  vocabulary grows.
-- **Complexity:** Low to Medium — `pg_trgm` is already installed (the
-  `library_search` migration added it into the `extensions` schema), so this is
-  now trigram indexes on `genres.name` / `moods.name` plus a matching function,
-  through the full migration sequence.
-- **Issue:** `matchApprovedVocabulary` and `ensureVocabularyIds` are
-  O(new names × existing names), and the Supabase select path has a default
-  1,000-row response ceiling. The approved set is currently 407 genres and 140
-  moods, while unapproved personal rows can grow without a bound.
-- **Why fix:** server-side `similarity()`/`%` lookups with trigram indexes avoid
-  full-table transfers and remove the hidden 1,000-row ceiling.
-
 ## Personal tags share the global vocabulary tables
 
 - **In plain terms:** user-created tags are private at the link level but their
@@ -651,7 +664,11 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Issue:** AI enrichment is correctly closed to approved rows, but
   `lib/tags.ts` calls `ensureVocabularyIds`, which inserts freeform unapproved
   rows into shared `genres`/`moods`. Only `user_genres`/`user_moods` ownership
-  is private.
+  is private. Free-form personal tags make this sharper, not different: every
+  distinct string any user types becomes a globally readable row, and nothing
+  bounds how many. The names do not leak into another user's typeahead
+  (`library_tag_suggestions` ends with `where c.total > 0`), but they are
+  readable by any signed-in user with a direct `select` on `genres`/`moods`.
 - **Why fix:** separating personal vocabulary prevents one user's invented
   names from becoming globally readable operational data and simplifies
   cleanup/promotion rules.
@@ -672,8 +689,8 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** the signal is useful only when review is cheap and promotion
   preserves recipe/vocabulary identity. Cutting a new generation is the settled
   half; the open half is what a vocabulary revision should do to existing songs.
-  Re-matching without a new model call is currently impossible — only snapped
-  canonical names are persisted, and `unmatched_tags` counts raw output without
+  Re-matching without a new model call is currently impossible — only the
+  approved names that matched are persisted, and `unmatched_tags` counts raw output without
   linking it to a song — so the questions are which songs a `vocabulary_version`
   change re-opens, and whether that resets the per-rank attempt budget the way a
   rank increase does.
