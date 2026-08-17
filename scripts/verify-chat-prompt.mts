@@ -1,7 +1,8 @@
 // Chat prompt verification: proves the assistant is shown the COMPLETE tag
 // vocabulary of a library (nothing truncated), that every name it is shown is
-// resolvable back to an id it can search with, and that the candidate universe
-// is Medium/High-or-personally-tagged and honors private AI-tag suppressions.
+// resolvable back to an id it can search with under exact matching, and that
+// the candidate universe is Medium/High-or-personally-tagged and honors
+// private AI-tag suppressions.
 //
 // The service-role client bypasses RLS, so this replicates the two RPCs'
 // bodies scoped to one explicit user rather than calling them — same posture
@@ -13,7 +14,7 @@ import { createClient } from '@supabase/supabase-js'
 import type { LibraryTag } from '../lib/chat/library-search'
 import { buildChatSystemPrompt } from '../lib/chat/prompt'
 import type { Database } from '../lib/supabase/types'
-import { normalizeTagName, snapToExistingName } from '../lib/vocabulary'
+import { normalizeTagName } from '../lib/vocabulary'
 import { requireEnv } from './lib/env.mjs'
 
 const [url, serviceKey] = requireEnv(
@@ -219,14 +220,14 @@ for (const [kind, tags] of kinds) {
 }
 hard('prompt: no truncation marker', !prompt.includes(', …'))
 
-// 3. Every listed name resolves to an id through the same snapper search_library
-//    uses. Guards the personal-tag case: an unapproved tag used to be listed
-//    for the model and then match nothing.
+// 3. Every listed name survives the normalization search_library applies to
+//    the model's request, so an exact lookup finds it. Matching is exact, so a
+//    denormalized row is shown to the model and then matches nothing — the
+//    personal-tag case, now that free-form names go in unfiltered.
 for (const [kind, tags] of kinds) {
-  const names = tags.map((tag) => tag.name)
-  const unresolvable = names.filter(
-    (name) => snapToExistingName(normalizeTagName(name), names) === null,
-  )
+  const unresolvable = tags
+    .map((tag) => tag.name)
+    .filter((name) => normalizeTagName(name) !== name)
   hard(
     `${kind}: every listed name is searchable`,
     unresolvable.length === 0,

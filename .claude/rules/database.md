@@ -45,8 +45,9 @@ of it, in order:
    - `npm run verify:enrichment` — enrichment pipeline changes.
    - `npm run verify:re-enrichment` — recipe, job, attempt, or promotion
      changes (policy cases plus remote queue invariants).
-   - `npm run verify:genres` — genre vocabulary / fuzzy-snapping
-     (`lib/vocabulary.ts`) changes.
+   - `npm run verify:genres` — genre/mood vocabulary (`lib/vocabulary.ts`)
+     changes: approved-list reachability, the AI-link approval gate, and the
+     free-form personal-tag path.
    - `npm run verify:tokens` — `spotify_tokens` changes.
    - `npm run verify:refresh` — token-refresh flow changes.
 7. **`npm run typecheck`** — regenerated types often surface code the new schema
