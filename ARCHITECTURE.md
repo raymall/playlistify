@@ -73,8 +73,10 @@ the same commit (rule in `AGENTS.md`).
 - `lib/playlists/` — playlist creation and post-creation management:
   `tracks.ts` (ordered RLS-scoped Spotify-id resolution), `build.ts` (shared
   create/chunk-add/empty-shell cleanup), `create.ts`, `sync.ts`, `update.ts`,
-  `delete.ts`, `recreate.ts`, `validation.ts`, and the client-safe response
-  parsers in `contract.ts`.
+  `delete.ts`, `recreate.ts`, `validation.ts` (shared UUID/playlist-id
+  narrowing + name/description limits), `spotify-failures.ts` (shared mapping
+  from Spotify token/API failures onto the engines' common failure arms), and
+  the client-safe response parsers in `contract.ts`.
 - `lib/supabase/` — client factories + plumbing: `client.ts` (browser anon),
   `server.ts` (request-scoped RLS), `admin.ts` (service role — importing it is
   lint-restricted to an allowlist in `eslint.config.mjs`), `session.ts`
@@ -104,8 +106,9 @@ the same commit (rule in `AGENTS.md`).
   `verify-rls.mjs`, `verify-import.mjs`, `verify-enrichment.mjs`,
   `verify-genres.mts`, and `verify-chat-prompt.mts` cover their own domains,
   and `check-tokens.mjs` / `exercise-refresh.mts` probe the Spotify token
-  path. `check-node-version.mjs` enforces Node 24 before dev and build; shared
-  env guard lives in `scripts/lib/env.mjs`.
+  path. `check-node-version.mjs` enforces Node 24 before dev and build; the
+  shared env guard lives in `scripts/lib/env.mjs` and the shared PASS/FAIL
+  checker + head-count helper in `scripts/lib/verify.mjs`.
 - `supabase/migrations/` — schema source of truth. Core tables are `profiles`,
   `spotify_tokens`, `songs`, `genres`, `moods`, AI and personal tag links,
   `user_songs`, `playlists`, `playlist_songs`, `llm_models`, and

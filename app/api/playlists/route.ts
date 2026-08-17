@@ -1,6 +1,4 @@
-import { NextResponse } from 'next/server'
-
-import { errorResponse, requireUser } from '@/lib/api/route-helpers'
+import { errorResponse, jsonResult, requireUser } from '@/lib/api/route-helpers'
 import { isRecord, readJson, readString } from '@/lib/json'
 import {
   createPlaylistForUser,
@@ -14,6 +12,8 @@ import {
 import {
   PLAYLIST_DESCRIPTION_MAX,
   PLAYLIST_NAME_MAX,
+  readPlaylistIdPayload,
+  readUuid,
   UUID_PATTERN,
 } from '@/lib/playlists/validation'
 import { createClient } from '@/lib/supabase/server'
@@ -40,9 +40,6 @@ const readSongIds = (value: unknown): string[] | null => {
   }
   return ids.length >= SONGS_MIN ? ids : null
 }
-
-const readUuid = (value: unknown): string | null =>
-  typeof value === 'string' && UUID_PATTERN.test(value) ? value : null
 
 const readCreatePayload = (value: unknown): CreatePlaylistPayload | null => {
   if (!isRecord(value)) return null
@@ -86,19 +83,6 @@ const readUpdatePayload = (
   return { playlistId, name, description }
 }
 
-const readPlaylistIdPayload = (
-  value: unknown,
-): { playlistId: string } | null => {
-  if (!isRecord(value)) return null
-  const playlistId = readUuid(value.playlistId)
-  return playlistId === null ? null : { playlistId }
-}
-
-const playlistResponse = (result: { status: string }) =>
-  NextResponse.json(result, {
-    status: result.status === 'error' ? 500 : 200,
-  })
-
 const requirePlaylistUser = async () => {
   const supabase = await createClient()
   const auth = await requireUser(supabase)
@@ -121,7 +105,7 @@ export async function POST(request: Request) {
   if (payload === null) return errorResponse('Invalid request body', 400)
 
   const result = await createPlaylistForUser(supabase, auth.user.id, payload)
-  return playlistResponse(result)
+  return jsonResult(result)
 }
 
 export async function PATCH(request: Request) {
@@ -131,7 +115,7 @@ export async function PATCH(request: Request) {
   const payload = readUpdatePayload(await readJson(request))
   if (payload === null) return errorResponse('Invalid request body', 400)
 
-  return playlistResponse(
+  return jsonResult(
     await updatePlaylistDetails(supabase, auth.user.id, payload),
   )
 }
@@ -143,7 +127,7 @@ export async function DELETE(request: Request) {
   const payload = readPlaylistIdPayload(await readJson(request))
   if (payload === null) return errorResponse('Invalid request body', 400)
 
-  return playlistResponse(
+  return jsonResult(
     await deletePlaylistForUser(supabase, auth.user.id, payload.playlistId),
   )
 }

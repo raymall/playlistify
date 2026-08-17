@@ -1,36 +1,23 @@
-import { NextResponse } from 'next/server'
-
-import { errorResponse, requireUser } from '@/lib/api/route-helpers'
+import { errorResponse, jsonResult, requireUser } from '@/lib/api/route-helpers'
 import { isRecord, readJson } from '@/lib/json'
+import { readUuid } from '@/lib/playlists/validation'
 import { createClient } from '@/lib/supabase/server'
 import {
   addUserTag,
   hideAiTag,
+  readTagKind,
   removeUserTag,
   showAiTag,
   type TagAddPayload,
-  type TagAddResponse,
   type TagHidePayload,
-  type TagKind,
   type TagRemovePayload,
-  type TagRemoveResponse,
   type TagShowPayload,
-  type TagSuppressionResponse,
 } from '@/lib/tags'
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-const readKind = (value: unknown): TagKind | null =>
-  value === 'genre' || value === 'mood' ? value : null
-
-const readUuid = (value: unknown): string | null =>
-  typeof value === 'string' && UUID_PATTERN.test(value) ? value : null
 
 const readAddPayload = (value: unknown): TagAddPayload | null => {
   if (!isRecord(value)) return null
   const songId = readUuid(value.songId)
-  const kind = readKind(value.kind)
+  const kind = readTagKind(value.kind)
   const { name } = value
   if (songId === null || kind === null) return null
   if (value.operation !== 'add') return null
@@ -41,7 +28,7 @@ const readAddPayload = (value: unknown): TagAddPayload | null => {
 const readRemovePayload = (value: unknown): TagRemovePayload | null => {
   if (!isRecord(value)) return null
   const songId = readUuid(value.songId)
-  const kind = readKind(value.kind)
+  const kind = readTagKind(value.kind)
   const tagId = readUuid(value.tagId)
   if (songId === null || kind === null || tagId === null) return null
   if (value.operation !== 'remove') return null
@@ -51,7 +38,7 @@ const readRemovePayload = (value: unknown): TagRemovePayload | null => {
 const readHidePayload = (value: unknown): TagHidePayload | null => {
   if (!isRecord(value)) return null
   const songId = readUuid(value.songId)
-  const kind = readKind(value.kind)
+  const kind = readTagKind(value.kind)
   const tagId = readUuid(value.tagId)
   if (songId === null || kind === null || tagId === null) return null
   if (value.operation !== 'hide') return null
@@ -61,58 +48,43 @@ const readHidePayload = (value: unknown): TagHidePayload | null => {
 const readShowPayload = (value: unknown): TagShowPayload | null => {
   if (!isRecord(value)) return null
   const songId = readUuid(value.songId)
-  const kind = readKind(value.kind)
+  const kind = readTagKind(value.kind)
   const tagId = readUuid(value.tagId)
   if (songId === null || kind === null || tagId === null) return null
   if (value.operation !== 'show') return null
   return { operation: 'show', songId, kind, tagId }
 }
 
-const requireTagUser = async () => {
+export async function POST(request: Request) {
   const supabase = await createClient()
   const { user, response } = await requireUser(supabase)
-  return { supabase, user, response }
-}
+  if (user === null) return response
 
-const mutationResponse = (
-  result: TagAddResponse | TagRemoveResponse | TagSuppressionResponse,
-) =>
-  NextResponse.json(result, {
-    status: result.status === 'error' ? 500 : 200,
-  })
-
-export async function POST(request: Request) {
-  const { supabase, user, response } = await requireTagUser()
-  if (user === null) {
-    return response ?? errorResponse('Authentication unavailable', 503, true)
-  }
   const body = await readJson(request)
   const addPayload = readAddPayload(body)
   if (addPayload !== null) {
-    return mutationResponse(await addUserTag(supabase, user.id, addPayload))
+    return jsonResult(await addUserTag(supabase, user.id, addPayload))
   }
   const hidePayload = readHidePayload(body)
   if (hidePayload !== null) {
-    return mutationResponse(await hideAiTag(supabase, user.id, hidePayload))
+    return jsonResult(await hideAiTag(supabase, user.id, hidePayload))
   }
   return errorResponse('Invalid request body', 400)
 }
 
 export async function DELETE(request: Request) {
-  const { supabase, user, response } = await requireTagUser()
-  if (user === null) {
-    return response ?? errorResponse('Authentication unavailable', 503, true)
-  }
+  const supabase = await createClient()
+  const { user, response } = await requireUser(supabase)
+  if (user === null) return response
+
   const body = await readJson(request)
   const removePayload = readRemovePayload(body)
   if (removePayload !== null) {
-    return mutationResponse(
-      await removeUserTag(supabase, user.id, removePayload),
-    )
+    return jsonResult(await removeUserTag(supabase, user.id, removePayload))
   }
   const showPayload = readShowPayload(body)
   if (showPayload !== null) {
-    return mutationResponse(await showAiTag(supabase, user.id, showPayload))
+    return jsonResult(await showAiTag(supabase, user.id, showPayload))
   }
   return errorResponse('Invalid request body', 400)
 }

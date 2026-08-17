@@ -56,8 +56,4 @@ function PopoverTitle({ className, ...props }: PopoverPrimitive.Title.Props) {
   )
 }
 
-function PopoverClose({ ...props }: PopoverPrimitive.Close.Props) {
-  return <PopoverPrimitive.Close data-slot='popover-close' {...props} />
-}
-
-export { Popover, PopoverClose, PopoverContent, PopoverTitle, PopoverTrigger }
+export { Popover, PopoverContent, PopoverTitle, PopoverTrigger }

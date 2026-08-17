@@ -9,6 +9,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 import { requireEnv } from './lib/env.mjs'
+import { createChecker, headCount } from './lib/verify.mjs'
 
 const [url, anonKey, serviceKey] = requireEnv([
   'NEXT_PUBLIC_SUPABASE_URL',
@@ -19,17 +20,7 @@ const [url, anonKey, serviceKey] = requireEnv([
 const service = createClient(url, serviceKey)
 const anon = createClient(url, anonKey)
 
-let failed = false
-
-const headCount = async (query) => {
-  const { count, error } = await query
-  return { count: count ?? 0, error }
-}
-
-const hard = (label, ok, detail) => {
-  if (!ok) failed = true
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`)
-}
+const { hard, hasFailed } = createChecker()
 
 // Hard: no user-referenced song has a null or empty title.
 const nullTitle = await headCount(
@@ -181,8 +172,8 @@ if (
 }
 
 console.log(
-  failed
+  hasFailed()
     ? '\nIMPORT INVARIANTS FAILED: see FAIL lines above.'
     : '\nIMPORT OK: all invariants hold.',
 )
-process.exit(failed ? 1 : 0)
+process.exit(hasFailed() ? 1 : 0)

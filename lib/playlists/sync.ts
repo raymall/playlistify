@@ -1,5 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import {
+  mapSpotifyFailure,
+  mapTokenFailure,
+} from '@/lib/playlists/spotify-failures'
 import { fetchUserPlaylists } from '@/lib/spotify/api'
 import { getValidSpotifyToken } from '@/lib/spotify/token'
 import type { Database } from '@/lib/supabase/types'
@@ -23,26 +27,10 @@ export const syncPlaylistStatuses = async (
   }
 
   const tokenResult = await getValidSpotifyToken(userId)
-  if (tokenResult.status === 'reconnect_required') {
-    return { status: 'reconnect_required' }
-  }
-  if (tokenResult.status === 'error') {
-    return { status: 'error', message: tokenResult.message }
-  }
+  if (tokenResult.status !== 'ok') return mapTokenFailure(tokenResult)
 
   const spotifyResult = await fetchUserPlaylists(tokenResult.accessToken)
-  if (spotifyResult.status === 'auth_failed') {
-    return { status: 'reconnect_required' }
-  }
-  if (spotifyResult.status === 'rate_limited') {
-    return {
-      status: 'rate_limited',
-      retryAfterSeconds: spotifyResult.retryAfterSeconds,
-    }
-  }
-  if (spotifyResult.status === 'error') {
-    return { status: 'error', message: spotifyResult.message }
-  }
+  if (spotifyResult.status !== 'ok') return mapSpotifyFailure(spotifyResult)
 
   const spotifyPlaylists = []
   for (const playlist of playlistsResult.data) {

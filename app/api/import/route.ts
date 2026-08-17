@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server'
-
-import { errorResponse, requireUser } from '@/lib/api/route-helpers'
+import {
+  errorResponse,
+  jsonRetryableResult,
+  requireUser,
+} from '@/lib/api/route-helpers'
 import { isRecord, readJson, readString } from '@/lib/json'
 import {
   importLikedSongsBatch,
@@ -53,14 +55,9 @@ export async function POST(request: Request) {
   const syncStartedAt = payload.syncStartedAt ?? new Date().toISOString()
 
   try {
-    const result = await importLikedSongsBatch(
-      user.id,
-      payload.offset,
-      syncStartedAt,
+    return jsonRetryableResult(
+      await importLikedSongsBatch(user.id, payload.offset, syncStartedAt),
     )
-    const status =
-      result.status !== 'error' ? 200 : result.safeToRetry === true ? 503 : 500
-    return NextResponse.json(result, { status })
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Unexpected import failure'

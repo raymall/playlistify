@@ -6,6 +6,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 import { requireEnv } from './lib/env.mjs'
+import { createChecker, headCount } from './lib/verify.mjs'
 
 const [url, anonKey, serviceKey] = requireEnv([
   'NEXT_PUBLIC_SUPABASE_URL',
@@ -21,17 +22,7 @@ const anon = createClient(url, anonKey)
 const LOW_MAX_CONFIDENCE = 0.5
 const MEDIUM_MAX_CONFIDENCE = 0.75
 
-let failed = false
-
-const headCount = async (query) => {
-  const { count, error } = await query
-  return { count: count ?? 0, error }
-}
-
-const hard = (label, ok, detail) => {
-  if (!ok) failed = true
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`)
-}
+const { hard, hasFailed } = createChecker()
 
 // Hard: enriched rows carry the full enrichment column set; unknown rows
 // carry confidence/model/timestamp (ai_attributes intentionally stays null,
@@ -346,8 +337,8 @@ console.log(
 )
 
 console.log(
-  failed
+  hasFailed()
     ? '\nENRICHMENT INVARIANTS FAILED: see FAIL lines above.'
     : '\nENRICHMENT OK: all invariants hold.',
 )
-process.exit(failed ? 1 : 0)
+process.exit(hasFailed() ? 1 : 0)

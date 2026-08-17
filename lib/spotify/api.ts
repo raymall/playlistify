@@ -2,7 +2,7 @@
 // is parsed from `unknown` with guard helpers — no `as` casts, so malformed or
 // partial payloads degrade to nulls/empties instead of throwing mid-batch.
 
-import { isRecord, readNumber, readString } from '@/lib/json'
+import { isRecord, readNumber, readString, readStringArray } from '@/lib/json'
 
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1'
 
@@ -92,17 +92,6 @@ const readBooleanArray = (value: unknown): boolean[] | null => {
     return null
   }
   return raw.map((entry) => entry === true)
-}
-
-const readStringArray = (value: unknown): string[] => {
-  const raw = readArray(value)
-  if (raw === null) return []
-  const strings: string[] = []
-  for (const entry of raw) {
-    const str = readString(entry)
-    if (str !== null) strings.push(str)
-  }
-  return strings
 }
 
 const parseRetryAfter = (header: string | null): number => {

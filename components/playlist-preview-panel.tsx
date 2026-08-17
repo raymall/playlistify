@@ -11,6 +11,11 @@ import {
   type PlaylistProposal,
   readCreatePlaylistResponse,
 } from '@/lib/chat/contract'
+import { readJson } from '@/lib/json'
+import {
+  PLAYLIST_DESCRIPTION_MAX,
+  PLAYLIST_NAME_MAX,
+} from '@/lib/playlists/validation'
 import { wait } from '@/lib/sleep'
 
 interface PlaylistPreviewPanelProps {
@@ -34,9 +39,6 @@ type CreateState =
     }
   | { phase: 'error'; message: string }
   | { phase: 'created'; spotifyUrl: string; persisted: boolean }
-
-const NAME_MAX = 100
-const DESCRIPTION_MAX = 300
 
 /**
  * Renders one playlist proposal for review: rename, edit description, drop
@@ -113,12 +115,7 @@ export const PlaylistPreviewPanel = ({
       }
       if (isStopped()) return
 
-      let payload: unknown = null
-      try {
-        payload = await response.json()
-      } catch {
-        payload = null
-      }
+      const payload = await readJson(response)
       if (isStopped()) return
 
       const parsed = readCreatePlaylistResponse(payload)
@@ -195,7 +192,7 @@ export const PlaylistPreviewPanel = ({
             </label>
             <Input
               id='playlist-name'
-              maxLength={NAME_MAX}
+              maxLength={PLAYLIST_NAME_MAX}
               value={name}
               onChange={(event) => {
                 setName(event.target.value)
@@ -211,7 +208,7 @@ export const PlaylistPreviewPanel = ({
             </label>
             <Textarea
               id='playlist-description'
-              maxLength={DESCRIPTION_MAX}
+              maxLength={PLAYLIST_DESCRIPTION_MAX}
               rows={2}
               value={description}
               onChange={(event) => {

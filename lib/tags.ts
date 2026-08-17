@@ -12,6 +12,9 @@ import {
 
 export type TagKind = 'genre' | 'mood'
 
+export const readTagKind = (value: unknown): TagKind | null =>
+  value === 'genre' || value === 'mood' ? value : null
+
 export type TagAddPayload = {
   operation: 'add'
   songId: string

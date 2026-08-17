@@ -14,7 +14,7 @@ import {
   type EnrichmentCounts,
 } from '@/lib/enrichment/engine'
 import { type EnrichmentRecipeSummary } from '@/lib/enrichment/recipes'
-import { isRecord, readNumber, readString } from '@/lib/json'
+import { isRecord, readJson, readNumber, readString } from '@/lib/json'
 import { wait } from '@/lib/sleep'
 import { createClient } from '@/lib/supabase/client'
 
@@ -313,12 +313,7 @@ export const LibraryEnrichmentPanel = ({
         return
       }
 
-      let payload: unknown = null
-      try {
-        payload = await response.json()
-      } catch {
-        payload = null
-      }
+      const payload = await readJson(response)
       isRequestInFlightRef.current = false
       if (isStopped()) return
 

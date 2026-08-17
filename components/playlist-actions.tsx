@@ -28,6 +28,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { signInWithSpotify } from '@/lib/auth/spotify'
+import { readJson } from '@/lib/json'
 import {
   readDeletePlaylistResponse,
   readRecreatePlaylistResponse,
@@ -54,14 +55,6 @@ type Feedback = {
   kind: 'error' | 'message' | 'reconnect'
   message: string
 } | null
-
-const readResponseJson = async (response: Response): Promise<unknown> => {
-  try {
-    return await response.json()
-  } catch {
-    return null
-  }
-}
 
 /** Edit, recreate, and destructive controls for one stored playlist. */
 export const PlaylistActions = ({
@@ -151,9 +144,7 @@ export const PlaylistActions = ({
         signal: controller.signal,
       })
       if (isStopped()) return
-      const parsed = readUpdatePlaylistDetailsResponse(
-        await readResponseJson(response),
-      )
+      const parsed = readUpdatePlaylistDetailsResponse(await readJson(response))
       if (isStopped()) return
       if (parsed === null) {
         setEditError('The server returned an unexpected response.')
@@ -209,9 +200,7 @@ export const PlaylistActions = ({
         signal: controller.signal,
       })
       if (isStopped()) return
-      const parsed = readDeletePlaylistResponse(
-        await readResponseJson(response),
-      )
+      const parsed = readDeletePlaylistResponse(await readJson(response))
       if (isStopped()) return
       if (parsed === null) {
         setDeleteError('The server returned an unexpected response.')
@@ -267,9 +256,7 @@ export const PlaylistActions = ({
         signal: controller.signal,
       })
       if (isStopped()) return
-      const parsed = readRecreatePlaylistResponse(
-        await readResponseJson(response),
-      )
+      const parsed = readRecreatePlaylistResponse(await readJson(response))
       if (isStopped()) return
       if (parsed === null) {
         const message = 'The server returned an unexpected response.'

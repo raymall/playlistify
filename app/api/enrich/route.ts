@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server'
-
-import { errorResponse, requireUser } from '@/lib/api/route-helpers'
+import {
+  errorResponse,
+  jsonRetryableResult,
+  requireUser,
+} from '@/lib/api/route-helpers'
 import {
   type EnrichBatchPayload,
   enrichLibraryBatch,
@@ -40,8 +42,7 @@ export async function POST(request: Request) {
   const payload = readPayload(await readJson(request))
   if (payload === null) return errorResponse('Invalid request body', 400)
 
-  const result = await enrichLibraryBatch(user.id, payload.processedSoFar)
-  const status =
-    result.status !== 'error' ? 200 : result.safeToRetry === true ? 503 : 500
-  return NextResponse.json(result, { status })
+  return jsonRetryableResult(
+    await enrichLibraryBatch(user.id, payload.processedSoFar),
+  )
 }

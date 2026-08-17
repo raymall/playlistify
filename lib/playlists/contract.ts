@@ -13,7 +13,12 @@ type PlaylistFailureResponse =
   | { status: 'rate_limited'; retryAfterSeconds: number }
   | { status: 'error'; message: string }
 
-const readPlaylistFailureResponse = (
+/**
+ * Shared failure tail of every playlist-mutation response. Also reused by the
+ * chat create-playlist parser (lib/chat/contract.ts), whose failure arms are
+ * structurally identical.
+ */
+export const readPlaylistFailureResponse = (
   value: Record<string, unknown>,
 ): PlaylistFailureResponse | null => {
   const { status } = value

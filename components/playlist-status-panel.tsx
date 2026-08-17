@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { signInWithSpotify } from '@/lib/auth/spotify'
+import { readJson } from '@/lib/json'
 import { readSyncPlaylistStatusesResponse } from '@/lib/playlists/contract'
 import { wait } from '@/lib/sleep'
 
@@ -51,12 +52,7 @@ export const PlaylistStatusPanel = () => {
       }
       if (isStopped()) return
 
-      let payload: unknown = null
-      try {
-        payload = await response.json()
-      } catch {
-        payload = null
-      }
+      const payload = await readJson(response)
       if (isStopped()) return
 
       const parsed = readSyncPlaylistStatusesResponse(payload)

@@ -22,6 +22,25 @@ export const errorResponse = (
     { status },
   )
 
+/** JSON response for an engine result: 500 when it reports an error, 200 otherwise. */
+export const jsonResult = (result: { status: string }) =>
+  NextResponse.json(result, {
+    status: result.status === 'error' ? 500 : 200,
+  })
+
+/**
+ * Like `jsonResult`, but an error the engine marks `safeToRetry` maps to 503
+ * so the client loop may retry it for free.
+ */
+export const jsonRetryableResult = (result: {
+  status: string
+  safeToRetry?: boolean
+}) =>
+  NextResponse.json(result, {
+    status:
+      result.status !== 'error' ? 200 : result.safeToRetry === true ? 503 : 500,
+  })
+
 /**
  * The auth gate every `/api/*` handler uses — `/api` is not covered by
  * proxy.ts route protection, so each one gates on `getUser()` itself.

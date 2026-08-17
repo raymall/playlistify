@@ -16,6 +16,7 @@ import {
 } from '@/lib/enrichment/policy'
 import { type Database, type Tables } from '@/lib/supabase/types'
 import { requireEnv } from '@/scripts/lib/env.mjs'
+import { createChecker } from '@/scripts/lib/verify.mjs'
 
 /** Mirrors the budget in `enrichment_attempts_remaining_at_rank()`. */
 const ANSWER_BUDGET_PER_RANK = 3
@@ -28,14 +29,8 @@ const [url, anonKey, serviceKey] = requireEnv([
 
 const service = createClient<Database>(url, serviceKey)
 const anon = createClient<Database>(url, anonKey)
-let failureCount = 0
 
-const hard = (label: string, isPassing: boolean, detail = '') => {
-  if (!isPassing) failureCount += 1
-  console.log(
-    `${isPassing ? 'PASS' : 'FAIL'}  ${label}${detail.length > 0 ? `  ${detail}` : ''}`,
-  )
-}
+const { hard, hasFailed } = createChecker()
 
 const recognized = (band: 'low' | 'medium' | 'high'): PromotionCandidate => ({
   outcome: 'recognized',
@@ -379,8 +374,8 @@ if (songsResult.error !== null) {
 }
 
 console.log(
-  failureCount > 0
+  hasFailed()
     ? '\nRE-ENRICHMENT INVARIANTS FAILED: see FAIL lines above.'
     : '\nRE-ENRICHMENT OK: policy and remote invariants hold.',
 )
-process.exit(failureCount > 0 ? 1 : 0)
+process.exit(hasFailed() ? 1 : 0)

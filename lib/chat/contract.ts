@@ -4,7 +4,8 @@
 // CreatePlaylistResponse type is imported type-only (erased at build), so no
 // server code leaks into the client bundle.
 
-import { isRecord, readNumber, readString } from '@/lib/json'
+import { isRecord, readNumber, readString, readStringArray } from '@/lib/json'
+import { readPlaylistFailureResponse } from '@/lib/playlists/contract'
 import type { CreatePlaylistResponse } from '@/lib/playlists/create'
 
 export interface ProposalTrack {
@@ -31,8 +32,6 @@ export interface PlaylistProposal {
 export interface SearchSummary {
   /** Full number of matches — the playlist-relevant figure. */
   matchCount: number
-  /** How many of those were sampled back to the model. */
-  sampled: number
   unmatchedTagCount: number
 }
 
@@ -74,21 +73,10 @@ export const readSearchSummary = (value: unknown): SearchSummary | null => {
   if (matchCount === null) return null
   return {
     matchCount,
-    sampled: readNumber(value.sampled) ?? matchCount,
     unmatchedTagCount: Array.isArray(value.unmatchedTags)
       ? value.unmatchedTags.length
       : 0,
   }
-}
-
-const readStringArray = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return []
-  const out: string[] = []
-  for (const entry of value) {
-    const str = readString(entry)
-    if (str !== null) out.push(str)
-  }
-  return out
 }
 
 const readProposalTrack = (value: unknown): ProposalTrack | null => {
@@ -168,17 +156,5 @@ export const readCreatePlaylistResponse = (
       persisted: value.persisted === true,
     }
   }
-  if (status === 'reconnect_required') return { status }
-  if (status === 'rate_limited') {
-    const retryAfterSeconds = readNumber(value.retryAfterSeconds)
-    if (retryAfterSeconds === null) return null
-    return { status, retryAfterSeconds }
-  }
-  if (status === 'error') {
-    return {
-      status,
-      message: readString(value.message) ?? 'Something went wrong.',
-    }
-  }
-  return null
+  return readPlaylistFailureResponse(value)
 }

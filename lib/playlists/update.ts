@@ -1,6 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import {
+  mapSpotifyFailure,
+  mapTokenFailure,
+} from '@/lib/playlists/spotify-failures'
+import {
   PLAYLIST_DESCRIPTION_MAX,
   PLAYLIST_NAME_MAX,
 } from '@/lib/playlists/validation'
@@ -66,30 +70,14 @@ export const updatePlaylistDetails = async (
   }
 
   const tokenResult = await getValidSpotifyToken(userId)
-  if (tokenResult.status === 'reconnect_required') {
-    return { status: 'reconnect_required' }
-  }
-  if (tokenResult.status === 'error') {
-    return { status: 'error', message: tokenResult.message }
-  }
+  if (tokenResult.status !== 'ok') return mapTokenFailure(tokenResult)
 
   const spotifyResult = await updateSpotifyPlaylistDetails(
     tokenResult.accessToken,
     spotifyPlaylistId,
     { name, description },
   )
-  if (spotifyResult.status === 'auth_failed') {
-    return { status: 'reconnect_required' }
-  }
-  if (spotifyResult.status === 'rate_limited') {
-    return {
-      status: 'rate_limited',
-      retryAfterSeconds: spotifyResult.retryAfterSeconds,
-    }
-  }
-  if (spotifyResult.status === 'error') {
-    return { status: 'error', message: spotifyResult.message }
-  }
+  if (spotifyResult.status !== 'ok') return mapSpotifyFailure(spotifyResult)
 
   const localResult = await supabase
     .from('playlists')

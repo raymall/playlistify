@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { isRecord, readNumber, readString } from '@/lib/json'
 import { MIN_TAG_QUERY_LENGTH } from '@/lib/library/search-params'
-import { type TagKind } from '@/lib/tags'
+import { readTagKind, type TagKind } from '@/lib/tags'
 import { normalizeTagName } from '@/lib/vocabulary'
 
 export type TagSuggestion = {
@@ -38,9 +38,6 @@ const remember = (key: string, suggestions: readonly TagSuggestion[]) => {
   }
   cache.set(key, suggestions)
 }
-
-const readTagKind = (value: unknown): TagKind | null =>
-  value === 'genre' || value === 'mood' ? value : null
 
 const readSuggestion = (value: unknown): TagSuggestion | null => {
   if (!isRecord(value)) return null

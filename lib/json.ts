@@ -12,10 +12,23 @@ export const readString = (value: unknown): string | null =>
 export const readNumber = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null
 
-/** Request body as unknown, or null when the body isn't valid JSON. */
-export const readJson = async (request: Request): Promise<unknown> => {
+/** String entries of `value`; a non-array yields [] and non-strings are skipped. */
+export const readStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const entry of value) {
+    const str = readString(entry)
+    if (str !== null) out.push(str)
+  }
+  return out
+}
+
+/** Request or Response body as unknown, or null when it isn't valid JSON. */
+export const readJson = async (
+  source: Request | Response,
+): Promise<unknown> => {
   try {
-    return await request.json()
+    return await source.json()
   } catch {
     return null
   }

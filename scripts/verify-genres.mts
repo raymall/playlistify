@@ -15,6 +15,7 @@ import { createClient } from '@supabase/supabase-js'
 import type { Database } from '../lib/supabase/types'
 import { isValidTagName, normalizeTagName } from '../lib/vocabulary'
 import { requireEnv } from './lib/env.mjs'
+import { createChecker } from './lib/verify.mjs'
 
 const [url, serviceKey] = requireEnv(
   ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
@@ -23,12 +24,7 @@ const [url, serviceKey] = requireEnv(
 
 const service = createClient<Database>(url, serviceKey)
 
-const failures: string[] = []
-
-const hard = (label: string, ok: boolean, detail?: string) => {
-  if (!ok) failures.push(label)
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`)
-}
+const { hard, hasFailed } = createChecker()
 
 const approvedByTable = new Map<'genres' | 'moods', string[]>()
 const unapprovedCounts = new Map<'genres' | 'moods', number>()
@@ -103,8 +99,8 @@ console.log(
 )
 
 console.log(
-  failures.length > 0
+  hasFailed()
     ? '\nVOCAB CHECKS FAILED: see FAIL lines above.'
     : '\nVOCAB OK: every name is exactly reachable and AI links are gated.',
 )
-process.exit(failures.length > 0 ? 1 : 0)
+process.exit(hasFailed() ? 1 : 0)

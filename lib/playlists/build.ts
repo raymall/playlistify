@@ -1,3 +1,4 @@
+import { mapSpotifyFailure } from '@/lib/playlists/spotify-failures'
 import {
   addPlaylistTracksChunk,
   createSpotifyPlaylist,
@@ -39,18 +40,7 @@ export const buildSpotifyPlaylist = async (
     name,
     description,
   })
-  if (createResult.status === 'auth_failed') {
-    return { status: 'reconnect_required' }
-  }
-  if (createResult.status === 'rate_limited') {
-    return {
-      status: 'rate_limited',
-      retryAfterSeconds: createResult.retryAfterSeconds,
-    }
-  }
-  if (createResult.status === 'error') {
-    return { status: 'error', message: createResult.message }
-  }
+  if (createResult.status !== 'ok') return mapSpotifyFailure(createResult)
 
   const playlist = createResult.data
   let addedCount = 0

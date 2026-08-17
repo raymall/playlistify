@@ -72,9 +72,7 @@ export const getLibraryEnrichmentRecipes = async (
 export type ClaimedEnrichmentJob = {
   jobId: string
   leaseToken: string
-  songId: string
   recipeId: string
-  expectedRevision: number
   spotifyTrackId: string
   title: string | null
   artists: string[] | null
@@ -82,7 +80,6 @@ export type ClaimedEnrichmentJob = {
   releaseDate: string | null
   provider: string
   modelId: string
-  recipeRank: number
   promptVersion: string
   vocabularyVersion: string
   identityVersion: string
@@ -141,9 +138,7 @@ export const getLibraryEnrichmentCounts = async (
 type ClaimedJobRow = {
   job_id: string
   lease_token: string
-  song_id: string
   recipe_id: string
-  expected_revision: number
   spotify_track_id: string
   title: string | null
   artists: string[] | null
@@ -151,7 +146,6 @@ type ClaimedJobRow = {
   release_date: string | null
   provider: string
   model_id: string
-  recipe_rank: number
   prompt_version: string
   vocabulary_version: string
   identity_version: string
@@ -161,9 +155,7 @@ type ClaimedJobRow = {
 const readClaimedJob = (row: ClaimedJobRow): ClaimedEnrichmentJob => ({
   jobId: row.job_id,
   leaseToken: row.lease_token,
-  songId: row.song_id,
   recipeId: row.recipe_id,
-  expectedRevision: row.expected_revision,
   spotifyTrackId: row.spotify_track_id,
   title: row.title,
   artists: row.artists,
@@ -171,7 +163,6 @@ const readClaimedJob = (row: ClaimedJobRow): ClaimedEnrichmentJob => ({
   releaseDate: row.release_date,
   provider: row.provider,
   modelId: row.model_id,
-  recipeRank: row.recipe_rank,
   promptVersion: row.prompt_version,
   vocabularyVersion: row.vocabulary_version,
   identityVersion: row.identity_version,

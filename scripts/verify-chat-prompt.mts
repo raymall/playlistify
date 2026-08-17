@@ -16,6 +16,7 @@ import { buildChatSystemPrompt } from '../lib/chat/prompt'
 import type { Database } from '../lib/supabase/types'
 import { normalizeTagName } from '../lib/vocabulary'
 import { requireEnv } from './lib/env.mjs'
+import { createChecker } from './lib/verify.mjs'
 
 const [url, serviceKey] = requireEnv(
   ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
@@ -29,12 +30,7 @@ const IN_CHUNK = 100
 /** Supabase REST caps responses at 1000 rows; page anything that can exceed it. */
 const PAGE_SIZE = 1000
 
-const failures: string[] = []
-
-const hard = (label: string, ok: boolean, detail?: string) => {
-  if (!ok) failures.push(label)
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`)
-}
+const { hard, hasFailed } = createChecker()
 
 const chunk = <T,>(values: T[], size: number): T[][] => {
   const out: T[][] = []
@@ -273,8 +269,8 @@ hard(
 )
 
 console.log(
-  failures.length > 0
+  hasFailed()
     ? '\nCHAT PROMPT CHECKS FAILED: see FAIL lines above.'
     : '\nCHAT PROMPT OK: the assistant sees every searchable tag in the library.',
 )
-process.exit(failures.length > 0 ? 1 : 0)
+process.exit(hasFailed() ? 1 : 0)

@@ -7,13 +7,11 @@ import { type Database, type Json } from '@/lib/supabase/types'
 type AdminClient = SupabaseClient<Database>
 
 export type PromotionResult = {
-  decision: 'promoted' | 'rejected'
-  reason: string
   isPromoted: boolean
 }
 
-const readDecision = (value: string): 'promoted' | 'rejected' | null =>
-  value === 'promoted' || value === 'rejected' ? value : null
+const isKnownDecision = (value: string): boolean =>
+  value === 'promoted' || value === 'rejected'
 
 const toAttributesJson = (outcome: CandidateOutcome): Json | undefined => {
   if (outcome.aiAttributes === null) return undefined
@@ -76,8 +74,7 @@ export const recordAndPromoteCandidate = async (
   if (row === undefined) {
     return { status: 'error', message: 'Promotion returned no decision' }
   }
-  const decision = readDecision(row.decision)
-  if (decision === null) {
+  if (!isKnownDecision(row.decision)) {
     return {
       status: 'error',
       message: 'Promotion returned an invalid decision',
@@ -85,10 +82,6 @@ export const recordAndPromoteCandidate = async (
   }
   return {
     status: 'ok',
-    promotion: {
-      decision,
-      reason: row.reason,
-      isPromoted: row.is_promoted,
-    },
+    promotion: { isPromoted: row.is_promoted },
   }
 }

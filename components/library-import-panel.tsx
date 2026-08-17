@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { signInWithSpotify } from '@/lib/auth/spotify'
-import { isRecord, readNumber, readString } from '@/lib/json'
+import { isRecord, readJson, readNumber, readString } from '@/lib/json'
 import { wait } from '@/lib/sleep'
 import { type ImportBatchResponse } from '@/lib/spotify/import'
 
@@ -177,12 +177,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
       }
       if (isStopped()) return
 
-      let payload: unknown = null
-      try {
-        payload = await response.json()
-      } catch {
-        payload = null
-      }
+      const payload = await readJson(response)
       if (isStopped()) return
 
       const parsed = parseResponse(payload)

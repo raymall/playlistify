@@ -11,6 +11,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { buildSpotifyPlaylist } from '@/lib/playlists/build'
+import { mapTokenFailure } from '@/lib/playlists/spotify-failures'
 import { resolveTrackIds } from '@/lib/playlists/tracks'
 import { getValidSpotifyToken } from '@/lib/spotify/token'
 import type { Database } from '@/lib/supabase/types'
@@ -61,12 +62,7 @@ export const createPlaylistForUser = async (
   const { trackIds } = resolved
 
   const tokenResult = await getValidSpotifyToken(userId)
-  if (tokenResult.status === 'reconnect_required') {
-    return { status: 'reconnect_required' }
-  }
-  if (tokenResult.status === 'error') {
-    return { status: 'error', message: tokenResult.message }
-  }
+  if (tokenResult.status !== 'ok') return mapTokenFailure(tokenResult)
   const { accessToken } = tokenResult
 
   const buildResult = await buildSpotifyPlaylist(accessToken, {
