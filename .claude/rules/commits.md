@@ -38,8 +38,9 @@ Conventional Commits.
 
 - Blank line after the subject, then a `-` bullet list.
 - Bullets describe what was done: past tense, leading capital.
+- Keep each bullet to one or two lines. Say what changed, not how or why it works.
+- No wrapping. Prefer fewer, shorter bullets over a full account of the diff.
 - Add a "why" line only when the change isn't obvious.
-- No wrapping; keep it short — don't over-explain.
 
 ## Footer
 
