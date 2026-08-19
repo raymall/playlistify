@@ -20,51 +20,57 @@ export type Database = {
       enrichment_recipes: {
         Row: {
           batch_size: number
+          content_hash: string | null
           created_at: string
           enabled: boolean
           enrich_all_songs: boolean
           enrichment_rank: number
           id: string
-          identity_version: string
+          identity_fields: string[] | null
           is_default: boolean
           label: string
           model_id: string
-          prompt_version: string
+          output_spec: Json | null
           reasoning_effort: string
           recipe_key: string
-          vocabulary_version: string
+          system_prompt: string | null
+          vocabulary_snapshot_id: string | null
         }
         Insert: {
           batch_size?: number
+          content_hash?: string | null
           created_at?: string
           enabled?: boolean
           enrich_all_songs?: boolean
           enrichment_rank: number
           id?: string
-          identity_version: string
+          identity_fields?: string[] | null
           is_default?: boolean
           label: string
           model_id: string
-          prompt_version: string
+          output_spec?: Json | null
           reasoning_effort?: string
           recipe_key: string
-          vocabulary_version: string
+          system_prompt?: string | null
+          vocabulary_snapshot_id?: string | null
         }
         Update: {
           batch_size?: number
+          content_hash?: string | null
           created_at?: string
           enabled?: boolean
           enrich_all_songs?: boolean
           enrichment_rank?: number
           id?: string
-          identity_version?: string
+          identity_fields?: string[] | null
           is_default?: boolean
           label?: string
           model_id?: string
-          prompt_version?: string
+          output_spec?: Json | null
           reasoning_effort?: string
           recipe_key?: string
-          vocabulary_version?: string
+          system_prompt?: string | null
+          vocabulary_snapshot_id?: string | null
         }
         Relationships: [
           {
@@ -72,6 +78,13 @@ export type Database = {
             columns: ['model_id']
             isOneToOne: false
             referencedRelation: 'llm_models'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'enrichment_recipes_vocabulary_snapshot_id_fkey'
+            columns: ['vocabulary_snapshot_id']
+            isOneToOne: false
+            referencedRelation: 'vocabulary_snapshots'
             referencedColumns: ['id']
           },
         ]
@@ -830,6 +843,33 @@ export type Database = {
           },
         ]
       }
+      vocabulary_snapshots: {
+        Row: {
+          content_hash: string
+          created_at: string
+          genre_names: string[]
+          id: string
+          label: string
+          mood_names: string[]
+        }
+        Insert: {
+          content_hash: string
+          created_at?: string
+          genre_names: string[]
+          id?: string
+          label: string
+          mood_names: string[]
+        }
+        Update: {
+          content_hash?: string
+          created_at?: string
+          genre_names?: string[]
+          id?: string
+          label?: string
+          mood_names?: string[]
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -846,11 +886,13 @@ export type Database = {
           album: string
           artists: string[]
           expected_revision: number
-          identity_version: string
+          genre_names: string[]
+          identity_fields: string[]
           job_id: string
           lease_token: string
           model_id: string
-          prompt_version: string
+          mood_names: string[]
+          output_spec: Json
           provider: string
           reasoning_effort: string
           recipe_id: string
@@ -858,8 +900,8 @@ export type Database = {
           release_date: string
           song_id: string
           spotify_track_id: string
+          system_prompt: string
           title: string
-          vocabulary_version: string
         }[]
       }
       confidence_band: {
@@ -913,18 +955,16 @@ export type Database = {
         Args: never
         Returns: {
           batch_size: number
+          content_hash: string
           enrich_all_songs: boolean
           enrichment_rank: number
           escalating_songs: number
-          identity_version: string
           is_current: boolean
           label: string
           model_id: string
-          prompt_version: string
           provider: string
           reasoning_effort: string
           recipe_id: string
-          vocabulary_version: string
         }[]
       }
       library_search_page: {
@@ -1050,6 +1090,10 @@ export type Database = {
         Returns: number
       }
       songs_artists_search: { Args: { arr: string[] }; Returns: string }
+      sync_enrichment_recipe_activation: {
+        Args: { p_default_id: string; p_recipe_ids: string[] }
+        Returns: undefined
+      }
       sync_playlist_spotify_metadata: {
         Args: { p_playlists: Json }
         Returns: {

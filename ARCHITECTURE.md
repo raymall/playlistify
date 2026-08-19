@@ -115,7 +115,9 @@ the same commit (rule in `AGENTS.md`).
   `user_songs`, `playlists`, `playlist_songs`, `llm_models`, and
   `unmatched_tags`. Guarded re-enrichment adds `enrichment_recipes`,
   `song_enrichment_jobs`, immutable `song_enrichment_attempts`, and private
-  `user_{genre,mood}_suppressions`.
+  `user_{genre,mood}_suppressions`; recipe snapshots add service-role-only
+  `vocabulary_snapshots` (frozen approved lists, shared by content hash) and
+  the snapshot columns + immutability trigger on `enrichment_recipes`.
   Service-role RPCs own job enqueue/claim/release, attempt recording, atomic
   promotion, and outcome counts. Authenticated
   RPCs expose effective tag names, selectable songs, matching
