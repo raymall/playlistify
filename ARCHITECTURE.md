@@ -35,9 +35,10 @@ the same commit (rule in `AGENTS.md`).
 - `public/` — static assets, including the Chandler hugging cutout shown on the
   `/` landing page.
 - `lib/ai/` — `providers.ts` (server-only provider → AI SDK factory map;
-  `resolveProviderModel`, non-throwing — callers map its error variant to
-  their own failure path), `chat-model.ts` (resolves the chat model from the
-  `CHAT_MODEL` env var, not the catalog).
+  `resolveProviderModel` and `resolveProviderEffortOptions` — how each
+  provider spells a reasoning effort — both non-throwing: callers map the
+  error variant to their own failure path), `chat-model.ts` (resolves the
+  chat model from the `CHAT_MODEL` env var, not the catalog).
 - `lib/api/` — `route-helpers.ts`: shared JSON error response + `requireUser`,
   the auth gate every `/api/*` handler uses (server-only).
 - `lib/auth/` — `spotify.ts` (browser-side OAuth kick-off; scopes live here),
@@ -62,13 +63,17 @@ the same commit (rule in `AGENTS.md`).
 - `lib/landing/` — client-safe landing-page copy and the complete shuffled
   tagline-loop builder.
 - `lib/enrichment/` — `engine.ts` (enqueue/claim loop + structured-output
-  call), `recipes.ts` (recipe, queue, lease, and counts RPC contracts, plus the
-  `EnrichmentRecipeSummary` the Library reports), `candidates.ts` (per-song
-  normalization), `promotion.ts` (attempt + atomic promotion calls),
-  `policy.ts` (pure promotion matrix, mirrored from SQL for
-  `verify:re-enrichment`), `confidence.ts` (client-safe confidence bands, the
-  per-rank answer budget, and the shared-result/budget copy), and `schema.ts`
-  (zod output schema, confidence threshold, `ai_attributes` parser).
+  call; everything the call is shaped by comes off the claim's frozen recipe
+  snapshot), `recipes.ts` (recipe, queue, lease, and counts RPC contracts,
+  `isSupportedRecipe` — the capability check over a claimed snapshot — plus
+  the `EnrichmentRecipeSummary` the Library reports), `identity.ts` (the
+  per-field formatters `identity_fields` name; the song line is built from
+  them), `candidates.ts` (per-song normalization), `promotion.ts` (attempt +
+  atomic promotion calls), `policy.ts` (pure promotion matrix, mirrored from
+  SQL for `verify:re-enrichment`), `confidence.ts` (client-safe confidence
+  bands, the per-rank answer budget, and the shared-result/budget copy), and
+  `schema.ts` (the bounded `output_spec` parser + per-recipe zod schema
+  builder, confidence threshold, `ai_attributes` parser).
 - `lib/spotify/` — `api.ts` (typed Web API client), `import.ts` (Liked Songs
   batch import), `token.ts` (Spotify access-token refresh).
 - `lib/playlists/` — playlist creation and post-creation management:
@@ -168,7 +173,7 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   hiding, and personal tags. The row's title cell is its `<th scope='row'>`, so
   the tag editor is announced against a song name. There is **no** per-song
   analysis control: the panel names the current recipe (model, effort, batch
-  size, versions, rank) beside **Enrich**, plus a line per stronger
+  size, rank, snapshot hash) beside **Enrich**, plus a line per stronger
   recipe the next run would escalate to and how many songs move, and each row's
   tag popover names the recipe behind that song's own result — `Recipe:
 current` when it is the default, otherwise the recipe's label. URL
@@ -282,9 +287,15 @@ caller's library. The engine passes only what is left of
 own `batch_size`, so batch size and reasoning effort are recipe identity rather
 than deployment config. The server generates the lease token before
 the claim RPC; replaying a lost HTTP response with that same token returns the
-already-leased batch instead of reserving another. The server-selected recipe
-resolves through `lib/ai/providers.ts`, and one AI SDK v7 `generateText` +
-`Output.object` call produces candidates.
+already-leased batch instead of reserving another. The claim returns the
+recipe's complete frozen snapshot — system prompt, identity fields, bounded
+output spec, and the approved vocabulary as it was when the recipe was minted —
+so a batch reads nothing else. The model and the recipe's reasoning effort
+resolve through `lib/ai/providers.ts`, and one AI SDK v7 `generateText` +
+`Output.object` call, against a schema built from the output spec, produces
+candidates. A snapshot this build cannot execute faithfully — unknown identity
+field, unparseable spec, unmapped provider or effort — is released unclaimed
+for a safe retry (`isSupportedRecipe` + the two provider resolvers).
 
 Every claimed song produces an immutable attempt: recognized, unknown,
 omitted, or failed. `promote_song_enrichment_attempt` locks the attempt, job,
@@ -362,9 +373,12 @@ count in `library_enrichment_recipes()` sits behind an uncorrelated
 is never evaluated and the report costs three index lookups instead of a scan
 of the caller's library.
 
-The vocabulary remains **closed**: the prompt carries only `is_approved`
-`genres`/`moods`; `matchApprovedVocabulary` keeps exact matches and drops
-everything else, and `unmatched_tags` records the dropped names. The gate is
+The vocabulary remains **closed**: the prompt carries only approved
+`genres`/`moods` — from the recipe's frozen `vocabulary_snapshots` row, so
+approving a tag changes nothing until `recipe:sync` mints a new recipe;
+`matchApprovedVocabulary` then validates the response against the _live_
+approved list (correct for `unmatched_tags` review), keeps exact matches and
+drops everything else, and `unmatched_tags` records the dropped names. The gate is
 enforced twice — app-side there, and again in SQL, where
 `promote_song_enrichment_attempt` resolves names to ids through an
 `is_approved` join, so a link to an unapproved row cannot be written even by a
@@ -545,12 +559,14 @@ writes the rounded value — which keeps the cutoff auditable in SQL and
 `verify:enrichment` truthful.
 
 **The closed vocabulary is prompt-enforced, not schema-enforced.** The zod
-schema still types genres/moods as `z.array(z.string())`. A hard
+schema is built per recipe from its bounded `output_spec`, but genres/moods
+stay `z.array(z.string())` with only a length cap. A hard
 `z.enum(approvedNames)` would make off-list output impossible — but also
 invisible, so nothing would reach `unmatched_tags` and the signal for growing
-the approved lists would disappear. It also needs a per-request dynamic schema
-built with an `as` cast the TS rules discourage. Deliberate trade; flip only
-with eyes open.
+the approved lists would disappear. Deliberate trade; flip only with eyes
+open. Relatedly, `output_spec` stores bounded parameters, never raw JSON
+Schema — the database must not be able to inject an arbitrary shape into a
+billed API call.
 
 **Canonical enrichment writes only happen in atomic promotion.**
 `SongMetadata` (`lib/spotify/import.ts`) pins import upserts to Spotify columns.
@@ -579,8 +595,9 @@ trigger to get there.
 
 **gpt-5 models reject non-default `temperature`,** and a small
 `maxOutputTokens` starves reasoning tokens (they count against the cap),
-truncating the JSON. The engine sets neither; `reasoningEffort` via
-`providerOptions.openai` is the intended cost/quality knob.
+truncating the JSON. The engine sets neither; the recipe's `reasoning_effort`,
+delivered through `resolveProviderEffortOptions`, is the intended cost/quality
+knob.
 
 **`maxDuration` is a ceiling, not a target.** `/api/enrich` exports
 `maxDuration = 300` (Vercel Fluid ceiling on Hobby), but legacy non-Fluid

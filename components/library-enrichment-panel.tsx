@@ -147,7 +147,8 @@ const SummaryCount = ({ count, label }: { count: number; label: string }) => (
 /**
  * Everything that makes one analysis differ from another, on one line: which
  * model, how hard it was asked to think, how many songs it weighs at once, and
- * the three versions that pin the prompt, the vocabulary, and the output shape.
+ * the snapshot hash that pins the prompt, the identity, the output shape, and
+ * the frozen vocabulary.
  */
 const describeRecipe = (recipe: EnrichmentRecipeSummary): string =>
   [
@@ -155,9 +156,7 @@ const describeRecipe = (recipe: EnrichmentRecipeSummary): string =>
     `${recipe.reasoningEffort} effort`,
     `${recipe.batchSize} songs per call`,
     `rank ${recipe.enrichmentRank}`,
-    recipe.promptVersion,
-    recipe.vocabularyVersion,
-    recipe.identityVersion,
+    `snapshot ${recipe.contentHash.slice(0, 12)}`,
   ].join(' · ')
 
 export const LibraryEnrichmentPanel = ({

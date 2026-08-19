@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 
 import { type SupabaseClient } from '@supabase/supabase-js'
 
+import { isKnownIdentityField } from '@/lib/enrichment/identity'
+import { readEnrichmentOutputSpec } from '@/lib/enrichment/schema'
 import { type Database } from '@/lib/supabase/types'
 
 type AdminClient = SupabaseClient<Database>
@@ -31,9 +33,8 @@ export type EnrichmentRecipeSummary = {
   reasoningEffort: string
   batchSize: number
   enrichmentRank: number
-  promptVersion: string
-  vocabularyVersion: string
-  identityVersion: string
+  /** Hash of the complete snapshot — prompt, identity, spec, vocabulary. */
+  contentHash: string
   canEnrichAllSongs: boolean
   isCurrent: boolean
   /** Songs the next run would send here instead of the current recipe. */
@@ -60,9 +61,7 @@ export const getLibraryEnrichmentRecipes = async (
     reasoningEffort: row.reasoning_effort,
     batchSize: row.batch_size,
     enrichmentRank: row.enrichment_rank,
-    promptVersion: row.prompt_version,
-    vocabularyVersion: row.vocabulary_version,
-    identityVersion: row.identity_version,
+    contentHash: row.content_hash,
     canEnrichAllSongs: row.enrich_all_songs,
     isCurrent: row.is_current,
     escalatingSongs: row.escalating_songs,
@@ -80,10 +79,12 @@ export type ClaimedEnrichmentJob = {
   releaseDate: string | null
   provider: string
   modelId: string
-  promptVersion: string
-  vocabularyVersion: string
-  identityVersion: string
   reasoningEffort: string
+  systemPrompt: string
+  identityFields: string[]
+  outputSpec: unknown
+  genreNames: string[]
+  moodNames: string[]
 }
 
 export const enqueueLibraryEnrichmentJobs = async (
@@ -146,10 +147,12 @@ type ClaimedJobRow = {
   release_date: string | null
   provider: string
   model_id: string
-  prompt_version: string
-  vocabulary_version: string
-  identity_version: string
   reasoning_effort: string
+  system_prompt: string
+  identity_fields: string[]
+  output_spec: unknown
+  genre_names: string[]
+  mood_names: string[]
 }
 
 const readClaimedJob = (row: ClaimedJobRow): ClaimedEnrichmentJob => ({
@@ -163,10 +166,12 @@ const readClaimedJob = (row: ClaimedJobRow): ClaimedEnrichmentJob => ({
   releaseDate: row.release_date,
   provider: row.provider,
   modelId: row.model_id,
-  promptVersion: row.prompt_version,
-  vocabularyVersion: row.vocabulary_version,
-  identityVersion: row.identity_version,
   reasoningEffort: row.reasoning_effort,
+  systemPrompt: row.system_prompt,
+  identityFields: row.identity_fields,
+  outputSpec: row.output_spec,
+  genreNames: row.genre_names,
+  moodNames: row.mood_names,
 })
 
 export const claimEnrichmentJobs = async (
@@ -189,33 +194,18 @@ export const claimEnrichmentJobs = async (
 }
 
 /**
- * Both generations run on this code path: the approved lists are read from the
- * database per batch, so a vocabulary revision changes the prompt's contents
- * without changing how the prompt is built. A recipe naming an unknown version
- * is released unclaimed rather than guessed at.
+ * Capability check over the claimed snapshot, not a version-literal match:
+ * the prompt is present, the output spec parses into the bounded shape this
+ * build understands, and every identity field has a formatter. A recipe this
+ * build cannot execute faithfully is released unclaimed rather than guessed
+ * at. Provider and effort get the same treatment in the engine, through
+ * `resolveProviderModel` / `resolveProviderEffortOptions`.
  */
-const SUPPORTED_VOCABULARY_VERSIONS = new Set([
-  'vocabulary-v1',
-  'vocabulary-v2',
-])
-
-/**
- * The recipe chooses the effort, so an unrecognized value is released with the
- * rest of the identity checks rather than guessed at — silently substituting a
- * default would bill an answer the recipe never asked for.
- */
-const SUPPORTED_REASONING_EFFORTS = new Set([
-  'minimal',
-  'low',
-  'medium',
-  'high',
-])
-
 export const isSupportedRecipe = (job: ClaimedEnrichmentJob): boolean =>
-  job.promptVersion === 'prompt-v1' &&
-  SUPPORTED_VOCABULARY_VERSIONS.has(job.vocabularyVersion) &&
-  job.identityVersion === 'identity-v1' &&
-  SUPPORTED_REASONING_EFFORTS.has(job.reasoningEffort)
+  job.systemPrompt.trim() !== '' &&
+  readEnrichmentOutputSpec(job.outputSpec) !== null &&
+  job.identityFields.length > 0 &&
+  job.identityFields.every(isKnownIdentityField)
 
 export const releaseClaimedJobs = async (
   admin: AdminClient,

@@ -1,12 +1,16 @@
 import { generateText, Output } from 'ai'
 
-import { resolveProviderModel } from '@/lib/ai/providers'
+import {
+  resolveProviderEffortOptions,
+  resolveProviderModel,
+} from '@/lib/ai/providers'
 import {
   failedCandidate,
   normalizeCandidate,
   normalizeCandidateTagList,
   omittedCandidate,
 } from '@/lib/enrichment/candidates'
+import { describeSongIdentity } from '@/lib/enrichment/identity'
 import { recordAndPromoteCandidate } from '@/lib/enrichment/promotion'
 import {
   type ClaimedEnrichmentJob,
@@ -18,8 +22,9 @@ import {
   releaseClaimedJobs,
 } from '@/lib/enrichment/recipes'
 import {
+  buildEnrichmentBatchSchema,
   type EnrichedSong,
-  enrichmentBatchSchema,
+  readEnrichmentOutputSpec,
 } from '@/lib/enrichment/schema'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { matchApprovedVocabulary } from '@/lib/vocabulary'
@@ -46,21 +51,6 @@ export type EnrichBatchResponse =
 const DEFAULT_MAX_SONGS_PER_RUN = 500
 const MIN_MAX_SONGS_PER_RUN = 1
 const MAX_MAX_SONGS_PER_RUN = 5000
-
-const SYSTEM_PROMPT = `You are a music-metadata expert. For each numbered song in the user message, return one entry in "songs" with every schema field:
-
-- spotify_track_id: echo the id exactly as given.
-- confidence: 0-1, how certain you are that you know this exact recording.
-- genres (max 4) and moods (max 5): choose ONLY from the approved vocabulary lists in the user message, copying each tag verbatim. Never invent, translate, combine, or add a tag that is not on the lists — off-list tags are discarded. If nothing on a list fits, return fewer tags or none. Genres describe the musical style; moods the emotional feel.
-- energy: 1 (calm) to 5 (intense).
-- tempo_feel: slow, mid, or fast.
-- era: the decade or scene the recording belongs to, e.g. "1990s".
-- instrumentation (max 6): prominent instruments or production elements.
-- descriptors (max 8): short free-form qualities, e.g. "driving", "lo-fi".
-
-If you do not recognize a song with reasonable certainty, set confidence below 0.4, return empty arrays for genres, moods, instrumentation, and descriptors, era as an empty string, energy 1, and tempo_feel "mid". Never guess attributes for a song you do not recognize.
-
-Return every input song exactly once — same count, same ids.`
 
 type EnrichmentFailure = {
   status: 'error'
@@ -90,16 +80,12 @@ const readEnvInt = (
   return Math.min(max, Math.max(min, parsed))
 }
 
+/** The recording, described by exactly the fields the recipe froze. */
 const describeSong = (job: ClaimedEnrichmentJob, index: number): string => {
-  const title = job.title ?? 'unknown title'
-  const artists =
-    job.artists !== null && job.artists.length > 0
-      ? job.artists.join(', ')
-      : 'unknown artist'
-  const album = job.album ?? 'unknown'
-  const year =
-    job.releaseDate !== null ? job.releaseDate.slice(0, 4) : 'unknown'
-  return `${index + 1}. ${job.spotifyTrackId} — "${title}" by ${artists} (album: ${album}, released: ${year})`
+  const identity = describeSongIdentity(job, job.identityFields)
+  return `${index + 1}. ${job.spotifyTrackId}${
+    identity === '' ? '' : ` — ${identity}`
+  }`
 }
 
 const buildUserPrompt = (
@@ -131,26 +117,6 @@ const logUnmatchedTags = async (
   })
   if (error !== null) {
     console.error(`[enrich] unmatched ${kind} log failed: ${error.message}`)
-  }
-}
-
-const loadApprovedVocabulary = async (
-  admin: ReturnType<typeof createAdminClient>,
-) => {
-  const [genreResult, moodResult] = await Promise.all([
-    admin.from('genres').select('name').eq('is_approved', true).order('name'),
-    admin.from('moods').select('name').eq('is_approved', true).order('name'),
-  ])
-  if (genreResult.error !== null) {
-    return { status: 'error' as const, message: genreResult.error.message }
-  }
-  if (moodResult.error !== null) {
-    return { status: 'error' as const, message: moodResult.error.message }
-  }
-  return {
-    status: 'ok' as const,
-    genreNames: genreResult.data.map((row) => row.name),
-    moodNames: moodResult.data.map((row) => row.name),
   }
 }
 
@@ -231,16 +197,19 @@ type ClaimedRunResult =
 
 /**
  * Prompt, structured-output call, vocabulary match, and promotion for one
- * claimed same-recipe batch.
+ * claimed same-recipe batch. Everything the call is shaped by — prompt,
+ * identity fields, output spec, vocabulary, effort — comes off the claim's
+ * frozen snapshot; the only per-batch reads left are the promotion writes.
  */
 const runClaimedJobs = async (
   admin: ReturnType<typeof createAdminClient>,
   jobs: ClaimedEnrichmentJob[],
   firstJob: ClaimedEnrichmentJob,
 ): Promise<ClaimedRunResult> => {
-  if (!isSupportedRecipe(firstJob)) {
+  const outputSpec = readEnrichmentOutputSpec(firstJob.outputSpec)
+  if (!isSupportedRecipe(firstJob) || outputSpec === null) {
     await releaseForSafeRetry(admin, jobs)
-    return fail('recipe resolution', 'Recipe version is not supported', true)
+    return fail('recipe resolution', 'Recipe snapshot is not supported', true)
   }
 
   const resolvedModel = resolveProviderModel(
@@ -252,10 +221,13 @@ const runClaimedJobs = async (
     return fail('model resolution', resolvedModel.message, true)
   }
 
-  const vocabulary = await loadApprovedVocabulary(admin)
-  if (vocabulary.status === 'error') {
+  const effortOptions = resolveProviderEffortOptions(
+    firstJob.provider,
+    firstJob.reasoningEffort,
+  )
+  if (effortOptions.status === 'error') {
     await releaseForSafeRetry(admin, jobs)
-    return fail('approved vocabulary', vocabulary.message, true)
+    return fail('effort resolution', effortOptions.message, true)
   }
 
   let batch
@@ -263,16 +235,10 @@ const runClaimedJobs = async (
     const result = await generateText({
       model: resolvedModel.model,
       maxRetries: 4,
-      output: Output.object({ schema: enrichmentBatchSchema }),
-      instructions: SYSTEM_PROMPT,
-      prompt: buildUserPrompt(
-        jobs,
-        vocabulary.genreNames,
-        vocabulary.moodNames,
-      ),
-      providerOptions: {
-        openai: { reasoningEffort: firstJob.reasoningEffort },
-      },
+      output: Output.object({ schema: buildEnrichmentBatchSchema(outputSpec) }),
+      instructions: firstJob.systemPrompt,
+      prompt: buildUserPrompt(jobs, firstJob.genreNames, firstJob.moodNames),
+      providerOptions: effortOptions.providerOptions,
     })
     batch = result.output
   } catch (error) {
