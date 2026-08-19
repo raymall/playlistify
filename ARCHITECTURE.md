@@ -34,6 +34,11 @@ the same commit (rule in `AGENTS.md`).
   Touch only to restyle a primitive; add new ones via the shadcn CLI.
 - `public/` — static assets, including the Chandler hugging cutout shown on the
   `/` landing page.
+- `recipes/` — the authored enrichment-recipe catalog: `definitions.ts` (typed
+  list of every recipe — key, model, effort, batch size, rank, prompt file,
+  identity fields, output spec, enabled/default flags) and `prompts/*.md` (the
+  prompt prose, one file per revision, for clean diffs). `npm run recipe:sync`
+  turns this into `enrichment_recipes` rows; nothing at runtime reads it.
 - `lib/ai/` — `providers.ts` (server-only provider → AI SDK factory map;
   `resolveProviderModel` and `resolveProviderEffortOptions` — how each
   provider spells a reasoning effort — both non-throwing: callers map the
@@ -104,7 +109,12 @@ the same commit (rule in `AGENTS.md`).
   guards / abort-aware sleep / the shadcn `cn()` class merger (all importable
   from server and client code).
 - `scripts/` — Node ops + verification scripts (`npm run verify:*`,
-  `gen:types`); each file's header comment says what it proves. `verify-re-enrichment.mts` runs the promotion matrix as pure policy
+  `gen:types`, `recipe:sync`); each file's header comment says what it proves.
+  `sync-recipes.mts` (`npm run recipe:sync`) hashes `recipes/definitions.ts`
+  with a live approved-vocabulary snapshot and mints/activates
+  `enrichment_recipes` rows — dry-run by default, `-- --yes` to write; a fresh
+  database has no recipes until it runs, so it is part of environment setup.
+  `verify-re-enrichment.mts` runs the promotion matrix as pure policy
   tests, then checks the remote queue/attempt/canonical and RLS invariants —
   it is the executable form of the guarded-re-enrichment test matrix.
   `verify-playlists.mts` live-checks Spotify playlist create, list, add,
@@ -113,8 +123,11 @@ the same commit (rule in `AGENTS.md`).
   `verify-genres.mts`, and `verify-chat-prompt.mts` cover their own domains,
   and `exercise-refresh.mts` probes the Spotify token
   path. `check-node-version.mjs` enforces Node 24 before dev and build; the
-  shared env guard lives in `scripts/lib/env.mjs` and the shared PASS/FAIL
-  checker + head-count helper in `scripts/lib/verify.mjs`.
+  shared env guard lives in `scripts/lib/env.mjs`, the shared PASS/FAIL
+  checker + head-count helper in `scripts/lib/verify.mjs`, and the canonical
+  JSON + content-hash helpers both recipe scripts share in
+  `scripts/lib/recipe-hash.ts` (the database stores these hashes, it never
+  recomputes them).
 - `supabase/migrations/` — schema source of truth. Core tables are `profiles`,
   `spotify_tokens`, `songs`, `genres`, `moods`, AI and personal tag links,
   `user_songs`, `playlists`, `playlist_songs`, `llm_models`, and
@@ -627,24 +640,27 @@ During an outage, navigations fail `getUser()` fast and fall back to the
 If a proxy-level hard auth gate is ever added, it needs the retryable-vs-real
 distinction that `/api/*` gets from `requireUser`.
 
-**Model and recipe rows are operational data.** The initial model catalog and
-legacy recipe snapshots were seeded once. Models and versioned recipes are
-owner-curated in Supabase Studio thereafter; prompt, vocabulary, or identity
-changes create a new recipe instead of mutating old attempt identity. Exactly
-one enabled recipe is the default for pending work. Do not add recurring seed
-migrations that fight Studio edits or resurrect deleted rows.
+**Models are Studio-curated; recipes are sync-authored.** The `llm_models`
+catalog remains operational data edited in Supabase Studio. Recipe rows are
+not: they are minted from `recipes/definitions.ts` by `npm run recipe:sync`,
+which snapshots the live approved vocabulary, hashes the complete method, and
+inserts a row per unseen hash — the unique `content_hash` index is what makes
+"changing a parameter mints a new recipe" a database guarantee rather than a
+convention, and a trigger keeps everything except `label`/`enabled`/
+`is_default` immutable. Exactly one enabled recipe is the default for pending
+work (`sync_enrichment_recipe_activation` swaps the set atomically). Do not
+edit recipe rows in Studio, and do not add seed migrations for them.
 
-A vocabulary revision is the one case that reaches the recipe table from a
-migration, because the approved `genres`/`moods` rows it depends on are
-themselves migrated. `20260814003544_widen_mood_vocabulary.sql` is the shape to
-copy: approve the new names, disable the outgoing generation, then insert a
-replacement recipe per model carrying the same rank, prompt and identity at the
-new `vocabulary_version`. Ranks are preserved so no song's eligibility moves,
-and `song_enrichment_attempts` keeps pointing at the recipe it actually ran
-under. Every version the app can still run is listed in `isSupportedRecipe`
-([lib/enrichment/recipes.ts](lib/enrichment/recipes.ts)) — a claimed job naming
-an unlisted version is released rather than guessed at, so that list and the
-catalog must be updated together.
+A vocabulary revision is therefore two steps: approve the names by migration
+(the `genres`/`moods` rows are themselves migrated data), then run
+`recipe:sync` to mint recipes that freeze the new lists — until that mint,
+approvals change nothing a run sees. Keep ranks stable across a mint so no
+song's eligibility moves; `song_enrichment_attempts` keeps pointing at the
+exact recipe row it ran under. What the app can execute is no longer a version
+list but a capability check — `isSupportedRecipe`
+([lib/enrichment/recipes.ts](lib/enrichment/recipes.ts)) plus the provider
+resolvers — and a claimed snapshot this build cannot execute faithfully is
+released rather than guessed at.
 
 ## Where does new code go
 
@@ -664,5 +680,10 @@ catalog must be updated together.
   verify:rls → typecheck; commit migration + types together).
 - Script → `scripts/*.mjs|mts` with a header comment + an npm script using
   `--env-file=.env.local`.
+- Recipe or prompt change → edit `recipes/definitions.ts` /
+  `recipes/prompts/*.md`, then `npm run recipe:sync` (dry-run first) and
+  `npm run verify:recipes`. Never edit an `enrichment_recipes` row. A fresh
+  database has no recipes until the sync runs — it is part of environment
+  setup.
 - Env var → `.env.local`, documented in `.env.example`; server-side only
   unless prefixed `NEXT_PUBLIC_`.

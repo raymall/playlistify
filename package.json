@@ -19,6 +19,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "gen:types": "node --env-file=.env.local scripts/gen-types.mjs",
+    "recipe:sync": "node --env-file=.env.local --import tsx scripts/sync-recipes.mts",
     "verify:rls": "node --env-file=.env.local scripts/verify-rls.mjs",
     "verify:import": "node --env-file=.env.local scripts/verify-import.mjs",
     "verify:enrichment": "node --env-file=.env.local scripts/verify-enrichment.mjs",
