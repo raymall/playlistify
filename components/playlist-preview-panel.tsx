@@ -290,9 +290,9 @@ export const PlaylistPreviewPanel = ({
   return (
     <section
       aria-label='Playlist preview'
-      className='flex h-full min-h-0 flex-col border-2 border-border'
+      className='flex h-full min-h-0 w-full max-w-full min-w-0 flex-col overflow-x-hidden border-2 border-border'
     >
-      <div className='grid shrink-0 border-b-2 border-border md:grid-cols-[minmax(12rem,0.72fr)_minmax(0,1.28fr)]'>
+      <div className='grid min-w-0 shrink-0 border-b-2 border-border md:grid-cols-[minmax(12rem,0.72fr)_minmax(0,1.28fr)]'>
         <div className='min-h-56 bg-muted md:min-h-72'>
           <PlaylistArtworkPlaceholder imageUrls={coverArtUrls} />
         </div>
@@ -319,7 +319,7 @@ export const PlaylistPreviewPanel = ({
                 Description
               </label>
               <Textarea
-                className='min-h-16 resize-none rounded-none border-0 border-b border-control bg-transparent px-0 py-2 text-sm leading-relaxed focus-visible:border-control-ring focus-visible:ring-0 dark:bg-transparent'
+                className='min-h-16 resize-none rounded-none border-0 border-b border-control bg-transparent px-0 py-2 text-base leading-relaxed focus-visible:border-control-ring focus-visible:ring-0 md:text-sm dark:bg-transparent'
                 id='playlist-description'
                 maxLength={PLAYLIST_DESCRIPTION_MAX}
                 rows={2}
@@ -374,7 +374,7 @@ export const PlaylistPreviewPanel = ({
 
       <div
         aria-label='Playlist tracks'
-        className='min-h-0 flex-1 overflow-y-auto px-4 py-2 sm:px-5'
+        className='min-h-0 max-w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 sm:px-5'
         role='region'
         tabIndex={0}
       >
@@ -386,7 +386,7 @@ export const PlaylistPreviewPanel = ({
               return (
                 <li
                   key={track.songId}
-                  className='flex items-center gap-4 py-3 first:pt-1'
+                  className='flex max-w-full min-w-0 items-center gap-4 py-3 first:pt-1'
                 >
                   {track.albumArtUrl !== null ? (
                     <Image

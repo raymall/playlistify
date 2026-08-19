@@ -2,62 +2,52 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import { LANDING_TAGLINES, pickNextTaglineIndex } from '@/lib/landing/taglines'
+import { createTaglineLoop, LANDING_TAGLINES } from '@/lib/landing/taglines'
 
-const SCRAMBLE_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/#?'
-const SCRAMBLE_STEP_MS = 18
-const SCRAMBLE_MIN_STEPS = 14
-const EXIT_MIN_STEPS = 10
-const TAGLINE_DWELL_MS = 1400
-const BETWEEN_TAGLINES_MS = 70
+const CHARACTER_FADE_MS = 180
+const CHARACTER_STAGGER_MS = 16
+const TAGLINE_DWELL_MS = 3200
+const BETWEEN_TAGLINES_MS = 140
 const TAGLINE_SEGMENTER = new Intl.Segmenter('en', { granularity: 'grapheme' })
 
-const randomCharacter = () =>
-  SCRAMBLE_CHARACTERS[Math.floor(Math.random() * SCRAMBLE_CHARACTERS.length)]
+type TaglinePhase = 'entering' | 'exiting' | 'visible'
 
-const buildScrambleFrame = (target: string, settledCharacters: number) =>
-  Array.from(TAGLINE_SEGMENTER.segment(target), ({ segment }) => segment)
-    .map((character, index) => {
-      if (character === ' ') return ' '
-      return index < settledCharacters ? character : randomCharacter()
-    })
-    .join('')
+const splitTagline = (tagline: string) =>
+  Array.from(TAGLINE_SEGMENTER.segment(tagline), ({ segment }) => segment)
 
-const buildExitFrame = (source: string, unsettledCharacters: number) => {
-  const characters = Array.from(
-    TAGLINE_SEGMENTER.segment(source),
-    ({ segment }) => segment,
-  )
-  const scrambleFrom = characters.length - unsettledCharacters
+const splitTaglineWords = (tagline: string) => {
+  let characterOffset = 0
 
-  return characters
-    .map((character, index) => {
-      if (character === ' ') return ' '
-      return index < scrambleFrom ? character : randomCharacter()
-    })
-    .join('')
+  return tagline.split(' ').map((word) => {
+    const characters = splitTagline(word)
+    const offset = characterOffset
+    characterOffset += characters.length + 1
+    return { characters, offset }
+  })
 }
 
+const getFadeSequenceMs = (tagline: string) =>
+  Math.max(0, splitTagline(tagline).length - 1) * CHARACTER_STAGGER_MS +
+  CHARACTER_FADE_MS
+
 /**
- * Continuously decodes one landing line into the next. This is deliberately a
- * character scramble rather than a literal airport-board treatment: the copy
- * stays typographic and the existing Wake canvas remains the visual event.
+ * Fades each line out character by character before revealing the next one.
+ * One shuffled, complete sequence repeats so no line can be skipped.
  */
 export const PlaylistifyMeshTagline = () => {
   const slotRef = useRef<HTMLDivElement>(null)
-  const [displayText, setDisplayText] = useState<string>(LANDING_TAGLINES[0])
+  const [taglineIndex, setTaglineIndex] = useState(0)
+  const [phase, setPhase] = useState<TaglinePhase>('visible')
 
   useEffect(() => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
     const slot = slotRef.current
-    let currentIndex = 0
-    let intervalId: number | undefined
+    const loop = createTaglineLoop()
+    let loopPosition = 0
     let timeoutId: number | undefined
 
-    const clearTimers = () => {
-      if (intervalId !== undefined) window.clearInterval(intervalId)
+    const clearTimer = () => {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId)
-      intervalId = undefined
       timeoutId = undefined
     }
 
@@ -66,61 +56,30 @@ export const PlaylistifyMeshTagline = () => {
       timeoutId = window.setTimeout(runExit, TAGLINE_DWELL_MS)
     }
 
-    const runEnter = (nextIndex: number) => {
-      if (reducedMotion.matches) return
-      const target = LANDING_TAGLINES[nextIndex]
-      const totalSteps = Math.max(
-        SCRAMBLE_MIN_STEPS,
-        Math.ceil(target.length * 0.7),
-      )
-      let step = 0
-
-      intervalId = window.setInterval(() => {
-        step += 1
-        const settledCharacters = Math.floor(
-          (step / totalSteps) * target.length,
-        )
-        setDisplayText(buildScrambleFrame(target, settledCharacters))
-
-        if (step < totalSteps) return
-        window.clearInterval(intervalId)
-        intervalId = undefined
-        currentIndex = nextIndex
-        setDisplayText(target)
-        scheduleExit()
-      }, SCRAMBLE_STEP_MS)
-    }
-
     const runExit = () => {
       if (reducedMotion.matches) return
-      const source = LANDING_TAGLINES[currentIndex]
-      const totalSteps = Math.max(
-        EXIT_MIN_STEPS,
-        Math.ceil(source.length * 0.5),
-      )
-      let step = 0
+      const currentIndex = loop[loopPosition]
+      setPhase('exiting')
 
-      intervalId = window.setInterval(() => {
-        step += 1
-        const unsettledCharacters = Math.ceil(
-          (step / totalSteps) * source.length,
-        )
-        setDisplayText(buildExitFrame(source, unsettledCharacters))
-
-        if (step < totalSteps) return
-        window.clearInterval(intervalId)
-        intervalId = undefined
-        setDisplayText('')
-        const nextIndex = pickNextTaglineIndex(currentIndex)
+      timeoutId = window.setTimeout(() => {
         timeoutId = window.setTimeout(() => {
-          runEnter(nextIndex)
+          loopPosition = (loopPosition + 1) % loop.length
+          const nextIndex = loop[loopPosition]
+          setTaglineIndex(nextIndex)
+          setPhase('entering')
+
+          timeoutId = window.setTimeout(() => {
+            setPhase('visible')
+            scheduleExit()
+          }, getFadeSequenceMs(LANDING_TAGLINES[nextIndex]))
         }, BETWEEN_TAGLINES_MS)
-      }, SCRAMBLE_STEP_MS)
+      }, getFadeSequenceMs(LANDING_TAGLINES[currentIndex]))
     }
 
     const handleReducedMotionChange = () => {
-      clearTimers()
-      setDisplayText(LANDING_TAGLINES[currentIndex])
+      clearTimer()
+      setTaglineIndex(loop[loopPosition])
+      setPhase('visible')
       scheduleExit()
     }
 
@@ -129,18 +88,50 @@ export const PlaylistifyMeshTagline = () => {
     scheduleExit()
 
     return () => {
-      clearTimers()
+      clearTimer()
       reducedMotion.removeEventListener('change', handleReducedMotionChange)
       if (slot !== null) delete slot.dataset.ready
     }
   }, [])
+
+  const tagline = LANDING_TAGLINES[taglineIndex]
+  const words = splitTaglineWords(tagline)
 
   return (
     <>
       <p className='sr-only'>{LANDING_TAGLINES[0]}</p>
       <div ref={slotRef} className='mesh-landing-tagline-slot'>
         <div aria-hidden className='mesh-landing-tagline'>
-          <p className='mesh-landing-tagline-line'>{displayText}</p>
+          <p className='mesh-landing-tagline-line' data-phase={phase}>
+            {words.map(({ characters, offset }, wordIndex) => (
+              <span
+                key={`${taglineIndex}-${wordIndex}`}
+                className='mesh-landing-tagline-word'
+              >
+                {characters.map((character, characterIndex) => (
+                  <span
+                    key={`${taglineIndex}-${wordIndex}-${characterIndex}`}
+                    className='mesh-landing-tagline-char'
+                    style={{
+                      animationDelay: `${(offset + characterIndex) * CHARACTER_STAGGER_MS}ms`,
+                    }}
+                  >
+                    {character}
+                  </span>
+                ))}
+                {wordIndex < words.length - 1 && (
+                  <span
+                    className='mesh-landing-tagline-char'
+                    style={{
+                      animationDelay: `${(offset + characters.length) * CHARACTER_STAGGER_MS}ms`,
+                    }}
+                  >
+                    {'\u00a0'}
+                  </span>
+                )}
+              </span>
+            ))}
+          </p>
         </div>
       </div>
     </>

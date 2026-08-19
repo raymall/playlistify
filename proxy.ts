@@ -30,7 +30,7 @@ function isPrefetch(request: NextRequest) {
  * Runs on every matched request (Next's middleware equivalent): refreshes
  * the Supabase session cookie, publishes the resolved identity to the render,
  * bounces signed-out users off protected pages, and lands signed-in users on
- * /chat instead of /. `/api/*` is matched (so sessions refresh) but never
+ * /library instead of /. `/api/*` is matched (so sessions refresh) but never
  * redirected — API routes gate on getUser() themselves.
  */
 export async function proxy(request: NextRequest) {
@@ -51,8 +51,8 @@ export async function proxy(request: NextRequest) {
     PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   ) {
     // Transient getUser() blip on a live session: let the navigation through
-    // instead of bouncing '/library' -> '/' -> '/chat'. Only a genuine logout
-    // (no auth cookie) redirects to the marketing page.
+    // instead of bouncing a live '/library' navigation through '/' and back.
+    // Only a genuine logout (no auth cookie) redirects to the marketing page.
     if (hasAuthCookie(request)) {
       return response
     }
@@ -62,10 +62,10 @@ export async function proxy(request: NextRequest) {
     return redirectWithCookies(url, response)
   }
 
-  // Signed-in users land on /chat, not the marketing page.
+  // Signed-in users land on /library, not the marketing page.
   if (user && pathname === '/') {
     const url = request.nextUrl.clone()
-    url.pathname = '/chat'
+    url.pathname = '/library'
     return redirectWithCookies(url, response)
   }
 

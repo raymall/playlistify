@@ -162,8 +162,10 @@ an ellipsis and preserve the button width when practical.
 
 - The existing WebGL Wake background, tuning, and PLAYLISTIFY wordmark effect
   are unchanged.
-- Landing taglines dwell for `1400ms`, reverse-scramble out, pause for `70ms`,
-  then resolve the next line in `18ms` steps. The sequence loops indefinitely.
+- Landing taglines dwell for `3200ms`, fade out in `16ms` character steps,
+  pause for `140ms`, then fade the next line in character by character. One
+  complete shuffled order repeats indefinitely, so every line appears once per
+  loop.
 - Under `prefers-reduced-motion: reduce`, the tagline remains readable and
   static, and the existing Wake canvas renders its reduced-motion frame.
 - UI transitions are limited to color, border, and short focus/pressed feedback.
@@ -173,7 +175,8 @@ an ellipsis and preserve the button width when practical.
 ### Homepage
 
 The Wake field and PLAYLISTIFY wordmark remain the primary visual. The tagline
-is plain mono text—never drawn as an airport sign—and continuously decodes. The
+is plain mono text—never drawn as an airport sign—and fades one character at a
+time. The
 Spotify action is a clean outlined control. Chandler remains pinned at bottom
 right at the same scale across every page.
 

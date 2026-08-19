@@ -10,7 +10,20 @@ export const LANDING_TAGLINES = [
   'Nothing new. Everything you love.',
 ] as const
 
-export const pickNextTaglineIndex = (currentIndex: number) => {
-  const offset = 1 + Math.floor(Math.random() * (LANDING_TAGLINES.length - 1))
-  return (currentIndex + offset) % LANDING_TAGLINES.length
+/**
+ * Keeps the server-rendered first line stable, shuffles every remaining line
+ * once, then lets the caller repeat that complete order indefinitely.
+ */
+export const createTaglineLoop = () => {
+  const remaining = LANDING_TAGLINES.slice(1).map((_, index) => index + 1)
+
+  for (let index = remaining.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1))
+    const current = remaining[index]
+    const swap = remaining[swapIndex]
+    remaining[index] = swap
+    remaining[swapIndex] = current
+  }
+
+  return [0, ...remaining]
 }

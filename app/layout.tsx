@@ -1,6 +1,6 @@
 import './globals.css'
 
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Archivo, Archivo_Black, IBM_Plex_Mono } from 'next/font/google'
 import Image from 'next/image'
 import { ThemeProvider } from 'next-themes'
@@ -35,6 +35,14 @@ export const metadata: Metadata = {
     'Turn your Spotify library into AI-built playlists you describe in plain language.',
 }
 
+export const viewport: Viewport = {
+  themeColor: [
+    { color: '#f2efe6', media: '(prefers-color-scheme: light)' },
+    { color: '#11110f', media: '(prefers-color-scheme: dark)' },
+  ],
+  viewportFit: 'cover',
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -57,7 +65,7 @@ export default function RootLayout({
           <main className='flex-1'>{children}</main>
           <Image
             alt=''
-            className='global-chandler-cutout pointer-events-none fixed right-0 bottom-0 z-10 h-auto select-none'
+            className='global-chandler-cutout pointer-events-none fixed end-0 bottom-0 z-10 h-auto select-none'
             loading='eager'
             sizes='(max-width: 576px) 9rem, (min-width: 1600px) 25rem, 25vw'
             src={chandlerHuggingMeme}

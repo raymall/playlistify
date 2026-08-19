@@ -53,7 +53,7 @@ function ComboboxInput({ className, ...props }: ComboboxPrimitive.Input.Props) {
   return (
     <ComboboxPrimitive.Input
       className={cn(
-        'h-6 min-w-24 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground',
+        'h-6 min-w-24 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm',
         className,
       )}
       data-slot='combobox-input'

@@ -178,10 +178,11 @@ export default async function PlaylistsPage() {
           <p className='editorial-kicker'>03 / Made by Playlistify for you</p>
           <h1 className='editorial-title'>Playlists</h1>
         </div>
-        <div className='flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center'>
+        <div className='flex w-full items-start gap-2 sm:w-auto sm:items-center'>
           <Link
             className={buttonVariants({
-              className: 'w-full sm:w-auto',
+              className:
+                'min-w-0 flex-1 px-2 text-xs sm:flex-none sm:px-4 sm:text-sm',
               variant: 'outline',
             })}
             href='/chat'

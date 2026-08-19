@@ -6,12 +6,12 @@ export type PaginationSlot =
   { kind: 'page'; page: number } | { kind: 'gap'; key: 'start' | 'end' }
 
 /** Pages rendered either side of the current one. */
-export const PAGINATION_SIBLING_COUNT = 2
+export const PAGINATION_SIBLING_COUNT = 1
 
 /**
- * Always 1 and `pageCount`, plus `page ± 2`, with a gap wherever the run is
- * discontinuous — except when the gap would replace exactly one number, since
- * an ellipsis is wider than the digit it hides. Nine slots at most.
+ * Shows only the current page and its immediate siblings. First/last have
+ * dedicated controls in the component, so gaps stand in for longer omitted
+ * runs without repeating those destinations as numbered links.
  */
 export const buildPaginationSlots = (
   page: number,
@@ -20,27 +20,17 @@ export const buildPaginationSlots = (
   const total = Math.max(1, Math.trunc(pageCount))
   const current = Math.min(Math.max(Math.trunc(page), 1), total)
 
-  const pages = new Set([1, total])
-  for (
-    let offset = -PAGINATION_SIBLING_COUNT;
-    offset <= PAGINATION_SIBLING_COUNT;
-    offset += 1
-  ) {
-    const candidate = current + offset
-    if (candidate >= 1 && candidate <= total) pages.add(candidate)
+  const slots: PaginationSlot[] = []
+  const start = Math.max(1, current - PAGINATION_SIBLING_COUNT)
+  const end = Math.min(total, current + PAGINATION_SIBLING_COUNT)
+
+  if (start > 2) slots.push({ kind: 'gap', key: 'start' })
+
+  for (let value = start; value <= end; value += 1) {
+    slots.push({ kind: 'page', page: value })
   }
 
-  const slots: PaginationSlot[] = []
-  let previous = 0
-  for (const value of [...pages].sort((a, b) => a - b)) {
-    const missing = value - previous - 1
-    if (previous > 0 && missing === 1) {
-      slots.push({ kind: 'page', page: value - 1 })
-    } else if (previous > 0 && missing > 1) {
-      slots.push({ kind: 'gap', key: value <= current ? 'start' : 'end' })
-    }
-    slots.push({ kind: 'page', page: value })
-    previous = value
-  }
+  if (end < total - 1) slots.push({ kind: 'gap', key: 'end' })
+
   return slots
 }

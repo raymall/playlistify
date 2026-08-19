@@ -1,11 +1,14 @@
 'use client'
 
+import { XIcon } from 'lucide-react'
 import Image from 'next/image'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { LibraryConfidenceInfo } from '@/components/library-confidence-info'
 import { LibraryTagEditor } from '@/components/library-tag-editor'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
   Table,
   TableBody,
@@ -123,7 +126,7 @@ const SongArtwork = ({
   const classes =
     size === 'large'
       ? 'h-auto aspect-square w-full object-cover'
-      : 'size-16 object-cover sm:size-18'
+      : 'size-12 object-cover sm:size-18'
   const pixels = size === 'large' ? 560 : 72
 
   if (song.albumArtUrl === null) {
@@ -154,7 +157,13 @@ const SongArtwork = ({
   )
 }
 
-const SelectedSong = ({ song }: { song: LibrarySong }) => {
+type SelectedSongProps = {
+  className?: string
+  song: LibrarySong
+  onClose?: () => void
+}
+
+const SelectedSong = ({ className, song, onClose }: SelectedSongProps) => {
   const title = song.title ?? 'Untitled'
   const artists =
     song.artists !== null && song.artists.length > 0
@@ -168,8 +177,24 @@ const SelectedSong = ({ song }: { song: LibrarySong }) => {
   return (
     <aside
       aria-label={`Selected song: ${title}`}
-      className='border-2 border-border bg-background lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto'
+      className={cn(
+        'relative border-2 border-border bg-background lg:sticky lg:top-20',
+        className,
+      )}
     >
+      {onClose !== undefined && (
+        <div className='sticky top-3 z-20 h-0'>
+          <Button
+            aria-label={`Close details for ${title}`}
+            className='absolute end-3 bg-background/90 backdrop-blur-sm'
+            size='icon'
+            variant='outline'
+            onClick={onClose}
+          >
+            <XIcon aria-hidden='true' />
+          </Button>
+        </div>
+      )}
       <SongArtwork size='large' song={song} />
       <div className='flex flex-col gap-5 border-t-2 border-border p-4 sm:p-5'>
         <div className='flex flex-col gap-2'>
@@ -178,7 +203,11 @@ const SelectedSong = ({ song }: { song: LibrarySong }) => {
               Selected song
             </p>
             <Badge
-              className='justify-self-end'
+              className={cn(
+                'justify-self-end',
+                confidenceBand === 'pending' &&
+                  'border-current bg-transparent text-foreground',
+              )}
               variant={confidenceVariant[confidenceBand]}
             >
               {CONFIDENCE_BANDS[confidenceBand].label}
@@ -222,38 +251,97 @@ export const LibraryTable = ({
   songs,
 }: LibraryTableProps) => {
   const [selectedSongId, setSelectedSongId] = useState(songs.at(0)?.id)
+  const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false)
   const selectedSong =
     songs.find((song) => song.id === selectedSongId) ?? songs.at(0)
   const activeGenreNames = new Set(activeGenres)
   const activeMoodNames = new Set(activeMoods)
   const activeBandSet = new Set(activeBands)
 
+  useEffect(() => {
+    const mobile = window.matchMedia('(max-width: 1023px)')
+    const handleBreakpointChange = () => {
+      if (!mobile.matches) setIsMobilePanelOpen(false)
+    }
+
+    mobile.addEventListener('change', handleBreakpointChange)
+    return () => {
+      mobile.removeEventListener('change', handleBreakpointChange)
+    }
+  }, [])
+
   if (selectedSong === undefined) return null
+
+  const handleSelectSong = (songId: string) => {
+    setSelectedSongId(songId)
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      setIsMobilePanelOpen(true)
+    }
+  }
+
+  const handleMobilePanelOpenChange = (isOpen: boolean) => {
+    setIsMobilePanelOpen(isOpen)
+  }
 
   return (
     <div className='grid items-start gap-6 lg:grid-cols-[minmax(17rem,0.72fr)_minmax(0,1.75fr)] xl:gap-10'>
-      <SelectedSong song={selectedSong} />
+      <div className='hidden lg:block'>
+        <SelectedSong song={selectedSong} />
+      </div>
+
+      <Dialog
+        open={isMobilePanelOpen}
+        onOpenChange={handleMobilePanelOpenChange}
+      >
+        <DialogContent
+          className='top-0 right-0 bottom-0 left-auto h-dvh w-[min(92vw,28rem)] max-w-none translate-x-0 translate-y-0 gap-0 overflow-y-auto rounded-none border-0 border-s-2 border-border p-0 ring-0 duration-300 lg:hidden data-open:zoom-in-100 data-open:slide-in-from-right-full data-closed:zoom-out-100 data-closed:slide-out-to-right-full'
+          overlayClassName='duration-300'
+          showCloseButton={false}
+        >
+          <DialogTitle className='sr-only'>
+            Details for {selectedSong.title ?? 'Untitled'}
+          </DialogTitle>
+          <SelectedSong
+            className='border-0'
+            song={selectedSong}
+            onClose={() => {
+              setIsMobilePanelOpen(false)
+            }}
+          />
+        </DialogContent>
+      </Dialog>
 
       <div className='min-w-0 border-t-2 border-border'>
         <Table className='table-fixed'>
+          <colgroup>
+            <col className='w-14 sm:w-21' />
+            <col />
+            <col className='w-0 md:w-2/5' />
+            <col className='w-18 sm:w-28' />
+          </colgroup>
           <TableCaption className='sr-only'>
             Your imported Liked Songs, most recently liked first. Select artwork
             to inspect and edit a song.
           </TableCaption>
           <TableHeader>
             <TableRow className='border-border hover:bg-transparent'>
-              <TableHead className='w-22' scope='col'>
+              <TableHead className='px-0 sm:px-1' scope='col'>
                 Art
               </TableHead>
-              <TableHead className='w-1/3 text-left' scope='col'>
+              <TableHead className='px-1 text-left sm:px-2' scope='col'>
                 Title / Artist
               </TableHead>
-              <TableHead className='hidden w-2/5 md:table-cell' scope='col'>
+              <TableHead className='hidden md:table-cell' scope='col'>
                 Tags
               </TableHead>
-              <TableHead className='w-28 text-right' scope='col'>
-                <span className='inline-flex items-center gap-1'>
-                  Confidence
+              <TableHead
+                aria-label='Confidence'
+                className='px-0.5 text-right sm:px-2'
+                scope='col'
+              >
+                <span className='inline-flex items-center gap-0.5 sm:gap-1'>
+                  <span className='sm:hidden'>Conf.</span>
+                  <span className='hidden sm:inline'>Confidence</span>
                   <LibraryConfidenceInfo />
                 </span>
               </TableHead>
@@ -280,7 +368,7 @@ export const LibraryTable = ({
                     isSelected && 'bg-muted',
                   )}
                 >
-                  <TableCell className='py-3'>
+                  <TableCell className='px-0 py-2 sm:px-1 sm:py-3'>
                     <button
                       aria-label={`Select ${title} and show its details`}
                       aria-pressed={isSelected}
@@ -290,7 +378,7 @@ export const LibraryTable = ({
                       )}
                       type='button'
                       onClick={() => {
-                        setSelectedSongId(song.id)
+                        handleSelectSong(song.id)
                       }}
                     >
                       <SongArtwork
@@ -301,7 +389,7 @@ export const LibraryTable = ({
                     </button>
                   </TableCell>
                   <th
-                    className='p-2 text-left align-middle font-normal text-foreground'
+                    className='py-1 ps-1 pe-0 text-left align-middle font-normal text-foreground sm:p-2'
                     scope='row'
                   >
                     <div className='min-w-0'>
@@ -326,7 +414,7 @@ export const LibraryTable = ({
                       song={song}
                     />
                   </TableCell>
-                  <TableCell className='text-right'>
+                  <TableCell className='py-1 ps-0 pe-0.5 text-right sm:p-2'>
                     <div className='flex flex-col items-end gap-1'>
                       <Badge
                         className={cn(

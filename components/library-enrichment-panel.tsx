@@ -134,11 +134,11 @@ const parseResponse = (value: unknown): EnrichBatchResponse | null => {
 }
 
 const SummaryCount = ({ count, label }: { count: number; label: string }) => (
-  <div className='flex min-w-0 flex-col items-center border-s-2 border-border px-3 py-1 text-center first:border-s-0 sm:px-4'>
-    <span className='font-display text-2xl leading-none tabular-nums'>
+  <div className='flex min-w-0 flex-col items-center border-s-2 border-border px-1 py-1 text-center first:border-s-0 sm:px-4'>
+    <span className='font-display text-xl leading-none tabular-nums sm:text-2xl'>
       {count.toLocaleString()}
     </span>
-    <span className='mt-1 font-mono text-[0.6875rem] tracking-[0.08em] text-muted-foreground uppercase'>
+    <span className='mt-1 font-mono text-[0.625rem] tracking-[0.04em] text-muted-foreground uppercase sm:text-[0.6875rem] sm:tracking-[0.08em]'>
       {label}
     </span>
   </div>
@@ -424,6 +424,7 @@ export const LibraryEnrichmentPanel = ({
 
   return (
     <section
+      aria-busy={isActive}
       aria-label='Library analysis status'
       className='flex flex-col gap-6'
     >
@@ -438,7 +439,7 @@ export const LibraryEnrichmentPanel = ({
         </div>
       )}
 
-      <div className='grid w-full grid-cols-2 gap-y-4 sm:grid-cols-5 sm:gap-y-0'>
+      <div className='grid w-full grid-cols-5'>
         <SummaryCount count={counts.pending} label='Pending' />
         <SummaryCount count={counts.none} label='None' />
         <SummaryCount count={counts.low} label='Low' />
@@ -456,14 +457,16 @@ export const LibraryEnrichmentPanel = ({
           </div>
           <Progress
             aria-label='Library confidence progress'
-            className='w-full motion-reduce:[&_[data-slot=progress-indicator]]:transition-none [&_[data-slot=progress-track]]:h-2'
+            aria-valuetext={`${analyzed.toLocaleString()} enriched out of ${counts.total.toLocaleString()}${isActive ? '; enrichment in progress' : ''}`}
+            className='library-enrichment-progress w-full motion-reduce:[&_[data-slot=progress-indicator]]:transition-none [&_[data-slot=progress-track]]:h-2'
+            data-active={isActive}
             max={counts.total}
             value={analyzed}
           />
         </div>
-        <div className='flex flex-wrap items-center gap-3 lg:justify-end'>
+        <div className='flex w-full flex-col items-center gap-3 sm:flex-row lg:justify-end'>
           <Button
-            className='min-w-56'
+            className='w-full sm:w-auto sm:min-w-56'
             disabled={isActive || counts.eligible === 0}
             size='lg'
             onClick={handleStart}
@@ -473,6 +476,7 @@ export const LibraryEnrichmentPanel = ({
           </Button>
           {isActive && (
             <Button
+              className='w-full sm:w-auto'
               disabled={isPausing}
               variant='outline'
               onClick={handlePause}

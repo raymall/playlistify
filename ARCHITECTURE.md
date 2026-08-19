@@ -59,8 +59,8 @@ the same commit (rule in `AGENTS.md`).
   `LibraryTag` row shapes), `pagination.ts` (pure slot model), and
   `use-tag-suggestions.ts` (client-side debounced typeahead with a bounded
   module cache).
-- `lib/landing/` — client-safe landing-page copy and the never-repeat random
-  tagline picker.
+- `lib/landing/` — client-safe landing-page copy and the complete shuffled
+  tagline-loop builder.
 - `lib/enrichment/` — `engine.ts` (enqueue/claim loop + structured-output
   call), `recipes.ts` (recipe, queue, lease, and counts RPC contracts, plus the
   `EnrichmentRecipeSummary` the Library reports), `candidates.ts` (per-song
@@ -149,8 +149,8 @@ the same commit (rule in `AGENTS.md`).
 
 Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 
-- `/` — Wake animated mesh, continuously decoding liked-songs tagline, and
-  "Continue with Spotify"; proxy redirects signed-in users to `/chat`
+- `/` — Wake animated mesh, character-fading liked-songs tagline, and
+  "Continue with Spotify"; proxy redirects signed-in users to `/library`
   (`app/page.tsx`,
   `components/playlistify-mesh-landing.tsx`,
   `components/playlistify-mesh-tagline.tsx`,

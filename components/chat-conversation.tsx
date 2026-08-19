@@ -91,27 +91,47 @@ const ToolActivity = ({ part }: { part: ToolUIPart }) => {
   )
 }
 
-const MessageParts = ({ message }: { message: UIMessage }) => (
-  <>
-    {message.parts.map((part, index) => {
-      if (part.type === 'text') {
-        if (part.text.trim().length === 0) return null
-        return (
-          <p
-            key={index}
-            className='text-sm whitespace-pre-wrap text-foreground'
-          >
-            {part.text}
-          </p>
-        )
-      }
-      if (isStaticToolUIPart(part)) {
-        return <ToolActivity key={index} part={part} />
-      }
-      return null
-    })}
-  </>
-)
+const EXACT_DUPLICATE_TEXT = /^([\s\S]{20,}?)\s+\1$/
+
+const collapseExactDuplicateText = (value: string): string => {
+  const text = value.trim()
+  return EXACT_DUPLICATE_TEXT.exec(text)?.[1] ?? text
+}
+
+const MessageParts = ({ message }: { message: UIMessage }) => {
+  const renderedAssistantText = new Set<string>()
+
+  return (
+    <>
+      {message.parts.map((part, index) => {
+        if (part.type === 'text') {
+          const text = collapseExactDuplicateText(part.text)
+          if (text.length === 0) return null
+          const normalizedText = text.replace(/\s+/g, ' ')
+          if (
+            message.role === 'assistant' &&
+            renderedAssistantText.has(normalizedText)
+          ) {
+            return null
+          }
+          renderedAssistantText.add(normalizedText)
+          return (
+            <p
+              key={index}
+              className='text-sm whitespace-pre-wrap text-foreground'
+            >
+              {text}
+            </p>
+          )
+        }
+        if (isStaticToolUIPart(part)) {
+          return <ToolActivity key={index} part={part} />
+        }
+        return null
+      })}
+    </>
+  )
+}
 
 /** Latest tool-activity string, for the live region. */
 const deriveLiveAnnouncement = (

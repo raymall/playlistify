@@ -111,13 +111,17 @@ export const PlaylistStatusPanel = () => {
   const isBusy = state.phase === 'syncing' || state.phase === 'waiting'
 
   return (
-    <div className='flex flex-col items-stretch gap-1 sm:items-end'>
+    <div className='flex min-w-0 flex-1 flex-col items-stretch gap-1 sm:flex-none sm:items-end'>
       {state.phase === 'reconnect' ? (
-        <Button onClick={() => void signInWithSpotify()}>
+        <Button
+          className='w-full px-2 text-xs sm:w-auto sm:px-4 sm:text-sm'
+          onClick={() => void signInWithSpotify()}
+        >
           Reconnect Spotify
         </Button>
       ) : (
         <Button
+          className='w-full px-2 text-xs sm:w-auto sm:px-4 sm:text-sm'
           disabled={isBusy}
           variant='secondary'
           onClick={() => void runSync()}

@@ -66,7 +66,7 @@ export async function GET(request: Request) {
         }
       }
 
-      return NextResponse.redirect(`${origin}/chat`)
+      return NextResponse.redirect(`${origin}/library`)
     }
   }
 

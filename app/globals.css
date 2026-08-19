@@ -94,6 +94,7 @@
     @apply bg-background text-foreground;
 
     min-width: 20rem;
+    min-height: 100dvh;
   }
 
   html {
@@ -139,6 +140,28 @@ body:has(.mesh-landing) .site-header {
   display: none;
 }
 
+.library-enrichment-progress[data-active='true'] [data-slot='progress-track'],
+.library-enrichment-progress[data-active='true']
+  [data-slot='progress-indicator'] {
+  background-image: linear-gradient(
+    100deg,
+    var(--muted) 16%,
+    var(--control-soft) 38%,
+    var(--control) 50%,
+    var(--control-soft) 62%,
+    var(--muted) 84%
+  );
+  background-position: 200% 0;
+  background-size: 250% 100%;
+  animation: library-enrichment-flow 1.4s linear infinite;
+}
+
+@keyframes library-enrichment-flow {
+  to {
+    background-position: -200% 0;
+  }
+}
+
 .global-chandler-cutout {
   width: clamp(9rem, 25vw, 25rem);
 }
@@ -159,7 +182,8 @@ body:has(.mesh-landing) .site-header {
 
   position: relative;
   width: 100%;
-  min-height: 100svh;
+  min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: clip;
   color: #f3f5ee;
   background: radial-gradient(
@@ -323,6 +347,35 @@ body:has(.mesh-landing) .site-header {
   display: inline-block;
 }
 
+.mesh-landing-tagline-line[data-phase='entering'] .mesh-landing-tagline-char {
+  opacity: 0;
+  animation: mesh-tagline-fade-in 180ms ease-out forwards;
+}
+
+.mesh-landing-tagline-line[data-phase='exiting'] .mesh-landing-tagline-char {
+  animation: mesh-tagline-fade-out 180ms ease-in forwards;
+}
+
+@keyframes mesh-tagline-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mesh-tagline-fade-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
 @keyframes mesh-wordmark-flow {
   0%,
   100% {
@@ -351,9 +404,20 @@ body:has(.mesh-landing) .site-header {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .library-enrichment-progress[data-active='true'] [data-slot='progress-track'],
+  .library-enrichment-progress[data-active='true']
+    [data-slot='progress-indicator'] {
+    background-position: 50% 0;
+    animation: none;
+  }
+
   .mesh-landing-wordmark {
     animation-duration: 0.01ms;
     animation-iteration-count: 1;
+  }
+
+  .mesh-landing-tagline-char {
+    animation: none;
   }
 }
 

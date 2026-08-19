@@ -1,4 +1,9 @@
-import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronsLeftIcon,
+  ChevronsRightIcon,
+} from 'lucide-react'
 import Link from 'next/link'
 
 import { buttonVariants } from '@/components/ui/button'
@@ -42,11 +47,16 @@ export const LibraryPagination = ({
       aria-label='Library pagination'
       className='mt-4 flex flex-col items-center gap-2'
     >
-      <div className='flex flex-wrap items-center justify-center gap-1'>
+      <div className='flex flex-nowrap items-center justify-center gap-1'>
         {page > 1 ? (
           <>
-            <Link className={slotClass} href={hrefFor(1)}>
-              First
+            <Link
+              aria-label='First page'
+              className={cn(slotClass, 'px-2')}
+              href={hrefFor(1)}
+            >
+              <ChevronsLeftIcon aria-hidden='true' />
+              <span className='sr-only'>First page</span>
             </Link>
             <Link
               aria-label='Previous page'
@@ -90,8 +100,13 @@ export const LibraryPagination = ({
               <span className='sr-only'>Next</span>
               <ChevronRightIcon aria-hidden='true' data-icon='inline-end' />
             </Link>
-            <Link className={slotClass} href={hrefFor(pageCount)}>
-              Last
+            <Link
+              aria-label='Last page'
+              className={cn(slotClass, 'px-2')}
+              href={hrefFor(pageCount)}
+            >
+              <ChevronsRightIcon aria-hidden='true' />
+              <span className='sr-only'>Last page</span>
             </Link>
           </>
         ) : null}

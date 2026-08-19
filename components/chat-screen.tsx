@@ -7,6 +7,7 @@ import {
   isStaticToolUIPart,
   type UIMessage,
 } from 'ai'
+import { useEffect, useRef } from 'react'
 
 import { ChatConversation } from '@/components/chat-conversation'
 import { PlaylistPreviewPanel } from '@/components/playlist-preview-panel'
@@ -65,12 +66,36 @@ export const ChatScreen = () => {
   })
 
   const latestProposal = findLatestProposal(messages)
+  const latestProposalId = latestProposal?.toolCallId ?? null
   const prompt = findFirstPrompt(messages)
   const isBusy = status === 'streaming' || status === 'submitted'
+  const previewRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (
+      latestProposalId === null ||
+      !window.matchMedia('(max-width: 1023px)').matches
+    ) {
+      return
+    }
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      previewRef.current?.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth',
+        block: 'start',
+      })
+    })
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+    }
+  }, [latestProposalId])
 
   return (
-    <div className='mt-8 grid gap-5 lg:h-[72dvh] lg:grid-cols-[minmax(18rem,1fr)_minmax(0,2fr)]'>
-      <div className='flex min-h-0 flex-col border-2 border-border'>
+    <div className='mt-8 grid max-w-full min-w-0 gap-5 lg:h-[72dvh] lg:grid-cols-[minmax(18rem,1fr)_minmax(0,2fr)]'>
+      <div className='flex min-h-0 min-w-0 flex-col border-2 border-border'>
         <ChatConversation
           error={error}
           messages={messages}
@@ -81,7 +106,10 @@ export const ChatScreen = () => {
         />
       </div>
 
-      <div className='h-[70dvh] min-h-0 lg:h-auto'>
+      <div
+        ref={previewRef}
+        className='h-[70dvh] min-h-0 w-full max-w-full min-w-0 scroll-mt-20 overflow-x-hidden lg:h-auto'
+      >
         {latestProposal !== null ? (
           <PlaylistPreviewPanel
             key={latestProposal.toolCallId}

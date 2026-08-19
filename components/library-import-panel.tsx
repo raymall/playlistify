@@ -347,8 +347,8 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
       : ''
 
   return (
-    <div className='grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:w-72 lg:w-[30rem]'>
-      <div className='flex h-10 min-w-0 items-center'>
+    <div className='flex w-full flex-col gap-2 sm:grid sm:w-72 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-3 lg:w-[30rem]'>
+      <div className='order-2 flex min-w-0 items-center sm:order-none sm:h-10'>
         {isProgressVisible ? (
           <div className='flex w-full min-w-0 flex-col gap-1'>
             <Progress
@@ -396,11 +396,15 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
       </div>
 
       {state.phase === 'reconnect' ? (
-        <Button onClick={() => void signInWithSpotify()}>
+        <Button
+          className='order-1 w-full sm:order-none sm:w-auto'
+          onClick={() => void signInWithSpotify()}
+        >
           Reconnect Spotify
         </Button>
       ) : (
         <Button
+          className='order-1 w-full sm:order-none sm:w-auto'
           disabled={isPrimaryDisabled}
           variant={hasLibrary ? 'outline' : 'default'}
           onClick={handleStart}
@@ -409,7 +413,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         </Button>
       )}
 
-      <div className='sr-only col-span-2' role='status'>
+      <div className='sr-only sm:col-span-2' role='status'>
         {announcement}
       </div>
     </div>

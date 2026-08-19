@@ -374,7 +374,7 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
             <div className='flex min-w-0 flex-1 border-b border-input bg-transparent transition-colors focus-within:border-control'>
               <ComboboxInput
                 ref={inputRef}
-                className='h-full min-w-0 px-4 py-2 text-sm placeholder:text-muted-foreground sm:text-base'
+                className='h-full min-w-0 px-4 py-2 text-base placeholder:text-muted-foreground'
                 id={inputId}
                 name='q'
                 placeholder='Search titles, artists, genres or moods'
