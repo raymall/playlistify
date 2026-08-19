@@ -34,8 +34,8 @@ export const LibraryTableSkeleton = () => (
           <TableHead className='px-1 sm:px-2' scope='col'>
             Title / Artist
           </TableHead>
-          <TableHead className='hidden md:table-cell' scope='col'>
-            Tags
+          <TableHead className='w-0 p-0 md:w-auto md:p-2' scope='col'>
+            <span className='hidden md:inline'>Tags</span>
           </TableHead>
           <TableHead
             aria-label='Confidence'
@@ -59,8 +59,8 @@ export const LibraryTableSkeleton = () => (
                 <Skeleton className='h-3 w-2/3' />
               </div>
             </TableCell>
-            <TableCell className='hidden md:table-cell'>
-              <div className='flex flex-wrap gap-1.5'>
+            <TableCell className='w-0 p-0 md:w-auto md:p-2'>
+              <div className='hidden flex-wrap gap-1.5 md:flex'>
                 <Skeleton className='h-5 w-16 rounded-4xl' />
                 <Skeleton className='h-5 w-20 rounded-4xl' />
                 <Skeleton className='h-5 w-14 rounded-4xl' />

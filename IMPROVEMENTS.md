@@ -257,6 +257,22 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** accurate sizing lets Next.js choose a sharp-enough candidate
   without guessing high and wasting bandwidth at smaller breakpoints.
 
+## Safari 26 clips full-bleed landing art to its page viewport
+
+- **In plain terms:** Safari 26 leaves browser-owned strips around the Dynamic
+  Island and floating address bar that normal page content cannot paint. Keep
+  those strips matched to the landing background, and retest true edge-to-edge
+  rendering when WebKit fixes `viewport-fit=cover`.
+- **Severity:** Low — the landing remains usable and the strips use the mesh's
+  base color, but the WebGL animation cannot continue through them in Safari.
+- **Issue:** iOS Safari 26.3 clips ordinary elements, canvas rendering, and even
+  the root background to the page viewport despite `viewport-fit=cover`.
+  WebKit bug 301108 tracks the regression. `theme-color: #070905` visually
+  blends the browser-owned regions but can only provide a static color.
+- **Why fix:** once WebKit exposes the full display again, the mesh can paint
+  continuously behind the Dynamic Island and floating toolbar without a PWA or
+  native wrapper.
+
 ## The admin-client allowlist is lint-only
 
 - **In plain terms:** the service-role database client bypasses all privacy

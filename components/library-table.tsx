@@ -331,8 +331,8 @@ export const LibraryTable = ({
               <TableHead className='px-1 text-left sm:px-2' scope='col'>
                 Title / Artist
               </TableHead>
-              <TableHead className='hidden md:table-cell' scope='col'>
-                Tags
+              <TableHead className='w-0 p-0 md:w-auto md:p-2' scope='col'>
+                <span className='hidden md:inline'>Tags</span>
               </TableHead>
               <TableHead
                 aria-label='Confidence'
@@ -407,12 +407,14 @@ export const LibraryTable = ({
                       </span>
                     </div>
                   </th>
-                  <TableCell className='hidden md:table-cell'>
-                    <LibraryTagList
-                      activeGenres={activeGenreNames}
-                      activeMoods={activeMoodNames}
-                      song={song}
-                    />
+                  <TableCell className='w-0 p-0 md:w-auto md:p-2'>
+                    <div className='hidden md:block'>
+                      <LibraryTagList
+                        activeGenres={activeGenreNames}
+                        activeMoods={activeMoodNames}
+                        song={song}
+                      />
+                    </div>
                   </TableCell>
                   <TableCell className='py-1 ps-0 pe-0.5 text-right sm:p-2'>
                     <div className='flex flex-col items-end gap-1'>
