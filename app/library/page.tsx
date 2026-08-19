@@ -44,23 +44,23 @@ export default async function LibraryPage({
 
   return (
     <PageSection>
-      <header className='flex flex-col gap-1'>
-        <h1 className='text-3xl font-semibold tracking-tight'>Library</h1>
-        <p className='text-muted-foreground tabular-nums'>
-          {totalSongs.toLocaleString()} songs
-        </p>
+      <header className='flex flex-col gap-6 border-b-2 border-border pb-8 sm:flex-row sm:items-end sm:justify-between'>
+        <div className='flex flex-col gap-4'>
+          <p className='editorial-kicker'>01 / Liked Songs</p>
+          <h1 className='editorial-title'>Library</h1>
+        </div>
+        <LibraryImportPanel hasLibrary={totalSongs > 0} />
       </header>
 
-      <div className='mt-8'>
-        <LibraryImportPanel hasLibrary={totalSongs > 0} />
-        {totalSongs === 0 && (
-          <p className='mt-3 max-w-prose text-sm text-muted-foreground'>
-            Import your Spotify Liked Songs to build your library. Large
-            libraries take a few minutes and the import resumes where it left
-            off.
-          </p>
-        )}
-        {totalSongs > 0 && (
+      {totalSongs === 0 && (
+        <p className='mt-8 max-w-prose text-sm text-muted-foreground'>
+          Import your Spotify Liked Songs to build your library. Large libraries
+          take a few minutes and the import resumes where it left off.
+        </p>
+      )}
+
+      {totalSongs > 0 && (
+        <div className='mt-8 flex flex-col gap-8'>
           <LibraryEnrichmentPanel
             initialCounts={{
               total: totalSongs,
@@ -75,11 +75,6 @@ export default async function LibraryPage({
             }}
             recipes={recipes}
           />
-        )}
-      </div>
-
-      {totalSongs > 0 && (
-        <div className='mt-10 flex flex-col gap-6'>
           <LibrarySearchBar state={state} />
           {/* A changed key mounts a *new* boundary, which is never "already
               revealed" — without it React would not revert the revealed

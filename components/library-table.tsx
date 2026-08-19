@@ -1,4 +1,7 @@
+'use client'
+
 import Image from 'next/image'
+import { useState } from 'react'
 
 import { LibraryConfidenceInfo } from '@/components/library-confidence-info'
 import { LibraryTagEditor } from '@/components/library-tag-editor'
@@ -18,6 +21,7 @@ import {
   getConfidenceBand,
 } from '@/lib/enrichment/confidence'
 import { type LibrarySong } from '@/lib/library/song'
+import { cn } from '@/lib/utils'
 
 type LibraryTableProps = {
   activeBands: ConfidenceBand[]
@@ -26,10 +30,6 @@ type LibraryTableProps = {
   songs: LibrarySong[]
 }
 
-/**
- * Visual weight tracks band strength, but the badge always carries its label
- * as text — the band is never conveyed by appearance alone.
- */
 const confidenceVariant: Record<
   ConfidenceBand,
   'default' | 'secondary' | 'outline' | 'ghost'
@@ -41,90 +41,177 @@ const confidenceVariant: Record<
   high: 'default',
 }
 
-type LibraryTagChipsProps = {
+type LibraryTagListProps = {
   activeGenres: Set<string>
   activeMoods: Set<string>
   song: LibrarySong
 }
 
-/**
- * AI tags (filled) and the user's own tags (outlined) — variant is the
- * distinction, never hue, per the monochrome theme. A chip matching an active
- * filter is promoted to the strongest variant and says so in text, which
- * answers "why did this row match?" without relying on appearance.
- */
-const LibraryTagChips = ({
+const LibraryTagList = ({
   activeGenres,
   activeMoods,
   song,
-}: LibraryTagChipsProps) => {
+}: LibraryTagListProps) => {
   const hiddenGenreIds = new Set(song.hiddenGenres.map((tag) => tag.id))
   const hiddenMoodIds = new Set(song.hiddenMoods.map((tag) => tag.id))
   const aiGenres = song.aiGenres.filter((tag) => !hiddenGenreIds.has(tag.id))
   const aiMoods = song.aiMoods.filter((tag) => !hiddenMoodIds.has(tag.id))
-  const hasTags =
-    aiGenres.length > 0 ||
-    aiMoods.length > 0 ||
-    song.userGenres.length > 0 ||
-    song.userMoods.length > 0
+  const tags = [
+    ...aiGenres.map((tag) => ({
+      ...tag,
+      key: `ai-genre-${tag.id}`,
+      source: 'AI genre',
+      isActive: activeGenres.has(tag.name),
+    })),
+    ...aiMoods.map((tag) => ({
+      ...tag,
+      key: `ai-mood-${tag.id}`,
+      source: 'AI mood',
+      isActive: activeMoods.has(tag.name),
+    })),
+    ...song.userGenres.map((tag) => ({
+      ...tag,
+      key: `user-genre-${tag.id}`,
+      source: 'Personal genre',
+      isActive: activeGenres.has(tag.name),
+    })),
+    ...song.userMoods.map((tag) => ({
+      ...tag,
+      key: `user-mood-${tag.id}`,
+      source: 'Personal mood',
+      isActive: activeMoods.has(tag.name),
+    })),
+  ]
 
-  if (!hasTags) {
+  if (tags.length === 0) {
     return <span className='text-sm text-muted-foreground'>—</span>
   }
 
-  const renderChip = (
-    key: string,
-    prefix: string,
-    name: string,
-    isActive: boolean,
-    inactiveVariant: 'secondary' | 'outline',
-  ) => (
-    <Badge key={key} variant={isActive ? 'default' : inactiveVariant}>
-      <span className='sr-only'>{prefix}</span>
-      {name}
-      {isActive && <span className='sr-only'> (active filter)</span>}
-    </Badge>
+  return (
+    <p
+      className='text-[0.6875rem] leading-relaxed break-words whitespace-normal text-muted-foreground'
+      title={tags.map((tag) => tag.name).join(', ')}
+    >
+      {tags.map((tag, index) => (
+        <span key={tag.key}>
+          {index > 0 && ', '}
+          <span className='sr-only'>{tag.source}: </span>
+          <span
+            className={cn(
+              tag.isActive &&
+                'font-semibold text-primary underline decoration-2 underline-offset-2',
+            )}
+          >
+            {tag.name}
+          </span>
+          {tag.isActive && <span className='sr-only'> (active filter)</span>}
+        </span>
+      ))}
+    </p>
+  )
+}
+
+const SongArtwork = ({
+  isEager = false,
+  song,
+  size,
+}: {
+  isEager?: boolean
+  song: LibrarySong
+  size: 'large' | 'row'
+}) => {
+  const classes =
+    size === 'large'
+      ? 'h-auto aspect-square w-full object-cover'
+      : 'size-16 object-cover sm:size-18'
+  const pixels = size === 'large' ? 560 : 72
+
+  if (song.albumArtUrl === null) {
+    return (
+      <div
+        aria-hidden='true'
+        className={cn(
+          classes,
+          'grid place-items-center bg-muted font-display text-2xl',
+        )}
+      >
+        P
+      </div>
+    )
+  }
+
+  return (
+    <Image
+      alt=''
+      className={classes}
+      height={pixels}
+      loading={size === 'large' || isEager ? 'eager' : 'lazy'}
+      sizes={size === 'large' ? '(min-width: 1024px) 28vw, 100vw' : '4.5rem'}
+      src={song.albumArtUrl}
+      style={{ height: 'auto' }}
+      width={pixels}
+    />
+  )
+}
+
+const SelectedSong = ({ song }: { song: LibrarySong }) => {
+  const title = song.title ?? 'Untitled'
+  const artists =
+    song.artists !== null && song.artists.length > 0
+      ? song.artists.join(', ')
+      : 'Unknown artist'
+  const confidenceBand = getConfidenceBand(
+    song.enrichmentStatus,
+    song.aiConfidence,
   )
 
   return (
-    <div className='flex flex-wrap items-center gap-1'>
-      {aiGenres.map((tag) =>
-        renderChip(
-          `ai-genre-${tag.id}`,
-          'AI genre: ',
-          tag.name,
-          activeGenres.has(tag.name),
-          'secondary',
-        ),
-      )}
-      {aiMoods.map((tag) =>
-        renderChip(
-          `ai-mood-${tag.id}`,
-          'AI mood: ',
-          tag.name,
-          activeMoods.has(tag.name),
-          'secondary',
-        ),
-      )}
-      {song.userGenres.map((tag) =>
-        renderChip(
-          `user-genre-${tag.id}`,
-          'Your genre: ',
-          tag.name,
-          activeGenres.has(tag.name),
-          'outline',
-        ),
-      )}
-      {song.userMoods.map((tag) =>
-        renderChip(
-          `user-mood-${tag.id}`,
-          'Your mood: ',
-          tag.name,
-          activeMoods.has(tag.name),
-          'outline',
-        ),
-      )}
-    </div>
+    <aside
+      aria-label={`Selected song: ${title}`}
+      className='border-2 border-border bg-background lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto'
+    >
+      <SongArtwork size='large' song={song} />
+      <div className='flex flex-col gap-5 border-t-2 border-border p-4 sm:p-5'>
+        <div className='flex flex-col gap-2'>
+          <div className='grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1'>
+            <p className='editorial-kicker text-muted-foreground'>
+              Selected song
+            </p>
+            <Badge
+              className='justify-self-end'
+              variant={confidenceVariant[confidenceBand]}
+            >
+              {CONFIDENCE_BANDS[confidenceBand].label}
+            </Badge>
+            {song.aiConfidence !== null && (
+              <span className='col-start-2 row-start-2 justify-self-end font-mono text-[0.6875rem] text-muted-foreground tabular-nums'>
+                {song.aiConfidence.toFixed(2)}
+              </span>
+            )}
+          </div>
+          <h2 className='font-display text-3xl leading-[0.95] tracking-[-0.04em]'>
+            {title}
+          </h2>
+          <p className='text-sm text-muted-foreground'>{artists}</p>
+        </div>
+
+        <LibraryTagEditor
+          aiAttributes={song.aiAttributes}
+          aiConfidence={song.aiConfidence}
+          aiGenres={song.aiGenres}
+          aiMoods={song.aiMoods}
+          display='inline'
+          hiddenGenres={song.hiddenGenres}
+          hiddenMoods={song.hiddenMoods}
+          isCurrentRecipe={song.isCurrentRecipe}
+          recipeLabel={song.recipeLabel}
+          songId={song.id}
+          songTitle={title}
+          userGenres={song.userGenres}
+          userMoods={song.userMoods}
+        />
+      </div>
+    </aside>
   )
 }
 
@@ -134,123 +221,143 @@ export const LibraryTable = ({
   activeMoods,
   songs,
 }: LibraryTableProps) => {
+  const [selectedSongId, setSelectedSongId] = useState(songs.at(0)?.id)
+  const selectedSong =
+    songs.find((song) => song.id === selectedSongId) ?? songs.at(0)
   const activeGenreNames = new Set(activeGenres)
   const activeMoodNames = new Set(activeMoods)
   const activeBandSet = new Set(activeBands)
 
+  if (selectedSong === undefined) return null
+
   return (
-    <Table className='table-fixed'>
-      <TableCaption className='sr-only'>
-        Your imported Liked Songs, most recently liked first
-      </TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead className='w-16' scope='col'>
-            <span className='sr-only'>Artwork</span>
-          </TableHead>
-          <TableHead scope='col'>Title</TableHead>
-          <TableHead scope='col'>Artists</TableHead>
-          <TableHead className='w-2/5' scope='col'>
-            Tags
-          </TableHead>
-          <TableHead className='w-32 text-right' scope='col'>
-            <span className='inline-flex items-center gap-1'>
-              Confidence
-              <LibraryConfidenceInfo />
-            </span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {songs.map((song) => {
-          const titleText = song.title ?? 'Untitled'
-          const artistsText =
-            song.artists !== null && song.artists.length > 0
-              ? song.artists.join(', ')
-              : '—'
-          const confidenceBand = getConfidenceBand(
-            song.enrichmentStatus,
-            song.aiConfidence,
-          )
-          return (
-            <TableRow key={song.id}>
-              <TableCell>
-                {song.albumArtUrl !== null ? (
-                  <Image
-                    alt=''
-                    className='size-10 object-cover'
-                    height={40}
-                    src={song.albumArtUrl}
-                    width={40}
-                  />
-                ) : (
-                  <div aria-hidden='true' className='size-10 bg-muted' />
-                )}
-              </TableCell>
-              {/* The row's header cell, so every control in the row is
-                  announced against a song name rather than a bare row. */}
-              <th
-                className='p-2 text-left align-middle font-medium whitespace-nowrap text-foreground'
-                scope='row'
-              >
-                <span
-                  className='block truncate'
-                  title={song.title ?? undefined}
-                >
-                  {titleText}
+    <div className='grid items-start gap-6 lg:grid-cols-[minmax(17rem,0.72fr)_minmax(0,1.75fr)] xl:gap-10'>
+      <SelectedSong song={selectedSong} />
+
+      <div className='min-w-0 border-t-2 border-border'>
+        <Table className='table-fixed'>
+          <TableCaption className='sr-only'>
+            Your imported Liked Songs, most recently liked first. Select artwork
+            to inspect and edit a song.
+          </TableCaption>
+          <TableHeader>
+            <TableRow className='border-border hover:bg-transparent'>
+              <TableHead className='w-22' scope='col'>
+                Art
+              </TableHead>
+              <TableHead className='w-1/3 text-left' scope='col'>
+                Title / Artist
+              </TableHead>
+              <TableHead className='hidden w-2/5 md:table-cell' scope='col'>
+                Tags
+              </TableHead>
+              <TableHead className='w-28 text-right' scope='col'>
+                <span className='inline-flex items-center gap-1'>
+                  Confidence
+                  <LibraryConfidenceInfo />
                 </span>
-              </th>
-              <TableCell className='text-muted-foreground'>
-                <span
-                  className='block truncate'
-                  title={artistsText === '—' ? undefined : artistsText}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {songs.map((song) => {
+              const title = song.title ?? 'Untitled'
+              const artists =
+                song.artists !== null && song.artists.length > 0
+                  ? song.artists.join(', ')
+                  : 'Unknown artist'
+              const confidenceBand = getConfidenceBand(
+                song.enrichmentStatus,
+                song.aiConfidence,
+              )
+              const isSelected = song.id === selectedSong.id
+
+              return (
+                <TableRow
+                  key={song.id}
+                  className={cn(
+                    'border-border transition-colors',
+                    isSelected && 'bg-muted',
+                  )}
                 >
-                  {artistsText}
-                </span>
-              </TableCell>
-              <TableCell>
-                <div className='flex items-start gap-1'>
-                  <div className='min-w-0 flex-1'>
-                    <LibraryTagChips
+                  <TableCell className='py-3'>
+                    <button
+                      aria-label={`Select ${title} and show its details`}
+                      aria-pressed={isSelected}
+                      className={cn(
+                        'block cursor-pointer border-2 border-transparent transition-colors outline-none focus-visible:border-control focus-visible:ring-2 focus-visible:ring-control-ring/60',
+                        isSelected && 'border-control',
+                      )}
+                      type='button'
+                      onClick={() => {
+                        setSelectedSongId(song.id)
+                      }}
+                    >
+                      <SongArtwork
+                        isEager={isSelected}
+                        size='row'
+                        song={song}
+                      />
+                    </button>
+                  </TableCell>
+                  <th
+                    className='p-2 text-left align-middle font-normal text-foreground'
+                    scope='row'
+                  >
+                    <div className='min-w-0'>
+                      <span
+                        className='block truncate font-semibold'
+                        title={title}
+                      >
+                        {title}
+                      </span>
+                      <span
+                        className='block truncate text-sm text-muted-foreground'
+                        title={artists}
+                      >
+                        {artists}
+                      </span>
+                    </div>
+                  </th>
+                  <TableCell className='hidden md:table-cell'>
+                    <LibraryTagList
                       activeGenres={activeGenreNames}
                       activeMoods={activeMoodNames}
                       song={song}
                     />
-                  </div>
-                  <LibraryTagEditor
-                    aiAttributes={song.aiAttributes}
-                    aiConfidence={song.aiConfidence}
-                    aiGenres={song.aiGenres}
-                    aiMoods={song.aiMoods}
-                    hiddenGenres={song.hiddenGenres}
-                    hiddenMoods={song.hiddenMoods}
-                    isCurrentRecipe={song.isCurrentRecipe}
-                    recipeLabel={song.recipeLabel}
-                    songId={song.id}
-                    songTitle={titleText}
-                    userGenres={song.userGenres}
-                    userMoods={song.userMoods}
-                  />
-                </div>
-              </TableCell>
-              <TableCell className='text-right'>
-                <Badge
-                  variant={
-                    activeBandSet.has(confidenceBand)
-                      ? 'default'
-                      : confidenceVariant[confidenceBand]
-                  }
-                >
-                  {CONFIDENCE_BANDS[confidenceBand].label}
-                  {activeBandSet.has(confidenceBand) && (
-                    <span className='sr-only'> (active filter)</span>
-                  )}
-                </Badge>
-              </TableCell>
-            </TableRow>
-          )
-        })}
-      </TableBody>
-    </Table>
+                  </TableCell>
+                  <TableCell className='text-right'>
+                    <div className='flex flex-col items-end gap-1'>
+                      <Badge
+                        className={cn(
+                          confidenceBand === 'pending' &&
+                            !activeBandSet.has(confidenceBand) &&
+                            'border-current bg-transparent text-foreground',
+                        )}
+                        variant={
+                          activeBandSet.has(confidenceBand)
+                            ? 'default'
+                            : confidenceVariant[confidenceBand]
+                        }
+                      >
+                        {CONFIDENCE_BANDS[confidenceBand].label}
+                        {activeBandSet.has(confidenceBand) && (
+                          <span className='sr-only'> (active filter)</span>
+                        )}
+                      </Badge>
+                      {song.aiConfidence !== null && (
+                        <span className='font-mono text-[0.6875rem] text-muted-foreground tabular-nums'>
+                          {song.aiConfidence.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
   )
 }

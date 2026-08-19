@@ -19,7 +19,7 @@ import {
 import { type TagKind } from '@/lib/tags'
 import { MAX_TAG_LENGTH, normalizeTagName } from '@/lib/vocabulary'
 
-export const LIBRARY_PAGE_SIZE = 50
+export const LIBRARY_PAGE_SIZE = 15
 
 /** Per kind, so 12 genres and 12 moods can coexist. */
 export const MAX_LIBRARY_TAG_FILTERS = 12

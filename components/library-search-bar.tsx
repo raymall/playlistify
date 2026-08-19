@@ -1,5 +1,6 @@
 'use client'
 
+import { SearchIcon } from 'lucide-react'
 import Form from 'next/form'
 import { useRouter } from 'next/navigation'
 import {
@@ -10,14 +11,13 @@ import {
   useTransition,
 } from 'react'
 
-import { Button, buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import {
   Combobox,
   ComboboxChip,
   ComboboxChipRemove,
   ComboboxChips,
   ComboboxCollection,
-  ComboboxEmpty,
   ComboboxGroup,
   ComboboxGroupLabel,
   ComboboxInput,
@@ -37,11 +37,9 @@ import {
 import {
   buildLibraryHref,
   clearLibraryFilters,
-  countLibraryFilters,
   type LibrarySearchState,
   type LibraryTagFilter,
   listLibraryFilters,
-  MIN_TAG_QUERY_LENGTH,
   withLibraryBand,
   withLibraryFilter,
   withLibraryQuery,
@@ -49,7 +47,6 @@ import {
   withoutLibraryFilter,
 } from '@/lib/library/search-params'
 import { useTagSuggestions } from '@/lib/library/use-tag-suggestions'
-import { normalizeTagName } from '@/lib/vocabulary'
 
 type LibrarySearchBarProps = {
   state: LibrarySearchState
@@ -104,8 +101,6 @@ const parseFilterValue = (value: string): AppliedFilter | null => {
     : { kind: 'tag', filter: { kind, name: rest } }
 }
 
-const KIND_LABELS = { genre: 'Genre', mood: 'Mood' } as const
-
 /**
  * One input for both jobs. The user has a word in their head ("shoegaze") and
  * does not yet know whether it is a tag in their library or text in a title;
@@ -124,10 +119,10 @@ const KIND_LABELS = { genre: 'Genre', mood: 'Mood' } as const
 export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
   const router = useRouter()
   const inputId = useId()
-  const hintId = useId()
   const inputRef = useRef<HTMLInputElement>(null)
   const highlightedRef = useRef<string | undefined>(undefined)
   const [isPending, startTransition] = useTransition()
+  const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false)
 
   // Props are stale for as long as a navigation is pending, so two pills
   // clicked inside 300 ms would drop the first. The echo is the working copy;
@@ -148,7 +143,6 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
   const suggestions = useTagSuggestions(inputValue)
   const trimmedInput = inputValue.trim()
   const lowerInput = trimmedInput.toLowerCase()
-  const normalizedInput = normalizeTagName(inputValue)
   const pills: AppliedFilter[] = [
     ...listLibraryFilters(echo).map((filter): AppliedFilter => ({
       kind: 'tag',
@@ -156,6 +150,13 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
     })),
     ...echo.bands.map((band): AppliedFilter => ({ kind: 'band', band })),
   ]
+  const genrePills = pills.filter(
+    (pill) => pill.kind === 'tag' && pill.filter.kind === 'genre',
+  )
+  const moodPills = pills.filter(
+    (pill) => pill.kind === 'tag' && pill.filter.kind === 'mood',
+  )
+  const bandPills = pills.filter((pill) => pill.kind === 'band')
   const appliedValues = pills.map(toFilterValue)
 
   const suggested =
@@ -164,7 +165,7 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
   if (trimmedInput.length > 0) {
     groups.push({
       key: 'text',
-      label: 'Search text',
+      label: 'Titles / artists',
       items: [{ kind: 'text', name: trimmedInput }],
     })
   }
@@ -207,6 +208,7 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
   }
 
   const commitQuery = () => {
+    setIsSuggestionsOpen(false)
     commit(withLibraryQuery(echo, inputValue))
   }
 
@@ -241,21 +243,52 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
 
     // Removing a chip unmounts the button that had focus, which would drop it
     // to <body>. Base UI keeps focus in the input when adding.
-    if (hasRemoved) inputRef.current?.focus()
+    if (hasRemoved) {
+      inputRef.current?.focus()
+    } else {
+      setInputValue(echo.query)
+    }
+    setIsSuggestionsOpen(false)
     commit(nextState)
   }
 
   const handleClear = () => {
     setInputValue('')
+    setIsSuggestionsOpen(false)
     inputRef.current?.focus()
     commit(clearLibraryFilters())
   }
 
-  const handleInputValueChange = (value: string) => {
+  const handleInputValueChange = (
+    value: string,
+    eventDetails: { reason: string },
+  ) => {
+    // Closing the popup can emit an internal empty value before a submit
+    // click. Only a real keystroke is allowed to replace the user's draft.
+    if (eventDetails.reason !== 'input-change') return
+
     // Typing invalidates any highlight, so Enter is a text commit again until
     // the user arrows back into the list.
     highlightedRef.current = undefined
     setInputValue(value)
+    setIsSuggestionsOpen(value.trim().length > 0)
+  }
+
+  const handleOpenChange = (
+    nextOpen: boolean,
+    eventDetails: { reason: string },
+  ) => {
+    if (!nextOpen) {
+      highlightedRef.current = undefined
+      setIsSuggestionsOpen(false)
+      return
+    }
+
+    // An existing query should stay quiet when the input merely receives
+    // focus. Typing is the only interaction that reveals suggestions.
+    if (eventDetails.reason === 'input-change' && trimmedInput.length > 0) {
+      setIsSuggestionsOpen(true)
+    }
   }
 
   // Base UI consumes Enter on ComboboxInput: it clears the query and stops the
@@ -273,9 +306,9 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
     commitQuery()
   }
 
-  // Still needed for the Search button, which is a real submit. Typed off the
-  // element rather than React's own FormEventHandler alias, which the installed
-  // typings mark deprecated.
+  // Still needed for the magnifying-glass action, which is a real submit.
+  // Typed off the element rather than React's own FormEventHandler alias,
+  // which the installed typings mark deprecated.
   const handleSubmit: NonNullable<ComponentProps<'form'>['onSubmit']> = (
     event,
   ) => {
@@ -286,15 +319,12 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
 
   const statusMessage = (() => {
     if (trimmedInput.length === 0) return ''
-    if (normalizedInput.length < MIN_TAG_QUERY_LENGTH) {
-      return `Type ${MIN_TAG_QUERY_LENGTH} letters to see tag suggestions.`
-    }
-    if (suggestions.status === 'loading') return 'Loading tag suggestions…'
+    if (suggestions.status === 'loading') return 'Looking through your tags…'
     if (suggestions.status === 'unavailable') {
-      return 'Tag suggestions are unavailable right now.'
+      return 'Tag matches are unavailable. Title and artist search still works.'
     }
     if (suggestions.status === 'ready' && suggested.length === 0) {
-      return `No tags match “${normalizedInput}”.`
+      return 'No matching tags. Title and artist search is still available.'
     }
     return ''
   })()
@@ -303,7 +333,7 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
     <Form
       action='/library'
       aria-busy={isPending}
-      className='flex flex-col gap-1.5'
+      className='flex w-full flex-col gap-2'
       role='search'
       onSubmit={handleSubmit}
     >
@@ -319,7 +349,7 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
         <input key={`band-${band}`} name='band' type='hidden' value={band} />
       ))}
 
-      <label className='text-sm font-medium' htmlFor={inputId}>
+      <label className='sr-only' htmlFor={inputId}>
         Search your library
       </label>
 
@@ -329,99 +359,142 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
         filter={null}
         inputValue={inputValue}
         items={groups}
+        open={isSuggestionsOpen}
+        openOnInputClick={false}
         value={appliedValues}
         onInputValueChange={handleInputValueChange}
         onItemHighlighted={(value) => {
           highlightedRef.current = value
         }}
+        onOpenChange={handleOpenChange}
         onValueChange={handleValueChange}
       >
-        <div className='flex max-w-2xl items-start gap-2'>
-          <ComboboxChips>
-            {pills.map((pill) => {
-              const label =
-                pill.kind === 'band'
-                  ? CONFIDENCE_BANDS[pill.band].label
-                  : pill.filter.name
-              const prefix =
-                pill.kind === 'band'
-                  ? 'Confidence'
-                  : KIND_LABELS[pill.filter.kind]
-              const target =
-                pill.kind === 'band'
-                  ? `confidence ${label}`
-                  : `${pill.filter.kind} ${label}`
-              return (
-                <ComboboxChip key={toFilterValue(pill)}>
-                  <span className='sr-only'>{prefix} filter: </span>
-                  {label}
-                  <ComboboxChipRemove aria-label={`Remove ${target} filter`} />
-                </ComboboxChip>
-              )
-            })}
-            <ComboboxInput
-              ref={inputRef}
-              aria-describedby={hintId}
-              id={inputId}
-              name='q'
-              placeholder={pills.length === 0 ? 'Search title or artist' : ''}
-              onKeyDown={handleInputKeyDown}
-            />
-          </ComboboxChips>
-          <button
-            className={buttonVariants({ size: 'lg', variant: 'outline' })}
-            type='submit'
-          >
-            Search
-          </button>
-          {countLibraryFilters(echo) > 0 && (
-            <Button
-              className='shrink-0'
-              size='lg'
-              type='button'
-              variant='ghost'
-              onClick={handleClear}
-            >
-              Clear all filters
+        <ComboboxChips className='flex flex-col items-stretch gap-2 border-0 p-0 focus-within:border-transparent focus-within:ring-0 dark:bg-transparent'>
+          <div className='flex h-12 w-full items-stretch gap-2'>
+            <div className='flex min-w-0 flex-1 border-b border-input bg-transparent transition-colors focus-within:border-control'>
+              <ComboboxInput
+                ref={inputRef}
+                className='h-full min-w-0 px-4 py-2 text-sm placeholder:text-muted-foreground sm:text-base'
+                id={inputId}
+                name='q'
+                placeholder='Search titles, artists, genres or moods'
+                onKeyDown={handleInputKeyDown}
+              />
+            </div>
+            <Button aria-label='Search library' size='icon-lg' type='submit'>
+              <SearchIcon
+                aria-hidden='true'
+                className='size-6'
+                strokeWidth={1.5}
+              />
             </Button>
+          </div>
+
+          {pills.length > 0 && (
+            <div className='flex w-full flex-wrap items-center gap-x-5 gap-y-2 border border-border bg-popover px-3 py-2'>
+              {[
+                { key: 'genres', label: 'Genres', values: genrePills },
+                { key: 'moods', label: 'Moods', values: moodPills },
+                { key: 'bands', label: 'Confidence', values: bandPills },
+              ].map(
+                (group) =>
+                  group.values.length > 0 && (
+                    <div
+                      key={group.key}
+                      className='flex min-w-0 items-center gap-1'
+                    >
+                      <span className='editorial-kicker shrink-0 text-muted-foreground'>
+                        {group.label}:
+                      </span>
+                      <div className='flex min-w-0 flex-wrap gap-1'>
+                        {group.values.map((pill) => {
+                          const label =
+                            pill.kind === 'band'
+                              ? CONFIDENCE_BANDS[pill.band].label
+                              : pill.filter.name
+                          const target =
+                            pill.kind === 'band'
+                              ? `confidence ${label}`
+                              : `${pill.filter.kind} ${label}`
+                          return (
+                            <ComboboxChip
+                              key={toFilterValue(pill)}
+                              className='border-0 bg-control-soft text-control-soft-foreground'
+                            >
+                              {label}
+                              <ComboboxChipRemove
+                                aria-label={`Remove ${target} filter`}
+                              />
+                            </ComboboxChip>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ),
+              )}
+              <Button
+                className='ms-auto shrink-0'
+                size='sm'
+                type='button'
+                variant='ghost'
+                onClick={handleClear}
+              >
+                Clear all
+              </Button>
+            </div>
           )}
-        </div>
+        </ComboboxChips>
 
         <ComboboxPortal>
-          <ComboboxPositioner>
-            <ComboboxPopup>
-              <ComboboxStatus>{statusMessage}</ComboboxStatus>
-              <ComboboxList className='max-h-72 border-0'>
+          <ComboboxPositioner sideOffset={8}>
+            <ComboboxPopup className='rounded-none border border-border bg-popover p-0 shadow-none ring-0'>
+              <ComboboxStatus className='border-b border-border px-4 py-3 font-mono text-[0.6875rem]'>
+                {statusMessage}
+              </ComboboxStatus>
+              <ComboboxList className='max-h-80 rounded-none border-0 p-0'>
                 {(group: LibrarySearchGroup) => (
-                  <ComboboxGroup key={group.key} items={group.items}>
-                    <ComboboxGroupLabel>{group.label}</ComboboxGroupLabel>
+                  <ComboboxGroup
+                    key={group.key}
+                    className='border-t border-border first:border-t-0'
+                    items={group.items}
+                  >
+                    <ComboboxGroupLabel className='border-b border-border bg-popover px-4 py-2 text-muted-foreground'>
+                      {group.label}
+                    </ComboboxGroupLabel>
                     <ComboboxCollection>
                       {(item: LibrarySearchItem) => (
                         <ComboboxItem
                           key={toItemValue(item)}
+                          className='min-h-12 rounded-none border-b border-border/70 px-4 py-3 pl-9 last:border-b-0 data-highlighted:bg-control-soft data-highlighted:text-control-soft-foreground data-highlighted:[&_.suggestion-meta]:text-control-soft-foreground/70'
                           value={toItemValue(item)}
                         >
                           {item.kind === 'text' && (
-                            <span className='truncate'>
-                              Search “{item.name}” in titles and artists
-                            </span>
+                            <>
+                              <span className='truncate font-medium'>
+                                Search “{item.name}”
+                              </span>
+                              <span className='suggestion-meta ml-auto shrink-0 font-mono text-[0.6875rem] tracking-[0.08em] text-muted-foreground uppercase'>
+                                Enter
+                              </span>
+                            </>
                           )}
                           {item.kind === 'band' && (
                             <>
                               <span className='truncate'>
                                 {CONFIDENCE_BANDS[item.band].label}
                               </span>
-                              <span className='ml-auto shrink-0 text-xs text-muted-foreground'>
-                                confidence band
+                              <span className='suggestion-meta ml-auto shrink-0 font-mono text-[0.6875rem] tracking-[0.08em] text-muted-foreground uppercase'>
+                                Confidence
                               </span>
                             </>
                           )}
                           {(item.kind === 'genre' || item.kind === 'mood') && (
                             <>
                               <span className='truncate'>{item.name}</span>
-                              <span className='ml-auto shrink-0 text-xs text-muted-foreground tabular-nums'>
+                              <span className='suggestion-meta ml-auto shrink-0 font-mono text-[0.6875rem] text-muted-foreground tabular-nums'>
                                 {item.songCount.toLocaleString()}
-                                {item.isCapped ? '+' : ''} songs
+                                {item.isCapped ? '+' : ''}{' '}
+                                {item.songCount === 1 ? 'song' : 'songs'}
                               </span>
                             </>
                           )}
@@ -431,20 +504,10 @@ export const LibrarySearchBar = ({ state }: LibrarySearchBarProps) => {
                   </ComboboxGroup>
                 )}
               </ComboboxList>
-              <ComboboxEmpty>
-                {trimmedInput.length === 0
-                  ? 'Type a title, an artist, or a tag.'
-                  : ''}
-              </ComboboxEmpty>
             </ComboboxPopup>
           </ComboboxPositioner>
         </ComboboxPortal>
       </Combobox>
-
-      <p className='text-xs text-muted-foreground' id={hintId}>
-        Type a title or artist, or pick a tag or Confidence band to filter. Tags
-        combine with AND, bands with OR.
-      </p>
 
       <p aria-live='polite' className='sr-only' role='status'>
         {isPending ? 'Searching…' : ''}

@@ -1,3 +1,4 @@
+import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import Link from 'next/link'
 
 import { buttonVariants } from '@/components/ui/button'
@@ -33,7 +34,6 @@ export const LibraryPagination = ({
     buttonVariants({ size: 'sm', variant: 'default' }),
     'min-w-8',
   )
-  const disabledClass = cn(slotClass, 'pointer-events-none opacity-50')
   const hrefFor = (target: number) =>
     buildLibraryHref(withLibraryPage(state, target))
 
@@ -44,23 +44,20 @@ export const LibraryPagination = ({
     >
       <div className='flex flex-wrap items-center justify-center gap-1'>
         {page > 1 ? (
-          <Link className={slotClass} href={hrefFor(1)}>
-            First
-          </Link>
-        ) : (
-          <span aria-disabled='true' className={disabledClass}>
-            First
-          </span>
-        )}
-        {page > 1 ? (
-          <Link className={slotClass} href={hrefFor(page - 1)}>
-            Previous
-          </Link>
-        ) : (
-          <span aria-disabled='true' className={disabledClass}>
-            Previous
-          </span>
-        )}
+          <>
+            <Link className={slotClass} href={hrefFor(1)}>
+              First
+            </Link>
+            <Link
+              aria-label='Previous page'
+              className={cn(slotClass, 'px-2')}
+              href={hrefFor(page - 1)}
+            >
+              <ChevronLeftIcon aria-hidden='true' data-icon='inline-start' />
+              <span className='sr-only'>Previous</span>
+            </Link>
+          </>
+        ) : null}
 
         {buildPaginationSlots(page, pageCount).map((slot) =>
           slot.kind === 'gap' ? (
@@ -84,26 +81,23 @@ export const LibraryPagination = ({
         )}
 
         {page < pageCount ? (
-          <Link className={slotClass} href={hrefFor(page + 1)}>
-            Next
-          </Link>
-        ) : (
-          <span aria-disabled='true' className={disabledClass}>
-            Next
-          </span>
-        )}
-        {page < pageCount ? (
-          <Link className={slotClass} href={hrefFor(pageCount)}>
-            Last
-          </Link>
-        ) : (
-          <span aria-disabled='true' className={disabledClass}>
-            Last
-          </span>
-        )}
+          <>
+            <Link
+              aria-label='Next page'
+              className={cn(slotClass, 'px-2')}
+              href={hrefFor(page + 1)}
+            >
+              <span className='sr-only'>Next</span>
+              <ChevronRightIcon aria-hidden='true' data-icon='inline-end' />
+            </Link>
+            <Link className={slotClass} href={hrefFor(pageCount)}>
+              Last
+            </Link>
+          </>
+        ) : null}
       </div>
       <span className='text-sm text-muted-foreground tabular-nums'>
-        Page {page} of {pageCount}
+        {page} / {pageCount}
       </span>
     </nav>
   )

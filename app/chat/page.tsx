@@ -30,11 +30,11 @@ export default async function ChatPage() {
 
   return (
     <PageSection>
-      <header className='flex flex-col gap-1'>
-        <h1 className='text-3xl font-semibold tracking-tight'>Chat</h1>
-        <p className='text-muted-foreground'>
-          Describe a playlist and I’ll build it from your library.
-        </p>
+      <header className='border-b-2 border-border pb-8'>
+        <div className='flex flex-col gap-4'>
+          <p className='editorial-kicker'>02 / Create Playlist</p>
+          <h1 className='editorial-title'>Chat</h1>
+        </div>
       </header>
 
       {totalSongs === 0 ? (

@@ -111,42 +111,26 @@ export const PlaylistStatusPanel = () => {
   const isBusy = state.phase === 'syncing' || state.phase === 'waiting'
 
   return (
-    <div className='mt-6 flex flex-col items-start gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between'>
-      <div className='text-sm text-muted-foreground'>
-        {state.phase === 'syncing' && 'Checking Spotify…'}
-        {state.phase === 'waiting' && (
-          <span className='tabular-nums'>
-            Rate limited — retrying in {state.secondsLeft}s
-          </span>
-        )}
-        {state.phase === 'reconnect' &&
-          'Reconnect Spotify to check which playlists still exist there.'}
-        {state.phase === 'error' && (
-          <span className='text-destructive'>{state.message}</span>
-        )}
-        {state.phase === 'done' && (
-          <span className='tabular-nums'>
-            {state.presentCount.toLocaleString()} in Spotify ·{' '}
-            {state.missingCount.toLocaleString()} deleted
-          </span>
-        )}
-        {state.phase === 'idle' && 'Spotify status has not been checked yet.'}
-      </div>
-
+    <div className='flex flex-col items-stretch gap-1 sm:items-end'>
       {state.phase === 'reconnect' ? (
-        <Button size='sm' onClick={() => void signInWithSpotify()}>
+        <Button onClick={() => void signInWithSpotify()}>
           Reconnect Spotify
         </Button>
       ) : (
         <Button
           disabled={isBusy}
-          size='sm'
-          variant='outline'
+          variant='secondary'
           onClick={() => void runSync()}
         >
-          {isBusy ? 'Refreshing…' : 'Refresh status'}
+          {isBusy ? 'Refreshing…' : 'Refresh playlists'}
         </Button>
       )}
+
+      {state.phase === 'error' ? (
+        <p className='max-w-64 text-xs leading-tight text-destructive sm:text-right'>
+          {state.message}
+        </p>
+      ) : null}
 
       <span className='sr-only' role='status'>
         {announcement}

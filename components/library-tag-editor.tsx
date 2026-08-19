@@ -51,6 +51,7 @@ type LibraryTagEditorProps = {
   songTitle: string
   userGenres: LibraryTag[]
   userMoods: LibraryTag[]
+  display?: 'inline' | 'popover'
 }
 
 const parseAddResponse = (value: unknown): TagAddResponse | null => {
@@ -216,6 +217,7 @@ export const LibraryTagEditor = ({
   songTitle,
   userGenres,
   userMoods,
+  display = 'popover',
 }: LibraryTagEditorProps) => {
   const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
@@ -413,6 +415,152 @@ export const LibraryTagEditor = ({
     visibleAiGenres.length > 0 || visibleAiMoods.length > 0
   const hasHiddenAiTags = hiddenAiGenres.length > 0 || hiddenAiMoods.length > 0
 
+  const editorContent = (
+    <div className='flex flex-col gap-5'>
+      <div className='flex flex-col gap-2'>
+        {display === 'popover' ? (
+          <PopoverTitle>Tags</PopoverTitle>
+        ) : (
+          <h3 className='editorial-kicker'>Tags</h3>
+        )}
+        {aiAttributes !== null ? (
+          <div className='flex flex-col gap-1 font-mono text-[0.6875rem] text-muted-foreground'>
+            <p>{formatAttributesLine(aiAttributes, aiConfidence)}</p>
+            {aiAttributes.descriptors.length > 0 && (
+              <p>{aiAttributes.descriptors.join(', ')}</p>
+            )}
+            {aiAttributes.instrumentation.length > 0 && (
+              <p>{aiAttributes.instrumentation.join(', ')}</p>
+            )}
+          </div>
+        ) : (
+          <p className='font-mono text-[0.6875rem] text-muted-foreground'>
+            No AI data yet.
+          </p>
+        )}
+        {recipeLabel !== null && (
+          <p className='font-mono text-[0.6875rem] text-muted-foreground'>
+            Recipe: {isCurrentRecipe ? 'current' : recipeLabel}
+          </p>
+        )}
+      </div>
+
+      {(hasVisibleAiTags || hasHiddenAiTags) && (
+        <div className='flex flex-col gap-2 border-t border-border pt-4'>
+          <p className='editorial-kicker text-muted-foreground'>
+            Model suggestions · filled
+          </p>
+          {hasVisibleAiTags && (
+            <div className='flex flex-wrap gap-1.5'>
+              {visibleAiGenres.map((tag) => (
+                <Button
+                  key={`ai-genre-${tag.id}`}
+                  aria-label={`Hide AI genre ${tag.name} for ${songTitle}`}
+                  size='xs'
+                  variant='secondary'
+                  onClick={() => {
+                    hideTag('genre', tag)
+                  }}
+                >
+                  {tag.name}
+                  <span aria-hidden='true'>×</span>
+                </Button>
+              ))}
+              {visibleAiMoods.map((tag) => (
+                <Button
+                  key={`ai-mood-${tag.id}`}
+                  aria-label={`Hide AI mood ${tag.name} for ${songTitle}`}
+                  size='xs'
+                  variant='secondary'
+                  onClick={() => {
+                    hideTag('mood', tag)
+                  }}
+                >
+                  {tag.name}
+                  <span aria-hidden='true'>×</span>
+                </Button>
+              ))}
+            </div>
+          )}
+          {hasHiddenAiTags && (
+            <div className='flex flex-col items-start gap-2'>
+              <Button
+                aria-expanded={isShowingHidden}
+                size='xs'
+                variant='ghost'
+                onClick={() => {
+                  setIsShowingHidden((current) => !current)
+                }}
+              >
+                {isShowingHidden ? 'Hide hidden tags' : 'Show hidden tags'}
+              </Button>
+              {isShowingHidden && (
+                <div className='flex flex-wrap gap-1.5'>
+                  {hiddenAiGenres.map((tag) => (
+                    <Button
+                      key={`hidden-genre-${tag.id}`}
+                      aria-label={`Show AI genre ${tag.name} again for ${songTitle}`}
+                      size='xs'
+                      variant='outline'
+                      onClick={() => {
+                        showTag('genre', tag)
+                      }}
+                    >
+                      Undo {tag.name}
+                    </Button>
+                  ))}
+                  {hiddenAiMoods.map((tag) => (
+                    <Button
+                      key={`hidden-mood-${tag.id}`}
+                      aria-label={`Show AI mood ${tag.name} again for ${songTitle}`}
+                      size='xs'
+                      variant='outline'
+                      onClick={() => {
+                        showTag('mood', tag)
+                      }}
+                    >
+                      Undo {tag.name}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className='grid gap-4 border-t border-border pt-4'>
+        <p className='editorial-kicker text-muted-foreground'>
+          Personal tags · neutral
+        </p>
+        <TagKindEditor
+          kind='genre'
+          label='Genres'
+          placeholder='Add genre'
+          selected={genres}
+          songTitle={songTitle}
+          onValueChange={handleGenresChange}
+        />
+        <TagKindEditor
+          kind='mood'
+          label='Moods'
+          placeholder='Add mood'
+          selected={moods}
+          songTitle={songTitle}
+          onValueChange={handleMoodsChange}
+        />
+      </div>
+
+      <div aria-live='polite' className='sr-only' role='status'>
+        {announcement}
+      </div>
+    </div>
+  )
+
+  if (display === 'inline') {
+    return <div className='w-full'>{editorContent}</div>
+  }
+
   return (
     <Popover open={isOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger
@@ -424,135 +572,7 @@ export const LibraryTagEditor = ({
       >
         <TagsIcon aria-hidden='true' className='size-3.5' />
       </PopoverTrigger>
-      <PopoverContent>
-        <div className='flex flex-col gap-4'>
-          <div className='flex flex-col gap-1'>
-            <PopoverTitle>Tags</PopoverTitle>
-            {aiAttributes !== null ? (
-              <div className='flex flex-col gap-0.5 text-xs text-muted-foreground'>
-                <p>{formatAttributesLine(aiAttributes, aiConfidence)}</p>
-                {aiAttributes.descriptors.length > 0 && (
-                  <p>{aiAttributes.descriptors.join(', ')}</p>
-                )}
-                {aiAttributes.instrumentation.length > 0 && (
-                  <p>{aiAttributes.instrumentation.join(', ')}</p>
-                )}
-              </div>
-            ) : (
-              <p className='text-xs text-muted-foreground'>No AI data yet.</p>
-            )}
-            {/* Named only when it differs from the recipe the panel already
-                names, so the common case stays one short word. */}
-            {recipeLabel !== null && (
-              <p className='text-xs text-muted-foreground'>
-                Recipe: {isCurrentRecipe ? 'current' : recipeLabel}
-              </p>
-            )}
-          </div>
-          {(hasVisibleAiTags || hasHiddenAiTags) && (
-            <div className='flex flex-col gap-2'>
-              <p className='text-xs font-medium text-muted-foreground'>
-                AI tags
-              </p>
-              {hasVisibleAiTags && (
-                <div className='flex flex-wrap gap-1.5'>
-                  {visibleAiGenres.map((tag) => (
-                    <Button
-                      key={`ai-genre-${tag.id}`}
-                      aria-label={`Hide AI genre ${tag.name} for ${songTitle}`}
-                      size='xs'
-                      variant='secondary'
-                      onClick={() => {
-                        hideTag('genre', tag)
-                      }}
-                    >
-                      {tag.name}
-                      <span aria-hidden='true'>×</span>
-                    </Button>
-                  ))}
-                  {visibleAiMoods.map((tag) => (
-                    <Button
-                      key={`ai-mood-${tag.id}`}
-                      aria-label={`Hide AI mood ${tag.name} for ${songTitle}`}
-                      size='xs'
-                      variant='secondary'
-                      onClick={() => {
-                        hideTag('mood', tag)
-                      }}
-                    >
-                      {tag.name}
-                      <span aria-hidden='true'>×</span>
-                    </Button>
-                  ))}
-                </div>
-              )}
-              {hasHiddenAiTags && (
-                <div className='flex flex-col items-start gap-2'>
-                  <Button
-                    aria-expanded={isShowingHidden}
-                    size='xs'
-                    variant='ghost'
-                    onClick={() => {
-                      setIsShowingHidden((current) => !current)
-                    }}
-                  >
-                    {isShowingHidden ? 'Hide hidden tags' : 'Show hidden tags'}
-                  </Button>
-                  {isShowingHidden && (
-                    <div className='flex flex-wrap gap-1.5'>
-                      {hiddenAiGenres.map((tag) => (
-                        <Button
-                          key={`hidden-genre-${tag.id}`}
-                          aria-label={`Show AI genre ${tag.name} again for ${songTitle}`}
-                          size='xs'
-                          variant='outline'
-                          onClick={() => {
-                            showTag('genre', tag)
-                          }}
-                        >
-                          Undo {tag.name}
-                        </Button>
-                      ))}
-                      {hiddenAiMoods.map((tag) => (
-                        <Button
-                          key={`hidden-mood-${tag.id}`}
-                          aria-label={`Show AI mood ${tag.name} again for ${songTitle}`}
-                          size='xs'
-                          variant='outline'
-                          onClick={() => {
-                            showTag('mood', tag)
-                          }}
-                        >
-                          Undo {tag.name}
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          <TagKindEditor
-            kind='genre'
-            label='Your genres'
-            placeholder='Add genre'
-            selected={genres}
-            songTitle={songTitle}
-            onValueChange={handleGenresChange}
-          />
-          <TagKindEditor
-            kind='mood'
-            label='Your moods'
-            placeholder='Add mood'
-            selected={moods}
-            songTitle={songTitle}
-            onValueChange={handleMoodsChange}
-          />
-        </div>
-        <div aria-live='polite' className='sr-only' role='status'>
-          {announcement}
-        </div>
-      </PopoverContent>
+      <PopoverContent>{editorContent}</PopoverContent>
     </Popover>
   )
 }

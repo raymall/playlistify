@@ -1,20 +1,29 @@
 import './globals.css'
 
 import type { Metadata } from 'next'
-import { Archivo, Geist } from 'next/font/google'
+import { Archivo, Archivo_Black, IBM_Plex_Mono } from 'next/font/google'
+import Image from 'next/image'
 import { ThemeProvider } from 'next-themes'
 
 import { SiteHeader } from '@/components/site-header'
+import chandlerHuggingMeme from '@/public/chandler-hugging-meme-original-hd-transparent.png'
 
 const archivo = Archivo({
-  variable: '--font-wordmark',
+  variable: '--font-archivo-loaded',
   subsets: ['latin'],
-  weight: '700',
+  weight: ['400', '500', '600', '700'],
 })
 
-const geistSans = Geist({
-  variable: '--font-sans',
+const archivoBlack = Archivo_Black({
+  variable: '--font-display-loaded',
   subsets: ['latin'],
+  weight: '400',
+})
+
+const ibmPlexMono = IBM_Plex_Mono({
+  variable: '--font-mono-loaded',
+  subsets: ['latin'],
+  weight: ['400', '500', '700'],
 })
 
 export const metadata: Metadata = {
@@ -34,7 +43,7 @@ export default function RootLayout({
   return (
     <html
       suppressHydrationWarning
-      className={`${archivo.variable} ${geistSans.variable} h-full antialiased`}
+      className={`${archivo.variable} ${archivoBlack.variable} ${ibmPlexMono.variable} h-full antialiased`}
       lang='en'
     >
       <body className='flex min-h-full flex-col'>
@@ -46,6 +55,13 @@ export default function RootLayout({
         >
           <SiteHeader />
           <main className='flex-1'>{children}</main>
+          <Image
+            alt=''
+            className='global-chandler-cutout pointer-events-none fixed right-0 bottom-0 z-10 h-auto select-none'
+            loading='eager'
+            sizes='(max-width: 576px) 9rem, (min-width: 1600px) 25rem, 25vw'
+            src={chandlerHuggingMeme}
+          />
         </ThemeProvider>
       </body>
     </html>
