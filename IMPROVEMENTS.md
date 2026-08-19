@@ -484,6 +484,25 @@ would duplicate an existing item, contradict one, or make one obsolete:
   otherwise a green result can prove only that the TypeScript mirror still
   agrees with itself.
 
+## Retired recipe rows accumulate with no pruning path
+
+- **In plain terms:** every recipe change mints a new row and disables the old
+  one, and nothing ever removes the old rows. A mistaken or experimental mint
+  leaves a disabled row in the catalog permanently, even when no song ever ran
+  under it.
+- **Complexity:** Low — a guarded delete for rows that are disabled with zero
+  attempts and zero jobs, either in `recipe:sync` or a small script.
+- **Issue:** `enrichment_recipes` is append-only by design, and
+  `song_enrichment_attempts.recipe_id` / `song_enrichment_jobs.recipe_id` are
+  `on delete restrict`, so a row that produced results genuinely cannot be
+  removed. A row that produced nothing is a different case and is currently
+  treated identically. One already exists — `openai:gpt-5.4-mini:3cb347b74744`,
+  minted 2026-08-19 from an unintended batch-size edit, since disabled, with
+  zero attempts and zero jobs.
+- **Why fix:** `library_enrichment_recipes` reads the catalog and so does
+  anyone auditing what has run; rows that never analyzed anything are noise
+  that makes a genuinely retired generation harder to spot.
+
 ## Clean up orphaned unapproved vocabulary rows
 
 - **In plain terms:** personal tags can leave unapproved global vocabulary rows
