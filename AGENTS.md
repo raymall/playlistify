@@ -43,6 +43,24 @@ The DB is a linked remote Supabase project; `supabase/migrations/` is the source
 5. Run `npm run verify:rls` (always) plus any other `verify:*` script the change touches, then `npm run typecheck`.
 6. Commit the migration and regenerated `types.ts` together.
 
+# Recipe changes
+
+A recipe is the **complete method** behind one analysis — model, reasoning effort, batch size, rank, prompt text, identity fields, output caps, and a frozen copy of the approved vocabulary. All of it is stored on the `enrichment_recipes` row and covered by a unique `content_hash`, so changing any of it **mints a new recipe instead of editing the old one**. That is a database guarantee (unique index + immutability trigger), not a convention — which is what keeps every past attempt's identity true.
+
+`recipes/definitions.ts` and `recipes/prompts/*.md` are the authored source; `npm run recipe:sync` turns them into rows. Never edit an `enrichment_recipes` or `vocabulary_snapshots` row in Studio, and never seed one from a migration.
+
+1. Edit `recipes/definitions.ts` (model, effort, batch size, rank, output spec, flags) or the prompt file in `recipes/prompts/`.
+2. Dry run: `npm run recipe:sync` — prints the full plan and writes nothing. Read what it says it will mint before going on.
+3. Apply: `npm run recipe:sync -- --yes`.
+4. Verify: `npm run verify:recipes`, plus `npm run verify:re-enrichment` when ranks or flags moved.
+5. `npm run typecheck`, then commit the definition/prompt change.
+
+Only `label`, `enabled`, and `is_default` are mutable — changing those relabels or reactivates existing rows and mints nothing. Everything else is in the hash.
+
+**Approving a genre or mood is two steps.** The approval itself is a migration (see **Database changes**); it reaches running analyses only when a later `recipe:sync` mints recipes that freeze the new list. `verify:recipes` reports the drift in between, so a pending mint is visible rather than silent.
+
+**Rank is a human decision the sync never guesses.** Keep ranks stable across a mint unless re-opening songs is the intent: a new recipe at the same rank grants no fresh attempts, while a higher rank re-opens finished songs and bills a full re-analysis. Do not enable two recipes at the same rank — the sync warns, and the tiebreak between them is a hash.
+
 # Improvements log
 
 `IMPROVEMENTS.md` (root, committed) is the running log of technical debt, sharp edges, deferred work, suggestions, and ideas. Whenever any of those surface during a session — something you noticed, worked around, deferred, or would recommend — record it there **in the same session**, don't just mention it in chat.

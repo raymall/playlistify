@@ -45,6 +45,10 @@ of it, in order:
    - `npm run verify:enrichment` — enrichment pipeline changes.
    - `npm run verify:re-enrichment` — recipe, job, attempt, or promotion
      changes (policy cases plus remote queue invariants).
+   - `npm run verify:recipes` — recipe or approved-vocabulary changes: the
+     catalog matches `recipes/definitions.ts`, every stored content hash
+     recomputes, and the live approved lists are checked against the newest
+     frozen snapshot.
    - `npm run verify:genres` — genre/mood vocabulary (`lib/vocabulary.ts`)
      changes: approved-list reachability, the AI-link approval gate, and the
      free-form personal-tag path.
@@ -53,6 +57,20 @@ of it, in order:
    broke. Fix before committing.
 8. **Commit the migration file and the regenerated `types.ts` together**, as
    one change.
+
+## Recipe rows are authored, not migrated
+
+`enrichment_recipes` and `vocabulary_snapshots` hold operational data minted by
+`npm run recipe:sync` from `recipes/definitions.ts` — **never** seed, update, or
+delete them from a migration, and never edit them in Studio. A trigger rejects
+any update outside `label` / `enabled` / `is_default`, and a unique
+`content_hash` makes a changed method a new row rather than an edited one, so a
+seed migration would either fail or fork the catalog.
+
+Approving `genres` / `moods` rows is still migration work. Carrying that
+approval into the running recipes is a `recipe:sync` afterwards — until then the
+frozen snapshots keep the old lists, and `verify:recipes` reports the drift. The
+full runbook is **Recipe changes** in `AGENTS.md`.
 
 ## CLI ↔ MCP mapping
 
