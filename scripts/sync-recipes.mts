@@ -150,7 +150,9 @@ for (const plan of planned) {
 
 const recipeRows = await service
   .from('enrichment_recipes')
-  .select('id, recipe_key, label, content_hash, enabled, is_default')
+  .select(
+    'id, recipe_key, label, content_hash, enabled, is_default, enrichment_rank',
+  )
 if (recipeRows.error !== null) {
   fail(`enrichment_recipes read failed: ${recipeRows.error.message}`)
 }
@@ -171,59 +173,120 @@ if (snapshotRow.error !== null) {
 
 // --- Print the plan. ---------------------------------------------------------
 
+const describeRole = (definition: RecipeDefinition) => {
+  if (!definition.enabled) return 'disabled'
+  return definition.isDefault
+    ? 'enabled, analyzes songs with no result yet'
+    : 'enabled'
+}
+
+const newPlans = planned.filter((plan) => !rowByHash.has(plan.contentHash))
+const retiringRows = recipeRows.data.filter((row) => {
+  const isTargeted =
+    row.content_hash !== null &&
+    planned.some(
+      (plan) =>
+        plan.definition.enabled && plan.contentHash === row.content_hash,
+    )
+  return row.enabled && !isTargeted
+})
+const relabelCount = planned.filter((plan) => {
+  const existing = rowByHash.get(plan.contentHash)
+  return existing !== undefined && existing.label !== plan.definition.label
+}).length
+
 console.log(
-  `Vocabulary snapshot ${vocabulary.contentHash.slice(0, 12)}… ` +
-    `(${vocabulary.genreNames.length} genres, ${vocabulary.moodNames.length} moods): ` +
-    (snapshotRow.data === null ? 'new — will create' : 'exists — reused'),
+  `\nRecipe sync — ${isApply ? 'applying' : 'dry run, nothing is written'}\n`,
 )
 
+console.log(
+  `Vocabulary: ${vocabulary.genreNames.length} genres, ` +
+    `${vocabulary.moodNames.length} moods — ` +
+    (snapshotRow.data === null
+      ? 'changed since the last frozen copy, so a new one is\n' +
+        '            created and frozen into every recipe below.'
+      : 'unchanged, so recipes reuse the frozen copy\n' +
+        '            that already exists.'),
+)
+
+console.log('\nRecipes')
 for (const plan of planned) {
   const existing = rowByHash.get(plan.contentHash)
-  const state = plan.definition.enabled
-    ? plan.definition.isDefault
-      ? 'enabled, default'
-      : 'enabled'
-    : 'disabled'
-  if (existing === undefined) {
-    console.log(
-      `NEW    ${plan.recipeKey} (rank ${plan.definition.rank}, ${state})`,
-    )
-  } else {
-    console.log(
-      `KEEP   ${existing.recipe_key} (rank ${plan.definition.rank}, ${state})` +
-        (existing.label === plan.definition.label
-          ? ''
-          : ` — label updates to "${plan.definition.label}"`),
-    )
+  const status = existing === undefined ? 'CREATE   ' : 'unchanged'
+  console.log(`\n  ${status}  ${plan.definition.label}`)
+  console.log(
+    `             rank ${plan.definition.rank} · ${describeRole(plan.definition)}`,
+  )
+  console.log(`             ${plan.recipeKey}`)
+  if (existing !== undefined && existing.label !== plan.definition.label) {
+    console.log(`             renaming from "${existing.label}"`)
   }
 }
 
-const targetHashes = new Set(
-  planned
-    .filter((plan) => plan.definition.enabled)
-    .map((plan) => plan.contentHash),
-)
-for (const row of recipeRows.data) {
-  const isTargeted =
-    row.content_hash !== null && targetHashes.has(row.content_hash)
-  if (row.enabled && !isTargeted) {
-    console.log(`OFF    ${row.recipe_key} — leaves the enabled set`)
+if (retiringRows.length > 0) {
+  console.log('\nLeaving the enabled set')
+  for (const row of retiringRows) {
+    console.log(`\n  RETIRE     ${row.label}`)
+    console.log(`             ${row.recipe_key}`)
   }
 }
 
-console.log(
-  'NOTE   Queued jobs for recipes leaving the enabled set are retired and\n' +
-    '       re-enqueued against the new default on the next "Analyze & improve"\n' +
-    '       run. Minting at an unchanged rank grants no fresh analysis budget;\n' +
-    '       only a higher-ranked recipe reopens finished songs.',
-)
+const changeParts = [
+  newPlans.length > 0 ? `${newPlans.length} created` : '',
+  retiringRows.length > 0 ? `${retiringRows.length} retired` : '',
+  relabelCount > 0 ? `${relabelCount} renamed` : '',
+].filter((part) => part !== '')
+
+if (changeParts.length === 0) {
+  console.log(
+    `\nResult: nothing to change — all ${planned.length} recipes already match the repo.`,
+  )
+} else {
+  console.log(`\nResult: ${changeParts.join(', ')}.`)
+
+  const highestEnabledRank = Math.max(
+    0,
+    ...recipeRows.data
+      .filter((row) => row.enabled)
+      .map((row) => row.enrichment_rank),
+  )
+  const escalating = newPlans.filter(
+    (plan) =>
+      plan.definition.enabled && plan.definition.rank > highestEnabledRank,
+  )
+
+  console.log(`\nWhat ${isApply ? 'this did' : 'applying this would do'}:`)
+  if (retiringRows.length > 0) {
+    console.log(
+      '  · Songs still queued against a retired recipe are re-queued against the\n' +
+        '    new one on the next "Analyze & improve" run. Results already promoted\n' +
+        '    are untouched, and stay attached to the recipe that produced them.',
+    )
+  }
+  if (escalating.length > 0) {
+    console.log(
+      `  · Rank ${escalating[0].definition.rank} outranks everything currently enabled, so songs that\n` +
+        '    were finished re-open and the next run pays for a full re-analysis.',
+    )
+  } else if (newPlans.length > 0) {
+    console.log(
+      '  · No rank increases, so no song gains extra analysis tries. This swaps\n' +
+        '    the method used from now on; it does not re-open finished songs.',
+    )
+  }
+}
 
 if (!isApply) {
-  console.log('\nDry run — nothing written. Re-run with `-- --yes` to apply.')
+  console.log(
+    '\nDry run — nothing was written.\n' +
+      'Re-run with `npm run recipe:sync -- --yes` to apply.',
+  )
   process.exit(0)
 }
 
 // --- Apply. -----------------------------------------------------------------
+
+console.log('\nWriting changes')
 
 let snapshotId = snapshotRow.data?.id ?? null
 if (snapshotId === null) {
@@ -284,7 +347,7 @@ for (const plan of planned) {
       )
     }
     recipeId = inserted.data.id
-    console.log(`Inserted ${plan.recipeKey}`)
+    console.log(`  created  ${plan.recipeKey}`)
   } else {
     recipeId = existing.id
     if (existing.label !== plan.definition.label) {
@@ -297,7 +360,7 @@ for (const plan of planned) {
           `label update failed (${existing.recipe_key}): ${updated.error.message}`,
         )
       }
-      console.log(`Relabeled ${existing.recipe_key}`)
+      console.log(`  renamed  ${existing.recipe_key}`)
     }
   }
   if (plan.definition.enabled) activationIds.push(recipeId)
@@ -315,6 +378,7 @@ if (activation.error !== null) {
 }
 
 console.log(
-  `\nApplied: ${activationIds.length} enabled, default set. ` +
-    'Run `npm run verify:recipes` to confirm.',
+  `\nDone. ${activationIds.length} recipes enabled; the default handles songs\n` +
+    'with no result yet. Run `npm run verify:recipes` to confirm the catalog\n' +
+    'matches the repo.',
 )
