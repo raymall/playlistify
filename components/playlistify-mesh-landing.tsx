@@ -494,7 +494,7 @@ export const PlaylistifyMeshLanding = ({
       <PlaylistifyMeshTagline />
 
       <div className='mesh-landing-cta'>
-        <SpotifySignInButton className='h-12 cursor-pointer rounded-full border-white/20 bg-[#f1f5eb] px-6 text-[#10170f] shadow-[0_1rem_3rem_rgba(0,0,0,0.3)] hover:bg-white focus-visible:border-white/70 focus-visible:ring-white/30' />
+        <SpotifySignInButton className='h-12 cursor-pointer border-white bg-transparent px-6 text-white shadow-none hover:bg-white hover:text-[#10170f] focus-visible:border-white focus-visible:ring-white/40 focus-visible:ring-offset-[#070905]' />
       </div>
 
       <p className='sr-only' id='playlistify-mesh-description'>

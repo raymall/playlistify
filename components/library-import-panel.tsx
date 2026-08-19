@@ -1,5 +1,6 @@
 'use client'
 
+import { CircleAlertIcon } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
@@ -10,7 +11,7 @@ import { isRecord, readJson, readNumber, readString } from '@/lib/json'
 import { wait } from '@/lib/sleep'
 import { type ImportBatchResponse } from '@/lib/spotify/import'
 
-interface LibraryImportPanelProps {
+type LibraryImportPanelProps = {
   hasLibrary: boolean
 }
 
@@ -328,76 +329,87 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
     state.phase === 'error'
       ? 'Retry'
       : hasLibrary
-        ? 'Re-sync Liked Songs'
+        ? 'Sync Liked Songs'
         : 'Import Liked Songs'
 
   const isProgressVisible =
-    state.phase === 'running' ||
-    state.phase === 'waiting' ||
-    state.phase === 'error'
+    state.phase === 'running' || state.phase === 'waiting'
+
+  const progressLabel =
+    state.phase === 'running' || state.phase === 'waiting'
+      ? state.phase === 'waiting'
+        ? state.reason === 'rate_limit'
+          ? `Rate limited — resuming in ${state.secondsLeft}s`
+          : `Connection problem — retrying in ${state.secondsLeft}s`
+        : state.total === null
+          ? 'Preparing…'
+          : `${Math.min(state.offset, state.total).toLocaleString()} / ${state.total.toLocaleString()} songs`
+      : ''
 
   return (
-    <div className='flex flex-col gap-4'>
-      <div className='flex flex-wrap items-center gap-3'>
-        {state.phase === 'reconnect' ? (
-          <Button onClick={() => void signInWithSpotify()}>
-            Reconnect Spotify
-          </Button>
+    <div className='grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:w-72 lg:w-[30rem]'>
+      <div className='flex h-10 min-w-0 items-center'>
+        {isProgressVisible ? (
+          <div className='flex w-full min-w-0 flex-col gap-1'>
+            <Progress
+              aria-label='Liked Songs import progress'
+              className='w-full motion-reduce:**:data-[slot=progress-indicator]:transition-none'
+              max={state.total ?? 100}
+              value={
+                state.total === null
+                  ? null
+                  : Math.min(state.offset, state.total)
+              }
+            />
+            <p className='truncate font-mono text-[0.6875rem] text-muted-foreground tabular-nums'>
+              {progressLabel}
+            </p>
+          </div>
+        ) : state.phase === 'error' ? (
+          <div
+            className='flex min-w-0 items-start gap-1.5 text-xs leading-tight text-destructive'
+            title={state.message}
+          >
+            <CircleAlertIcon
+              aria-hidden='true'
+              className='mt-0.5 size-3.5 shrink-0'
+            />
+            <p className='line-clamp-2'>{state.message}</p>
+          </div>
+        ) : state.phase === 'reconnect' ? (
+          <p className='line-clamp-2 text-xs leading-tight text-muted-foreground'>
+            Spotify connection expired. Reconnect to sync.
+          </p>
+        ) : state.phase === 'done' ? (
+          <p className='line-clamp-2 text-xs leading-tight text-muted-foreground'>
+            {state.total === 0
+              ? 'No Liked Songs found.'
+              : `${state.imported.toLocaleString()} songs synced.`}
+            {state.removed > 0 &&
+              ` ${state.removed.toLocaleString()} no longer liked ${
+                state.removed === 1 ? 'song' : 'songs'
+              } removed.`}
+          </p>
         ) : (
-          <Button disabled={isPrimaryDisabled} onClick={handleStart}>
-            {primaryLabel}
-          </Button>
-        )}
-        {state.phase === 'waiting' && (
-          <span className='text-sm text-muted-foreground tabular-nums'>
-            {state.reason === 'rate_limit'
-              ? `Rate limited — resuming in ${state.secondsLeft}s`
-              : `Connection problem — retrying in ${state.secondsLeft}s`}
-          </span>
+          <span aria-hidden='true' />
         )}
       </div>
 
-      {isProgressVisible && (
-        <div className='flex flex-col gap-2'>
-          <Progress
-            aria-label='Liked Songs import progress'
-            className='w-full max-w-md motion-reduce:**:data-[slot=progress-indicator]:transition-none'
-            max={state.total ?? 100}
-            value={
-              state.total === null ? null : Math.min(state.offset, state.total)
-            }
-          />
-          <p className='text-sm text-muted-foreground tabular-nums'>
-            {state.total === null
-              ? 'Preparing…'
-              : `${Math.min(state.offset, state.total).toLocaleString()} / ${state.total.toLocaleString()} songs`}
-          </p>
-        </div>
+      {state.phase === 'reconnect' ? (
+        <Button onClick={() => void signInWithSpotify()}>
+          Reconnect Spotify
+        </Button>
+      ) : (
+        <Button
+          disabled={isPrimaryDisabled}
+          variant={hasLibrary ? 'outline' : 'default'}
+          onClick={handleStart}
+        >
+          {primaryLabel}
+        </Button>
       )}
 
-      {state.phase === 'error' && (
-        <p className='text-sm text-destructive'>{state.message}</p>
-      )}
-
-      {state.phase === 'reconnect' && (
-        <p className='text-sm text-muted-foreground'>
-          Your Spotify connection expired. Reconnect to import your Liked Songs.
-        </p>
-      )}
-
-      {state.phase === 'done' && (
-        <p className='text-sm text-muted-foreground'>
-          {state.total === 0
-            ? 'No Liked Songs found in your Spotify library.'
-            : `Imported ${state.imported.toLocaleString()} songs from your Spotify library.`}
-          {state.removed > 0 &&
-            ` Removed ${state.removed.toLocaleString()} no longer liked ${
-              state.removed === 1 ? 'song' : 'songs'
-            }.`}
-        </p>
-      )}
-
-      <div className='sr-only' role='status'>
+      <div className='sr-only col-span-2' role='status'>
         {announcement}
       </div>
     </div>

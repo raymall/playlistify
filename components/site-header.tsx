@@ -6,18 +6,18 @@ import { ThemeToggle } from '@/components/theme-toggle'
 
 export function SiteHeader() {
   return (
-    <header className='site-header border-b'>
-      <div className='mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6'>
+    <header className='site-header border-b border-border'>
+      <div className='mx-auto flex h-16 w-full max-w-[100rem] items-center justify-between px-4 sm:px-6 lg:px-10'>
         <div className='flex items-center gap-8'>
           <Link
-            className='text-sm font-bold tracking-[0.14em] uppercase'
+            className='hidden font-display text-lg leading-none tracking-[-0.035em] uppercase sm:block'
             href='/'
           >
             Playlistify
           </Link>
           <NavLinks />
         </div>
-        <div className='flex items-center gap-2'>
+        <div className='flex items-center gap-1 sm:gap-2'>
           <ThemeToggle />
           <AccountMenu />
         </div>

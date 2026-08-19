@@ -22,15 +22,16 @@ export const LibraryTableSkeleton = () => (
     <Table className='table-fixed'>
       <TableHeader>
         <TableRow>
-          <TableHead className='w-16' scope='col'>
-            <span className='sr-only'>Artwork</span>
+          <TableHead className='w-22' scope='col'>
+            Art
           </TableHead>
-          <TableHead scope='col'>Title</TableHead>
-          <TableHead scope='col'>Artists</TableHead>
-          <TableHead className='w-2/5' scope='col'>
+          <TableHead className='w-1/3' scope='col'>
+            Title / Artist
+          </TableHead>
+          <TableHead className='hidden w-2/5 md:table-cell' scope='col'>
             Tags
           </TableHead>
-          <TableHead className='w-32 text-right' scope='col'>
+          <TableHead className='w-28 text-right' scope='col'>
             Confidence
           </TableHead>
         </TableRow>
@@ -39,15 +40,15 @@ export const LibraryTableSkeleton = () => (
         {PLACEHOLDER_ROWS.map((key) => (
           <TableRow key={key}>
             <TableCell>
-              <Skeleton className='size-10' />
+              <Skeleton className='size-16 sm:size-18' />
             </TableCell>
             <TableCell>
-              <Skeleton className='h-4 w-3/4' />
+              <div className='flex flex-col gap-2'>
+                <Skeleton className='h-4 w-3/4' />
+                <Skeleton className='h-3 w-2/3' />
+              </div>
             </TableCell>
-            <TableCell>
-              <Skeleton className='h-4 w-2/3' />
-            </TableCell>
-            <TableCell>
+            <TableCell className='hidden md:table-cell'>
               <div className='flex flex-wrap gap-1.5'>
                 <Skeleton className='h-5 w-16 rounded-4xl' />
                 <Skeleton className='h-5 w-20 rounded-4xl' />

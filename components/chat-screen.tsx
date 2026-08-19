@@ -69,8 +69,8 @@ export const ChatScreen = () => {
   const isBusy = status === 'streaming' || status === 'submitted'
 
   return (
-    <div className='mt-8 grid gap-6 lg:h-[70dvh] lg:grid-cols-2'>
-      <div className='flex min-h-0 flex-col rounded-lg border p-4'>
+    <div className='mt-8 grid gap-5 lg:h-[72dvh] lg:grid-cols-[minmax(18rem,1fr)_minmax(0,2fr)]'>
+      <div className='flex min-h-0 flex-col border-2 border-border'>
         <ChatConversation
           error={error}
           messages={messages}
@@ -95,9 +95,13 @@ export const ChatScreen = () => {
             }
           />
         ) : (
-          <div className='flex h-full items-center justify-center rounded-lg border border-dashed p-6'>
-            <p className='max-w-xs text-center text-sm text-muted-foreground'>
-              Your playlist preview will appear here once I’ve put one together.
+          <div className='flex h-full flex-col justify-between border-2 border-border p-6 sm:p-8'>
+            <p className='editorial-kicker'>Playlist preview</p>
+            <p className='max-w-xl font-display text-[clamp(2.5rem,6vw,6rem)] leading-[0.9] tracking-[-0.05em] text-muted-foreground uppercase'>
+              Your next playlist starts with a sentence.
+            </p>
+            <p className='max-w-sm text-sm text-muted-foreground'>
+              The editable track list will appear here after the first search.
             </p>
           </div>
         )}

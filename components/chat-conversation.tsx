@@ -16,7 +16,7 @@ import { readSearchSummary } from '@/lib/chat/contract'
 import { usePromptSuggestions } from '@/lib/chat/use-prompt-suggestions'
 import { isRecord } from '@/lib/json'
 
-interface ChatConversationProps {
+type ChatConversationProps = {
   messages: UIMessage[]
   status: ChatStatus
   error: Error | undefined
@@ -150,12 +150,12 @@ const PromptSuggestions = ({ status, onSend }: PromptSuggestionsProps) => {
   if (suggestionState.status === 'unavailable') return null
 
   return (
-    <div className='flex flex-col gap-3'>
+    <div className='flex flex-col gap-5'>
       <p className='text-sm text-muted-foreground'>
         Describe the playlist you want and I’ll build it from your library. For
         example:
       </p>
-      <div className='flex flex-col items-start gap-2'>
+      <div className='flex flex-col items-stretch gap-2'>
         {suggestionState.status === 'loading' ? (
           <>
             <span className='sr-only' role='status'>
@@ -173,6 +173,7 @@ const PromptSuggestions = ({ status, onSend }: PromptSuggestionsProps) => {
           suggestionState.suggestions.map((prompt) => (
             <Button
               key={prompt}
+              className='h-auto justify-start py-3 text-left whitespace-normal normal-case'
               disabled={status !== 'ready'}
               size='sm'
               variant='outline'
@@ -215,8 +216,8 @@ export const ChatConversation = ({
   }
 
   return (
-    <div className='flex h-full flex-col gap-4'>
-      <div className='flex flex-1 flex-col gap-4 overflow-y-auto'>
+    <div className='flex h-full min-h-0 flex-col'>
+      <div className='flex flex-1 flex-col gap-5 overflow-y-auto p-4 sm:p-5'>
         {messages.length === 0 ? (
           <PromptSuggestions status={status} onSend={onSend} />
         ) : (
@@ -225,8 +226,8 @@ export const ChatConversation = ({
               key={message.id}
               className={
                 message.role === 'user'
-                  ? 'flex flex-col gap-1 rounded-lg bg-muted px-3 py-2'
-                  : 'flex flex-col gap-1'
+                  ? 'flex flex-col gap-1 border-l-4 border-border bg-muted px-3 py-3'
+                  : 'flex flex-col gap-1 border-l border-border pl-3'
               }
             >
               <span className='sr-only'>
@@ -239,7 +240,7 @@ export const ChatConversation = ({
       </div>
 
       {error !== undefined && (
-        <div className='flex items-center justify-between gap-3 rounded-lg border border-destructive/50 px-3 py-2'>
+        <div className='mx-4 flex items-center justify-between gap-3 border border-destructive/50 px-3 py-2'>
           <p className='text-sm text-destructive'>
             Something went wrong. Please try again.
           </p>
@@ -254,27 +255,33 @@ export const ChatConversation = ({
         </div>
       )}
 
-      <div className='flex flex-col gap-2'>
+      <div className='flex flex-col gap-2 border-t-2 border-border p-4'>
         <label className='sr-only' htmlFor='chat-input'>
           Describe your playlist
         </label>
         <Textarea
+          className='rounded-none border-control bg-background px-3 py-3 dark:bg-background'
           id='chat-input'
-          placeholder='Describe the playlist you want…'
-          rows={2}
+          placeholder='Describe a mood, setting, or sequence…'
+          rows={4}
           value={input}
           onChange={(event) => {
             setInput(event.target.value)
           }}
           onKeyDown={handleKeyDown}
         />
-        <div className='flex items-center justify-end gap-2'>
+        <div className='grid gap-2'>
           {isStreaming && (
             <Button size='sm' variant='outline' onClick={onStop}>
               Stop
             </Button>
           )}
-          <Button disabled={!canSend} size='sm' onClick={submit}>
+          <Button
+            className='w-full'
+            disabled={!canSend}
+            size='lg'
+            onClick={submit}
+          >
             Send
           </Button>
         </div>

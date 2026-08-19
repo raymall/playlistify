@@ -305,13 +305,14 @@ export const PlaylistActions = ({
       : 'This removes the stored playlist from Playlistify and unfollows it in Spotify. This cannot be undone.'
 
   return (
-    <div className='flex flex-col items-start gap-2 sm:items-end'>
-      <div className='flex flex-wrap gap-2 sm:justify-end'>
+    <div className='flex w-full flex-col gap-2'>
+      <div className='grid w-full grid-cols-2 gap-2'>
         <Dialog open={isEditOpen} onOpenChange={handleEditOpenChange}>
           <DialogTrigger
             render={
               <Button
                 aria-label={`Edit “${name}”`}
+                className='order-2 w-full'
                 disabled={isBusy}
                 size='sm'
                 variant='outline'
@@ -383,16 +384,23 @@ export const PlaylistActions = ({
                 )}
               </div>
 
-              <DialogFooter>
+              <DialogFooter className='grid grid-cols-2 gap-2 sm:grid-cols-2 sm:justify-stretch'>
                 <DialogClose
                   aria-label={`Cancel editing “${name}”`}
                   disabled={busyAction === 'edit'}
-                  render={<Button type='button' variant='outline' />}
+                  render={
+                    <Button
+                      className='w-full'
+                      type='button'
+                      variant='outline'
+                    />
+                  }
                 >
                   Cancel
                 </DialogClose>
                 <Button
                   aria-label={`Save changes to “${name}”`}
+                  className='w-full'
                   disabled={busyAction === 'edit'}
                   type='submit'
                 >
@@ -406,6 +414,7 @@ export const PlaylistActions = ({
         {canRecreate && (
           <Button
             aria-label={`Recreate “${name}” in Spotify`}
+            className='order-1 col-span-2 w-full'
             disabled={isBusy}
             size='sm'
             onClick={() => void handleRecreate()}
@@ -419,6 +428,7 @@ export const PlaylistActions = ({
             render={
               <Button
                 aria-label={`Delete “${name}”`}
+                className='order-3 w-full'
                 disabled={isBusy}
                 size='sm'
                 variant='destructive'

@@ -16,11 +16,11 @@ the same commit (rule in `AGENTS.md`).
 - `app/auth/` — OAuth callback + signout route handlers.
 - `components/` — React components (kebab-case, one primary per file);
   `library-*.tsx` are the `/library` panels and table — only
-  `import-panel`, `enrichment-panel`, `search-bar`, `tag-editor`,
+  `import-panel`, `enrichment-panel`, `search-bar`, `table`, `tag-editor`,
   and `confidence-info` are client components; `chat-screen.tsx`
   (chat state owner), `chat-conversation.tsx` (messages + composer), and
   `playlist-preview-panel.tsx` (proposal review + create) are the `/chat` UI;
-  `playlist-status-panel.tsx`, `playlist-actions.tsx`, and
+  `playlist-status-panel.tsx`, `playlist-actions.tsx`, `playlist-details.tsx`, and
   `playlist-tag-chips.tsx` provide the narrow client/server islands on the
   managed `/playlists` cards; `playlistify-mesh-landing.tsx` owns the shared
   Wake/Veil canvas and `playlistify-mesh-tagline.tsx` owns its animated landing
@@ -138,7 +138,8 @@ the same commit (rule in `AGENTS.md`).
   in `MVP-PLAN.md` § Database Schema.
 - `proxy.ts` — runs on every request: session refresh + route protection.
 - Root: `MVP-PLAN.md` (product spec), `HOW-IT-WORKS.md` (plain-language
-  reasoning for behavior that has shipped), `IMPROVEMENTS.md` (committed log of
+  reasoning for behavior that has shipped), `DESIGN-SYSTEM.md` (visual-system
+  tokens, components, and screen decisions), `IMPROVEMENTS.md` (committed log of
   sharp edges + deferred work), `AGENTS.md`/`CLAUDE.md` (agent instructions),
   `README.md` (setup), `.nvmrc` + `package.json#engines` (Node 24 runtime
   contract), `.env.example` (every env var, commented), `next.config.ts`
@@ -148,7 +149,7 @@ the same commit (rule in `AGENTS.md`).
 
 Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
 
-- `/` — Wake animated mesh, briefly rotating liked-songs tagline, and
+- `/` — Wake animated mesh, continuously decoding liked-songs tagline, and
   "Continue with Spotify"; proxy redirects signed-in users to `/chat`
   (`app/page.tsx`,
   `components/playlistify-mesh-landing.tsx`,
@@ -165,7 +166,7 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   hiding, and personal tags. The row's title cell is its `<th scope='row'>`, so
   the tag editor is announced against a song name. There is **no** per-song
   analysis control: the panel names the current recipe (model, effort, batch
-  size, versions, rank) beside **Analyze & improve**, plus a line per stronger
+  size, versions, rank) beside **Enrich**, plus a line per stronger
   recipe the next run would escalate to and how many songs move, and each row's
   tag popover names the recipe behind that song's own result — `Recipe:
 current` when it is the default, otherwise the recipe's label. URL
@@ -182,10 +183,11 @@ current` when it is the default, otherwise the recipe's label. URL
   panel (rename, edit, drop tracks, create). Server-rendered empty states for
   no-library / not-yet-enriched (`app/chat/page.tsx` + `components/chat-*`,
   `components/playlist-preview-panel.tsx`).
-- `/playlists` — created-playlist management: cached live Spotify status and
-  authoritative title/description/cover metadata, edit, delete/unfollow,
-  recreate-from-stored-tracks, effective genre/mood rollups, and a Start
-  Playlist link
+- `/playlists` — featured-newest plus collection-grid playlist management:
+  cached live Spotify status and authoritative title/description/cover
+  metadata, Spotify-linked artwork and titles, a details dialog, edit,
+  delete/unfollow, recreate-from-stored-tracks, effective genre/mood rollups,
+  and a Start Playlist link
   (`app/playlists/page.tsx`, `app/playlists/loading.tsx` +
   `components/playlist-{status-panel,actions,tag-chips}.tsx`).
 - Chrome: `app/layout.tsx` — fonts, `ThemeProvider`, `SiteHeader` (nav,

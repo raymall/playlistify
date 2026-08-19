@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, UserRoundIcon } from 'lucide-react'
 
 import { buttonVariants } from '@/components/ui/button'
 import {
@@ -28,13 +28,15 @@ export function AccountMenuClient({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        aria-label={`Account menu for ${displayName}`}
         className={cn(
           buttonVariants({ variant: 'ghost', size: 'sm' }),
-          'text-xs font-medium tracking-[0.14em] uppercase',
+          'w-10 gap-1.5 px-0 text-xs font-medium tracking-[0.14em] uppercase md:w-auto md:px-3',
         )}
       >
-        {displayName}
-        <ChevronDown className='size-3' />
+        <UserRoundIcon className='size-4 md:hidden' />
+        <span className='hidden md:inline'>{displayName}</span>
+        <ChevronDown className='hidden size-3 md:block' />
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end'>
         {needsReconnect && (

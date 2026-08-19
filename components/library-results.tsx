@@ -97,11 +97,14 @@ export const LibraryResults = async ({
             activeMoods={effectiveState.moods}
             songs={result.songs}
           />
-          <LibraryPagination
-            page={effectiveState.page}
-            pageCount={result.pageCount}
-            state={effectiveState}
-          />
+          <div className='grid lg:grid-cols-[minmax(17rem,0.72fr)_minmax(0,1.75fr)] lg:gap-6 xl:gap-10'>
+            <div aria-hidden='true' className='hidden lg:block' />
+            <LibraryPagination
+              page={effectiveState.page}
+              pageCount={result.pageCount}
+              state={effectiveState}
+            />
+          </div>
         </div>
       ) : (
         canClear && (

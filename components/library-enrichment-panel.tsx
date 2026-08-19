@@ -1,14 +1,11 @@
 'use client'
 
+import { SparklesIcon } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import {
-  ANALYSIS_BUDGET_COPY,
-  ANALYSIS_SHARED_RESULT_COPY,
-} from '@/lib/enrichment/confidence'
 import {
   type EnrichBatchResponse,
   type EnrichmentCounts,
@@ -137,11 +134,13 @@ const parseResponse = (value: unknown): EnrichBatchResponse | null => {
 }
 
 const SummaryCount = ({ count, label }: { count: number; label: string }) => (
-  <div className='flex min-w-28 flex-col border-s border-border ps-3'>
-    <span className='text-xl font-semibold tabular-nums'>
+  <div className='flex min-w-0 flex-col items-center border-s-2 border-border px-3 py-1 text-center first:border-s-0 sm:px-4'>
+    <span className='font-display text-2xl leading-none tabular-nums'>
       {count.toLocaleString()}
     </span>
-    <span className='text-xs text-muted-foreground'>{label}</span>
+    <span className='mt-1 font-mono text-[0.6875rem] tracking-[0.08em] text-muted-foreground uppercase'>
+      {label}
+    </span>
   </div>
 )
 
@@ -360,11 +359,11 @@ export const LibraryEnrichmentPanel = ({
       processedThisRun += parsed.batchProcessed
       if (parsed.batchPromoted > 0) {
         setAnnouncement(
-          `${parsed.batchPromoted.toLocaleString()} shared ${parsed.batchPromoted === 1 ? 'analysis was' : 'analyses were'} improved.`,
+          `${parsed.batchPromoted.toLocaleString()} shared ${parsed.batchPromoted === 1 ? 'analysis was' : 'analyses were'} enriched.`,
         )
       } else if (parsed.batchRejected > 0) {
         setAnnouncement(
-          'The checked candidates did not improve the shared analysis.',
+          'The checked candidates did not enrich the shared analysis.',
         )
       }
       router.refresh()
@@ -414,31 +413,32 @@ export const LibraryEnrichmentPanel = ({
     state.phase === 'error'
       ? 'Retry'
       : state.phase === 'paused'
-        ? 'Resume analysis'
+        ? 'Resume enrichment'
         : state.phase === 'capReached'
-          ? 'Continue analysis'
+          ? 'Continue enrichment'
           : isActive
-            ? 'Analyzing…'
+            ? 'Enriching…'
             : counts.eligible > 0
-              ? `Analyze & improve ${counts.eligible.toLocaleString()}`
+              ? 'Enrich'
               : 'Confidence up to date'
 
   return (
     <section
-      aria-labelledby='library-confidence-heading'
-      className='mt-6 flex flex-col gap-4 border-t border-border pt-6'
+      aria-label='Library analysis status'
+      className='flex flex-col gap-6'
     >
-      <div className='flex flex-col gap-1'>
-        <h2 className='text-sm font-semibold' id='library-confidence-heading'>
-          Confidence
-        </h2>
-        <p className='max-w-prose text-sm text-muted-foreground'>
-          Confidence is reported by the model, not measured accuracy.{' '}
-          {ANALYSIS_SHARED_RESULT_COPY} {ANALYSIS_BUDGET_COPY}
-        </p>
-      </div>
+      {currentRecipe !== null && (
+        <div className='min-w-0 bg-muted px-5 py-4 sm:px-6'>
+          <p className='font-display text-2xl leading-none tracking-[-0.035em] sm:text-3xl'>
+            {currentRecipe.label}
+          </p>
+          <p className='editorial-kicker mt-2 truncate text-muted-foreground'>
+            Current recipe / {describeRecipe(currentRecipe)}
+          </p>
+        </div>
+      )}
 
-      <div className='flex flex-wrap gap-x-3 gap-y-3'>
+      <div className='grid w-full grid-cols-2 gap-y-4 sm:grid-cols-5 sm:gap-y-0'>
         <SummaryCount count={counts.pending} label='Pending' />
         <SummaryCount count={counts.none} label='None' />
         <SummaryCount count={counts.low} label='Low' />
@@ -446,36 +446,45 @@ export const LibraryEnrichmentPanel = ({
         <SummaryCount count={counts.high} label='High' />
       </div>
 
-      <div className='flex flex-wrap items-center gap-3'>
-        <Button
-          disabled={isActive || counts.eligible === 0}
-          onClick={handleStart}
-        >
-          {primaryLabel}
-        </Button>
-        {isActive && (
-          <Button disabled={isPausing} variant='outline' onClick={handlePause}>
-            {isPausing ? 'Pausing…' : 'Pause'}
+      <div className='grid gap-4 border-y-2 border-border py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center'>
+        <div className='flex min-w-0 flex-col gap-2'>
+          <div className='flex items-center justify-between gap-4 font-mono text-xs tabular-nums'>
+            <span>{analyzed.toLocaleString()} enriched</span>
+            <span className='text-muted-foreground'>
+              {counts.total.toLocaleString()} total
+            </span>
+          </div>
+          <Progress
+            aria-label='Library confidence progress'
+            className='w-full motion-reduce:[&_[data-slot=progress-indicator]]:transition-none [&_[data-slot=progress-track]]:h-2'
+            max={counts.total}
+            value={analyzed}
+          />
+        </div>
+        <div className='flex flex-wrap items-center gap-3 lg:justify-end'>
+          <Button
+            className='min-w-56'
+            disabled={isActive || counts.eligible === 0}
+            size='lg'
+            onClick={handleStart}
+          >
+            <SparklesIcon aria-hidden='true' data-icon='inline-start' />
+            {primaryLabel}
           </Button>
-        )}
-        {counts.queued > 0 && (
-          <p className='text-sm text-muted-foreground tabular-nums'>
-            {counts.queued.toLocaleString()} queued
-          </p>
-        )}
+          {isActive && (
+            <Button
+              disabled={isPausing}
+              variant='outline'
+              onClick={handlePause}
+            >
+              {isPausing ? 'Pausing…' : 'Pause'}
+            </Button>
+          )}
+        </div>
       </div>
 
-      {currentRecipe !== null && (
+      {currentRecipe !== null && escalations.length > 0 && (
         <div className='flex flex-col gap-0.5 text-xs text-muted-foreground'>
-          <p>
-            Analyzing with{' '}
-            <span className='font-medium text-foreground'>
-              {currentRecipe.label}
-            </span>
-            {currentRecipe.canEnrichAllSongs &&
-              ' — this recipe also revisits High songs'}
-          </p>
-          <p>{describeRecipe(currentRecipe)}</p>
           {escalations.map((recipe) => (
             <p key={recipe.recipeId} className='tabular-nums'>
               {recipe.escalatingSongs.toLocaleString()}{' '}
@@ -491,16 +500,6 @@ export const LibraryEnrichmentPanel = ({
 
       {(isActive || state.phase === 'paused' || state.phase === 'error') && (
         <div className='flex flex-col gap-2'>
-          <Progress
-            aria-label='Library confidence progress'
-            className='w-full max-w-md motion-reduce:[&_[data-slot=progress-indicator]]:transition-none'
-            max={counts.total}
-            value={analyzed}
-          />
-          <p className='text-sm text-muted-foreground tabular-nums'>
-            {analyzed.toLocaleString()} / {counts.total.toLocaleString()}{' '}
-            analyzed
-          </p>
           {isPausing && (
             <p className='text-sm text-muted-foreground'>
               Finishing the current attempt before pausing…

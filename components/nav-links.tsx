@@ -15,15 +15,15 @@ export function NavLinks() {
   const pathname = usePathname()
 
   return (
-    <nav aria-label='Main' className='flex items-center gap-6'>
+    <nav aria-label='Main' className='flex items-center gap-3 sm:gap-6'>
       {links.map(({ href, label }) => (
         <Link
           key={href}
           className={cn(
-            'text-xs font-medium tracking-[0.14em] uppercase transition-colors',
+            'border-b-2 py-1 font-mono text-[0.6875rem] font-medium tracking-[0.12em] uppercase transition-colors',
             pathname.startsWith(href)
-              ? 'text-foreground'
-              : 'text-muted-foreground hover:text-foreground',
+              ? 'border-control text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground',
           )}
           href={href}
         >

@@ -7,7 +7,14 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --color-control: var(--control);
+  --color-control-foreground: var(--control-foreground);
+  --color-control-ring: var(--control-ring);
+  --color-control-soft: var(--control-soft);
+  --color-control-soft-foreground: var(--control-soft-foreground);
+  --font-display: var(--font-display-loaded), 'Archivo Black', sans-serif;
+  --font-mono: var(--font-mono-loaded), 'IBM Plex Mono', monospace;
+  --font-sans: var(--font-archivo-loaded), 'Archivo', sans-serif;
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -30,42 +37,52 @@
 }
 
 :root {
-  --background: oklch(100% 0 0deg);
-  --foreground: oklch(14.5% 0 0deg);
-  --popover: oklch(100% 0 0deg);
-  --popover-foreground: oklch(14.5% 0 0deg);
-  --primary: oklch(20.5% 0 0deg);
-  --primary-foreground: oklch(98.5% 0 0deg);
-  --secondary: oklch(97% 0 0deg);
-  --secondary-foreground: oklch(20.5% 0 0deg);
-  --muted: oklch(97% 0 0deg);
-  --muted-foreground: oklch(55.6% 0 0deg);
-  --accent: oklch(97% 0 0deg);
-  --accent-foreground: oklch(20.5% 0 0deg);
+  --background: #f2efe6;
+  --foreground: #11110f;
+  --popover: #f8f5ed;
+  --popover-foreground: #11110f;
+  --primary: #11110f;
+  --primary-foreground: #f8f5ed;
+  --secondary: #ded8ca;
+  --secondary-foreground: #11110f;
+  --muted: #e8e3d8;
+  --muted-foreground: #68655e;
+  --accent: #ded8ca;
+  --accent-foreground: #11110f;
   --destructive: oklch(57.7% 0.245 27.325deg);
-  --border: oklch(92.2% 0 0deg);
-  --input: oklch(92.2% 0 0deg);
-  --ring: oklch(70.8% 0 0deg);
+  --border: rgb(17 17 15 / 32%);
+  --input: #11110f;
+  --ring: #11110f;
+  --control: #263f2a;
+  --control-foreground: #f4f6ed;
+  --control-ring: #557341;
+  --control-soft: #c7d2ba;
+  --control-soft-foreground: #162019;
   --radius: 0rem;
 }
 
 .dark {
-  --background: oklch(14.5% 0 0deg);
-  --foreground: oklch(98.5% 0 0deg);
-  --popover: oklch(20.5% 0 0deg);
-  --popover-foreground: oklch(98.5% 0 0deg);
-  --primary: oklch(92.2% 0 0deg);
-  --primary-foreground: oklch(20.5% 0 0deg);
-  --secondary: oklch(26.9% 0 0deg);
-  --secondary-foreground: oklch(98.5% 0 0deg);
-  --muted: oklch(26.9% 0 0deg);
-  --muted-foreground: oklch(70.8% 0 0deg);
-  --accent: oklch(26.9% 0 0deg);
-  --accent-foreground: oklch(98.5% 0 0deg);
+  --background: #11110f;
+  --foreground: #f2efe6;
+  --popover: #191917;
+  --popover-foreground: #f2efe6;
+  --primary: #f2efe6;
+  --primary-foreground: #11110f;
+  --secondary: #2c2a26;
+  --secondary-foreground: #f2efe6;
+  --muted: #24231f;
+  --muted-foreground: #aaa69c;
+  --accent: #35322d;
+  --accent-foreground: #f2efe6;
   --destructive: oklch(70.4% 0.191 22.216deg);
-  --border: oklch(100% 0 0deg / 10%);
-  --input: oklch(100% 0 0deg / 15%);
-  --ring: oklch(55.6% 0 0deg);
+  --border: rgb(242 239 230 / 32%);
+  --input: #f2efe6;
+  --ring: #f2efe6;
+  --control: #557341;
+  --control-foreground: #f4f6ed;
+  --control-ring: #8ca462;
+  --control-soft: #263f2a;
+  --control-soft-foreground: #edf2e6;
 }
 
 @layer base {
@@ -75,6 +92,8 @@
 
   body {
     @apply bg-background text-foreground;
+
+    min-width: 20rem;
   }
 
   html {
@@ -87,6 +106,29 @@
   h4 {
     @apply tracking-tight text-balance;
   }
+
+  ::selection {
+    color: var(--primary-foreground);
+    background: var(--primary);
+  }
+}
+
+@layer components {
+  .editorial-kicker {
+    @apply font-mono text-[0.6875rem] leading-none font-medium tracking-[0.16em] uppercase;
+  }
+
+  .editorial-title {
+    @apply font-display text-[clamp(3.5rem,10vw,8rem)] leading-[0.82] tracking-[-0.055em];
+  }
+
+  .editorial-section-title {
+    @apply font-display text-[clamp(2rem,5vw,4rem)] leading-[0.9] tracking-[-0.045em] uppercase;
+  }
+
+  .editorial-rule {
+    @apply border-border;
+  }
 }
 
 body:has(.mesh-landing) {
@@ -95,6 +137,10 @@ body:has(.mesh-landing) {
 
 body:has(.mesh-landing) .site-header {
   display: none;
+}
+
+.global-chandler-cutout {
+  width: clamp(9rem, 25vw, 25rem);
 }
 
 .mesh-landing {
@@ -173,7 +219,7 @@ body:has(.mesh-landing) .site-header {
   inset-block-start: 50%;
   inset-inline-start: 50%;
   z-index: 2;
-  font-family: var(--font-wordmark), sans-serif;
+  font-family: var(--font-archivo-loaded), Archivo, sans-serif;
   font-size: clamp(1.75rem, 5.5vw, 3.75rem);
   font-weight: 700;
   line-height: 1;
@@ -258,6 +304,7 @@ body:has(.mesh-landing) .site-header {
   place-items: center;
   width: 100%;
   min-height: calc(2 * 1.45em);
+  font-family: var(--font-mono-loaded), 'IBM Plex Mono', monospace;
   font-size: clamp(0.9375rem, 2.4vw, 1.125rem);
   line-height: 1.45;
   color: #e8eede;
@@ -317,7 +364,7 @@ body:has(.mesh-landing) .site-header {
 }
 
 @media (height <= 34rem) {
-  .mesh-landing-cutout {
+  body:has(.mesh-landing) .global-chandler-cutout {
     display: none;
   }
 
