@@ -331,6 +331,26 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** clean migration output is easier to trust at a glance, and the
   local catalog cache is restored when the daemon is available.
 
+## Two enabled recipes at one rank tiebreak on a hash
+
+- **In plain terms:** if two recipes are ever enabled at the same rank, which
+  one analyzes a song is settled by a hash — effectively at random, and liable
+  to flip the next time either is re-minted. Nothing in the database prevents
+  the situation; only the sync script warns about it.
+- **Severity:** Low — the catalog has one enabled recipe per rank today, and
+  `npm run recipe:sync` warns before writing. It becomes real the first time
+  two are enabled together, and it is silent from then on.
+- **Issue:** `next_enrichment_recipe` orders by `enrichment_rank` then
+  `recipe_key` (current definition in migration
+  `20260815230557_stronger_recipe_revisits_high.sql`). Recipe keys used to end
+  in readable version strings; since recipe snapshots they end in a
+  `content_hash` prefix, so the tiebreak carries no meaning — and re-minting
+  either recipe can silently swap which of the two wins.
+- **Why fix:** either make the tiebreak meaningful (prefer the most recently
+  created row) or make the state impossible — a partial unique index on
+  `enrichment_rank where enabled`, matching how `is_default` is already
+  constrained, which would turn the script's warning into a guarantee.
+
 ---
 
 # Deferred
@@ -526,24 +546,21 @@ would duplicate an existing item, contradict one, or make one obsolete:
   `verify:*` commands preserve convenience without granting future scripts a
   blank cheque.
 
-## Version and measure the enrichment system prompt
+## Measure enrichment prompt revisions before enabling them
 
-- **In plain terms:** the enrichment prompt is still its original unmeasured
-  draft. The recipe catalog labels it `prompt-v1`, but code does not prove that
-  the text still matches that version. Add an explicit prompt registry/version
-  check and evaluate revisions before enabling them.
-- **Complexity:** Medium — the version guard is small; proving a revision is
-  better depends on the enrichment eval harness.
-- **Issue:** `SYSTEM_PROMPT` remains hardcoded in
-  `lib/enrichment/engine.ts`. Claimed recipes carry `prompt_version`, and
-  `isSupportedRecipe` accepts the literal `prompt-v1`, but no hash or registry
-  binds that version to the prompt text. An innocent text edit without a new
-  recipe would make future immutable attempts claim the old recipe identity.
-  The prompt itself has never been A/B tested.
-- **Why fix:** map version strings to immutable prompt text, fail unsupported
-  versions, and create a new recipe row for every measured prompt revision.
-  Candidate improvements include clearer genre-versus-mood guidance and
-  examples, while preserving the instruction not to guess unknown recordings.
+- **In plain terms:** the enrichment prompt is now frozen verbatim into every
+  recipe and hash-bound to it (editing the text mints a new recipe), so the
+  old version-binding gap is closed — but the text itself is still the
+  original unmeasured draft. Evaluate revisions before enabling them.
+- **Complexity:** Medium — minting a revision is now one file edit plus
+  `recipe:sync`; proving it is better depends on the enrichment eval harness.
+- **Issue:** the prompt lives in `recipes/prompts/enrichment-v1.md` and is
+  stored on each recipe row under a unique content hash, but it has never been
+  A/B tested; nothing measures whether a revision helps or harms recognition
+  or tag quality.
+- **Why fix:** mint prompt revisions only with evidence. Candidate
+  improvements include clearer genre-versus-mood guidance and examples, while
+  preserving the instruction not to guess unknown recordings.
 
 ## Database CHECK statuses generate as plain strings
 
@@ -580,24 +597,24 @@ would duplicate an existing item, contradict one, or make one obsolete:
 
 ## Classify hardcoded constants versus real configuration
 
-- **In plain terms:** one enrichment limit is an env var and two more became
-  recipe columns, while page sizes, retry budgets, leases, and timeouts are
-  spread through code and SQL. Decide
+- **In plain terms:** one enrichment limit is an env var and the whole
+  answer-shaping method now lives on the recipe snapshot, while page sizes,
+  retry budgets, leases, and timeouts are spread through code and SQL. Decide
   which are operational knobs and which are invariants; do not move them all
   blindly.
 - **Complexity:** Medium — a code/SQL sweep plus documentation for the values
   that remain intentionally fixed.
 - **Issue:** `ENRICHMENT_MAX_SONGS_PER_RUN` is the one clamped environment
-  variable left; batch size and reasoning effort moved onto
-  `enrichment_recipes`, which is a third category the original sweep did not
-  anticipate — data that belongs to a versioned identity rather than to code or
-  to deployment. Other
+  variable left; batch size, reasoning effort, and — since recipe snapshots —
+  the prompt, identity fields, output spec, and frozen vocabulary all live on
+  `enrichment_recipes`, a third category the original sweep did not
+  anticipate: data that belongs to a hash-frozen identity rather than to code
+  or to deployment. Other
   possible tunables remain hardcoded: library/import page sizes, Supabase retry
   ladders, Spotify token expiry buffer, enrichment-panel retry budgets, the
   600-second job lease, and the 3-second queue wait. The refactor also added
   policy constants that should stay fixed in code/database: the three-attempt
-  job cap, confidence thresholds, provider/API chunk limits, and recipe version
-  identifiers.
+  job cap, confidence thresholds, and provider/API chunk limits.
 - **Why fix:** classify values by purpose. Move only deployment-specific knobs
   behind clamped server-side configuration, keep protocol and safety bounds in
   code/SQL, and document every new environment variable in `.env.example` and
@@ -629,20 +646,22 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Complexity:** Medium — an owner-only list and promote action, or a focused
   operational script, plus a decision on what a vocabulary revision re-opens.
 - **Issue:** `unmatched_tags` records kind, normalized name, occurrence count,
-  and timestamps. There is no workflow to review frequent candidates, promote
-  one into the approved vocabulary, version that vocabulary change, and decide
-  whether affected songs should be rechecked. The 2026-08-13 widening did all
-  four by hand — 27 moods promoted by migration, a new `vocabulary-v2` recipe
-  generation cut to carry them, and nothing re-opened — which is what the
-  workflow would have to automate.
+  and timestamps. There is no workflow to review frequent candidates or
+  promote one into the approved vocabulary — approval is still a hand-written
+  migration. Carrying an approval into the running recipes is the half recipe
+  snapshots settled: `npm run recipe:sync` mints recipes that freeze the
+  updated list, and `verify:recipes` warns while the live vocabulary has
+  drifted from the newest snapshot. Nothing decides whether affected songs
+  should be rechecked; the 2026-08-13 widening promoted 27 moods by migration
+  and re-opened nothing.
 - **Why fix:** the signal is useful only when review is cheap and promotion
-  preserves recipe/vocabulary identity. Cutting a new generation is the settled
-  half; the open half is what a vocabulary revision should do to existing songs.
-  Re-matching without a new model call is currently impossible — only the
-  approved names that matched are persisted, and `unmatched_tags` counts raw output without
-  linking it to a song — so the questions are which songs a `vocabulary_version`
-  change re-opens, and whether that resets the per-rank attempt budget the way a
-  rank increase does.
+  preserves recipe/vocabulary identity. Minting the new generation is the
+  settled half; the open half is what a vocabulary revision should do to
+  existing songs. Re-matching without a new model call is currently
+  impossible — only the approved names that matched are persisted, and
+  `unmatched_tags` counts raw output without linking it to a song — so the
+  questions are which songs a vocabulary-changing mint re-opens, and whether
+  that resets the per-rank attempt budget the way a rank increase does.
 
 ## The enrichment queue and promotion path have no metrics
 
@@ -670,12 +689,13 @@ would duplicate an existing item, contradict one, or make one obsolete:
   recordings, not winning a general coding leaderboard. Rank future providers
   on the app's own holdout set.
 - **Complexity:** Medium once the shared eval harness exists.
-- **Issue:** `enrichment_recipes.enrichment_rank` is authoritative. The
-  catalog contains only OpenAI recipes — three current vocabulary-v2 rows plus
-  the retired vocabulary-v1 generation — whose within-provider
-  ordering is understandable. A future Claude/Grok/other recipe cannot be
-  placed defensibly by reputation because general benchmarks do not measure
-  music-recognition recall or tag quality.
+- **Issue:** `enrichment_recipes.enrichment_rank` is authoritative (and set by
+  hand in `recipes/definitions.ts` — the sync never guesses it). The catalog
+  contains only OpenAI recipes — three snapshot-carrying rows minted from the
+  definitions plus the retired pre-snapshot generations — whose
+  within-provider ordering is understandable. A future Claude/Grok/other
+  recipe cannot be placed defensibly by reputation because general benchmarks
+  do not measure music-recognition recall or tag quality.
 - **Why fix:** score each candidate recipe on the same hard, hand-labeled songs
   and approved vocabulary. A wrong rank makes the promotion guard confidently
   enforce the wrong direction across every shared song.

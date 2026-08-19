@@ -97,7 +97,17 @@ recipe, because the answer may change with it.
 
 Recipes are never edited. A change mints a new one, so a record of what has
 already been tried on a song stays true instead of quietly coming to mean
-something else. Each recipe carries a rank — its place on a ladder from
+something else. That is enforced rather than remembered: a recipe carries
+every one of those parts verbatim — the instructions, the allowed vocabulary,
+the way a recording is described — and a fingerprint of the whole method is
+its identity, so an altered method cannot be filed as the old one.
+
+One consequence is deliberate: the vocabulary is frozen into the recipe when
+it is minted. Approving a new genre or mood changes nothing about the analyses
+being run until a new recipe is minted carrying the updated list — which also
+means two runs of one recipe always chose from exactly the same words.
+
+Each recipe carries a rank — its place on a ladder from
 cheapest to strongest — and that rank is what decides when a song has earned
 another look. Users request an improvement, not a vendor or a capability rank.
 
@@ -132,8 +142,9 @@ button could only ask for the same work in a different order, while making it
 look like some songs could be pushed harder than others.
 
 **The Library shows the recipe it is using.** Beside the button it names the
-current recipe in full — model, effort, batch size, versions, rank — and, if a
-stronger recipe would take some songs on the next run, how many. Each song's
+current recipe in full — model, effort, batch size, rank, and a short
+fingerprint of the frozen method — and, if a stronger recipe would take some
+songs on the next run, how many. Each song's
 tag panel names the recipe behind its own result, which is how a row analyzed
 under an older vocabulary is distinguishable from one analyzed under today's.
 

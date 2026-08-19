@@ -309,23 +309,40 @@ in Supabase Studio (operational data, not schema)
 Ranking is not here: it is a property of the recipe, because two prompt or
 vocabulary generations of one model can be ordered differently.
 
-**enrichment_recipes** — versioned, owner-curated analysis configurations
+**enrichment_recipes** — complete frozen analysis snapshots, authored from
+`recipes/definitions.ts` by `npm run recipe:sync`; only `label`, `enabled`,
+and `is_default` are mutable (trigger-enforced)
 
-| column               | type              | notes                                       |
-| -------------------- | ----------------- | ------------------------------------------- |
-| id                   | uuid PK           |                                             |
-| model_id             | uuid → llm_models | provider/model used                         |
-| recipe_key           | text unique       | immutable work identity                     |
-| label                | text              | owner-facing name                           |
-| prompt_version       | text              | prompt revision                             |
-| vocabulary_version   | text              | approved-vocabulary revision                |
-| identity_version     | text              | recording-identity input revision           |
-| reasoning_effort     | text              | `minimal` \| `low` \| `medium` \| `high`    |
-| batch_size           | smallint          | songs per LLM call, 1–50                    |
-| enrichment_rank      | smallint          | authoritative sparse capability ordering    |
-| enrich_all_songs     | boolean           | may this recipe revisit `High` songs        |
-| enabled / is_default | boolean           | one enabled default handles first-pass work |
-| created_at           | timestamptz       |                                             |
+| column                 | type                        | notes                                          |
+| ---------------------- | --------------------------- | ---------------------------------------------- |
+| id                     | uuid PK                     |                                                |
+| model_id               | uuid → llm_models           | provider/model used                            |
+| recipe_key             | text unique                 | `<definition key>:<content_hash prefix>`       |
+| label                  | text                        | owner-facing name                              |
+| system_prompt          | text                        | frozen prompt text (NULL on pre-snapshot rows) |
+| identity_fields        | text[]                      | fields the song line is built from             |
+| output_spec            | jsonb                       | bounded output caps/ranges, never JSON Schema  |
+| vocabulary_snapshot_id | uuid → vocabulary_snapshots | frozen approved vocabulary                     |
+| content_hash           | text unique                 | hash of the full snapshot + rank + opt-in      |
+| reasoning_effort       | text                        | `minimal` \| `low` \| `medium` \| `high`       |
+| batch_size             | smallint                    | songs per LLM call, 1–50                       |
+| enrichment_rank        | smallint                    | authoritative sparse capability ordering       |
+| enrich_all_songs       | boolean                     | may this recipe revisit `High` songs           |
+| enabled / is_default   | boolean                     | one enabled default handles first-pass work    |
+| created_at             | timestamptz                 |                                                |
+
+A CHECK requires the five snapshot columns non-null whenever `enabled` is
+true; the pre-snapshot rows keep NULLs (no backfill) and stay disabled.
+
+**vocabulary_snapshots** — frozen approved-vocabulary copies recipes reference
+
+| column                   | type        | notes                              |
+| ------------------------ | ----------- | ---------------------------------- |
+| id                       | uuid PK     |                                    |
+| label                    | text        |                                    |
+| genre_names / mood_names | text[]      | the approved lists as frozen       |
+| content_hash             | text unique | hash of the two lists; sync reuses |
+| created_at               | timestamptz |                                    |
 
 **song_enrichment_jobs** — globally deduplicated, leased work queue
 
