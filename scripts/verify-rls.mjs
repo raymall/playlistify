@@ -33,6 +33,7 @@ const TABLES = [
   'llm_models',
   'unmatched_tags',
   'enrichment_recipes',
+  'vocabulary_snapshots',
   'song_enrichment_attempts',
   'song_enrichment_jobs',
   'user_genre_suppressions',

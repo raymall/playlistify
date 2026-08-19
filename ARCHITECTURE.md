@@ -114,7 +114,9 @@ the same commit (rule in `AGENTS.md`).
   with a live approved-vocabulary snapshot and mints/activates
   `enrichment_recipes` rows — dry-run by default, `-- --yes` to write; a fresh
   database has no recipes until it runs, so it is part of environment setup.
-  `verify-re-enrichment.mts` runs the promotion matrix as pure policy
+  `verify-recipes.mts` proves the catalog matches the definitions, recomputes
+  every stored content hash, and reports approved-vocabulary drift since the
+  newest snapshot. `verify-re-enrichment.mts` runs the promotion matrix as pure policy
   tests, then checks the remote queue/attempt/canonical and RLS invariants —
   it is the executable form of the guarded-re-enrichment test matrix.
   `verify-playlists.mts` live-checks Spotify playlist create, list, add,
