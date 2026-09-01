@@ -314,7 +314,7 @@ export const LibraryTable = ({
       <div className='min-w-0 border-t-2 border-border'>
         <Table className='table-fixed'>
           <colgroup>
-            <col className='w-14 sm:w-21' />
+            <col className='w-16 sm:w-25' />
             <col />
             <col className='w-0 md:w-2/5' />
             <col className='w-18 sm:w-28' />
@@ -325,7 +325,7 @@ export const LibraryTable = ({
           </TableCaption>
           <TableHeader>
             <TableRow className='border-border hover:bg-transparent'>
-              <TableHead className='px-0 sm:px-1' scope='col'>
+              <TableHead className='px-1.5 sm:px-3' scope='col'>
                 Art
               </TableHead>
               <TableHead className='px-1 text-left sm:px-2' scope='col'>
@@ -368,7 +368,7 @@ export const LibraryTable = ({
                     isSelected && 'bg-muted',
                   )}
                 >
-                  <TableCell className='px-0 py-2 sm:px-1 sm:py-3'>
+                  <TableCell className='px-1.5 py-2 sm:px-3 sm:py-3'>
                     <button
                       aria-label={`Select ${title} and show its details`}
                       aria-pressed={isSelected}

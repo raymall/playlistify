@@ -21,14 +21,14 @@ export const LibraryTableSkeleton = () => (
   <div aria-hidden='true'>
     <Table className='table-fixed'>
       <colgroup>
-        <col className='w-14 sm:w-21' />
+        <col className='w-16 sm:w-25' />
         <col />
         <col className='w-0 md:w-2/5' />
         <col className='w-18 sm:w-28' />
       </colgroup>
       <TableHeader>
         <TableRow>
-          <TableHead className='px-0 sm:px-1' scope='col'>
+          <TableHead className='px-1.5 sm:px-3' scope='col'>
             Art
           </TableHead>
           <TableHead className='px-1 sm:px-2' scope='col'>
@@ -50,7 +50,7 @@ export const LibraryTableSkeleton = () => (
       <TableBody>
         {PLACEHOLDER_ROWS.map((key) => (
           <TableRow key={key}>
-            <TableCell className='px-0 py-1 sm:px-1 sm:py-2'>
+            <TableCell className='px-1.5 py-1 sm:px-3 sm:py-2'>
               <Skeleton className='size-12 sm:size-18' />
             </TableCell>
             <TableCell className='py-1 ps-1 pe-0 sm:p-2'>
