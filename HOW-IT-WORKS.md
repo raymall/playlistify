@@ -53,8 +53,7 @@ Sometimes a model silently omits one song from an otherwise valid batch. That
 song is retried with a delay. After three omissions from the same analysis
 recipe it is set aside; a genuinely stronger recipe gets its own fresh
 allowance later. Provider failures use the same bounded backoff lane and stop
-after three billable attempts instead of leaving a song in an endless retry
-loop.
+after three tries instead of leaving a song in an endless retry loop.
 
 **Canonical results are shared by everyone.** A recording is the same
 recording no matter whose library contains it, so Playlistify stores one
@@ -134,7 +133,7 @@ existing result, and its answer still has to come back High. A weaker answer
 from a stronger recipe changes nothing. Turning that on is an operator
 decision, taken once for a recipe, not a button anyone can press per song.
 
-**There is one way in: Analyze & improve.** One button works through everything
+**There is one way in: Enrich.** One button works through everything
 eligible, and there is no per-song request. Nothing is analyzed in the
 background either — the library waits until you ask. The reason it is a single
 control is that the recipe already decides what is worth analyzing; a per-song
@@ -169,7 +168,7 @@ the accepted attempt change as one snapshot. Old AI tags are replaced, not
 accumulated. If two analyses finish out of order, the decision is rechecked
 against the latest shared result before anything changes.
 
-Improvement is still capped, but **Analyze & improve** covers every song below
+Improvement is still capped, but **Enrich** covers every song below
 High, Medium included — so one click can re-analyze songs that already have a
 usable result. What keeps that honest is the promotion rule above: a Medium
 song that gets three more Medium answers stays exactly as it was, having cost
