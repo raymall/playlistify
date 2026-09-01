@@ -163,7 +163,7 @@ the same commit (rule in `AGENTS.md`).
   reasoning for behavior that has shipped), `DESIGN-SYSTEM.md` (visual-system
   tokens, components, and screen decisions), `IMPROVEMENTS.md` (committed log of
   sharp edges + deferred work), `AGENTS.md`/`CLAUDE.md` (agent instructions),
-  `README.md` (public intro + setup), `.nvmrc` +
+  `README.md` (public intro + setup), `LICENSE` (MIT), `.nvmrc` +
   `package.json#engines` (Node 24 runtime
   contract), `.env.example` (every env var, commented), `next.config.ts`
   (Spotify image host allowlist).

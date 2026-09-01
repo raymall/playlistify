@@ -69,3 +69,7 @@ proves.
   core flows, invariants.
 - [DESIGN-SYSTEM.md](./DESIGN-SYSTEM.md) — visual system.
 - [IMPROVEMENTS.md](./IMPROVEMENTS.md) — known sharp edges and deferred work.
+
+## License
+
+[MIT](./LICENSE)
