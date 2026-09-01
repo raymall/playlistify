@@ -457,7 +457,7 @@ export const LibraryEnrichmentPanel = ({
           <Progress
             aria-label='Library confidence progress'
             aria-valuetext={`${analyzed.toLocaleString()} enriched out of ${counts.total.toLocaleString()}${isActive ? '; enrichment in progress' : ''}`}
-            className='library-enrichment-progress w-full motion-reduce:[&_[data-slot=progress-indicator]]:transition-none [&_[data-slot=progress-track]]:h-2'
+            className='library-enrichment-progress w-full [&_[data-slot=progress-indicator]]:rounded-full [&_[data-slot=progress-indicator]]:bg-control motion-reduce:[&_[data-slot=progress-indicator]]:transition-none [&_[data-slot=progress-track]]:h-2'
             data-active={isActive}
             max={counts.total}
             value={analyzed}
