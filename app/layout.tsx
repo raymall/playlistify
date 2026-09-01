@@ -31,8 +31,7 @@ export const metadata: Metadata = {
     default: 'Playlistify',
     template: '%s · Playlistify',
   },
-  description:
-    'Turn your Spotify library into AI-built playlists you describe in plain language.',
+  description: "You already found the songs. We'll find the playlist.",
 }
 
 export const viewport: Viewport = {
