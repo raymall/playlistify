@@ -109,8 +109,9 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
     size and reasoning effort fixed by the recipe; globally deduplicated jobs;
     bounded per-recipe omission attempts;
     enrichment progress and failures observable in Vercel logs / Supabase
-    tables. Model/recipe catalogs remain owner-curated operational data in
-    Supabase Studio — no admin UI.
+    tables. The model catalog remains owner-curated operational data in
+    Supabase Studio; recipes are authored in the repo and minted by
+    `npm run recipe:sync` — no admin UI.
 
 ## Views / Pages
 
@@ -141,10 +142,11 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 - Web-search fallback for unrecognized songs (marked `unknown` instead).
 - Persisting chat history across sessions (a chat is ephemeral; only resulting playlists are saved).
 - Email + password auth (considered and reverted: every feature requires a connected Spotify account anyway, so a second sign-in method only added an identity-linking flow and its edge cases; Spotify OAuth is the sole login).
-- Admin UI for the model/recipe catalogs (`llm_models` and
-  `enrichment_recipes` are edited directly in Supabase Studio). Adding a whole
-  new LLM **provider** is still a code change (AI SDK provider package, API key,
-  and mapping entry).
+- Admin UI for the model/recipe catalogs (`llm_models` is edited directly in
+  Supabase Studio; `enrichment_recipes` rows are minted from
+  `recipes/definitions.ts` by `npm run recipe:sync`). Adding a whole new LLM
+  **provider** is still a code change (AI SDK provider package, API key, and
+  mapping entry).
 - User-facing reports of incorrect shared analysis. Private tag suppression is
   in scope; report collection, moderation, and use as a global review signal
   are deferred in `IMPROVEMENTS.md`.
@@ -303,8 +305,7 @@ in Supabase Studio (operational data, not schema)
 | enabled    | boolean not null default true  | whether the model may back an active recipe                   |
 | is_default | boolean not null default false | legacy model default, retained for compatibility              |
 | sort_order | smallint not null default 0    | owner-facing ordering                                         |
-
-| created_at | timestamptz | |
+| created_at | timestamptz                    |                                                               |
 
 Ranking is not here: it is a property of the recipe, because two prompt or
 vocabulary generations of one model can be ordered differently.
@@ -409,12 +410,13 @@ true; the pre-snapshot rows keep NULLs (no backfill) and stay disabled.
   authenticated request claims one leased same-recipe batch and returns
   progress. This stays inside serverless limits and is resumable without a
   scheduled worker.
-- **Model and recipe rows are owner-operational data, not recurring migration
-  seeds.** The additive migration took one legacy snapshot. New prompt,
-  vocabulary, or identity revisions create a new recipe; they do not mutate the
-  identity attached to old attempts. Studio is the usual place for that — the
-  exception is a vocabulary revision, which cuts its replacement generation in
-  the same migration that approves the new names.
+- **Model rows are owner-operational data edited in Studio; recipe rows are
+  minted, never edited.** A prompt, vocabulary, or identity revision changes
+  `recipes/definitions.ts`, and `npm run recipe:sync` mints a new
+  `enrichment_recipes` row under a new content hash — nothing mutates the
+  identity attached to old attempts. Approving vocabulary is a migration, but
+  it reaches running analyses only when a later sync mints recipes that freeze
+  the new list.
 
 ## Implementation Plan
 
