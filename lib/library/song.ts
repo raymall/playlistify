@@ -10,6 +10,18 @@ export type LibraryTag = {
   name: string
 }
 
+/**
+ * Which Spotify sources hold the song in this user's library. `isLiked` is
+ * the Liked Songs source; the counts are distinct owned playlists and saved
+ * albums. At least one is set for every row (a song leaves the library when
+ * none holds it).
+ */
+export type LibrarySongSources = {
+  isLiked: boolean
+  playlistCount: number
+  albumCount: number
+}
+
 export type LibrarySong = {
   id: string
   title: string | null
@@ -27,4 +39,5 @@ export type LibrarySong = {
   /** The recipe that produced this song's result; null before any promotion. */
   recipeLabel: string | null
   isCurrentRecipe: boolean
+  sources: LibrarySongSources
 }

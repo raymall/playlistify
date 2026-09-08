@@ -87,7 +87,9 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
    tries per recipe rank, and a strictly stronger recipe re-opens that budget;
    only a better candidate is promoted.
 4. Library view: browse imported tracks with each track's AI attributes,
-   model-reported Confidence band, the recipe behind it, and effective tags.
+   model-reported Confidence band, the recipe behind it, effective tags, and
+   which Spotify sources hold it (a Playlist or Album badge on the row; the
+   inspector names every source, Liked Songs included).
    Search runs in Postgres: free text over title + artists, AND-combined
    genre/mood filter pills fed by a library-scoped typeahead, OR-combined
    Confidence-band pills, exact counts, and

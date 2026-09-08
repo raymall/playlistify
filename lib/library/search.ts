@@ -14,7 +14,7 @@ import {
   LIBRARY_PAGE_SIZE,
   type LibrarySearchState,
 } from '@/lib/library/search-params'
-import { type LibrarySong } from '@/lib/library/song'
+import { type LibrarySong, type LibrarySongSources } from '@/lib/library/song'
 import type { Database } from '@/lib/supabase/types'
 
 /** Beyond this the recheck filters stop narrowing anything worth the parse. */
@@ -95,12 +95,34 @@ export const searchLibrary = async (
   // The recipe report is scoped to this page's ids. library_song_recipes() is
   // an inlinable SQL function, so that filter reaches the join as a key lookup
   // rather than filtering a scan of the whole library.
-  const [rowsResult, recipeResult] = await Promise.all([
+  // Source rows are read as a plain select: the table deliberately has no key
+  // to `songs` (see ARCHITECTURE.md), and RLS scopes it to the caller's rows.
+  const [rowsResult, recipeResult, sourcesResult] = await Promise.all([
     supabase.from('user_songs').select(SONG_EMBED).in('song_id', songIds),
     supabase.rpc('library_song_recipes').in('song_id', songIds),
+    supabase
+      .from('user_song_sources')
+      .select('song_id, source_type')
+      .in('song_id', songIds),
   ])
   if (rowsResult.error !== null) throw new Error(rowsResult.error.message)
   if (recipeResult.error !== null) throw new Error(recipeResult.error.message)
+  if (sourcesResult.error !== null) {
+    throw new Error(sourcesResult.error.message)
+  }
+
+  const sourcesBySongId = new Map<string, LibrarySongSources>()
+  for (const row of sourcesResult.data) {
+    const sources = sourcesBySongId.get(row.song_id) ?? {
+      isLiked: false,
+      playlistCount: 0,
+      albumCount: 0,
+    }
+    if (row.source_type === 'liked') sources.isLiked = true
+    else if (row.source_type === 'playlist') sources.playlistCount += 1
+    else if (row.source_type === 'album') sources.albumCount += 1
+    sourcesBySongId.set(row.song_id, sources)
+  }
 
   const recipeBySongId = new Map(
     recipeResult.data.map((row) => [
@@ -146,6 +168,11 @@ export const searchLibrary = async (
         })),
         recipeLabel: recipeBySongId.get(row.songs.id)?.label ?? null,
         isCurrentRecipe: recipeBySongId.get(row.songs.id)?.isCurrent ?? false,
+        sources: sourcesBySongId.get(row.songs.id) ?? {
+          isLiked: false,
+          playlistCount: 0,
+          albumCount: 0,
+        },
       },
     ]),
   )

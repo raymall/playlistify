@@ -125,6 +125,10 @@ an ellipsis and preserve the button width when practical.
   Library table; its missing numeric value is omitted because the status
   already communicates the state.
 - Badges do not print “AI” or “You”; accessible text announces the source.
+- Library rows carry a small **neutral filled** source badge — `Playlist`,
+  `Album`, or a count such as `2 playlists` — only when something other than
+  Liked Songs holds the song; liked-only rows stay unbadged. The song
+  inspector states every source in one sentence, Liked Songs included.
 - Filter badges share one bordered rail and stay grouped under the labels
   Genres, Moods, and Confidence. Each group may contain multiple values.
 - Removing a tag uses a visible `×` control with a source- and song-specific

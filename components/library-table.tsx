@@ -23,7 +23,7 @@ import {
   type ConfidenceBand,
   getConfidenceBand,
 } from '@/lib/enrichment/confidence'
-import { type LibrarySong } from '@/lib/library/song'
+import { type LibrarySong, type LibrarySongSources } from '@/lib/library/song'
 import { cn } from '@/lib/utils'
 
 type LibraryTableProps = {
@@ -111,6 +111,79 @@ const LibraryTagList = ({
         </span>
       ))}
     </p>
+  )
+}
+
+const pluralize = (count: number, singular: string, plural: string) =>
+  `${count.toLocaleString()} ${count === 1 ? singular : plural}`
+
+/**
+ * Row badges name only the sources beyond Liked Songs: a liked song is the
+ * default case and needs no badge, while a playlist or album is the answer to
+ * "why is this here?" — and to why an unlike did not remove it.
+ */
+const sourceBadges = (sources: LibrarySongSources) => {
+  const badges: { key: string; label: string; description: string }[] = []
+  if (sources.playlistCount > 0) {
+    badges.push({
+      key: 'playlist',
+      label:
+        sources.playlistCount === 1
+          ? 'Playlist'
+          : `${sources.playlistCount.toLocaleString()} playlists`,
+      description: `On ${pluralize(sources.playlistCount, 'playlist', 'playlists')} you own`,
+    })
+  }
+  if (sources.albumCount > 0) {
+    badges.push({
+      key: 'album',
+      label:
+        sources.albumCount === 1
+          ? 'Album'
+          : `${sources.albumCount.toLocaleString()} albums`,
+      description: `On ${pluralize(sources.albumCount, 'saved album', 'saved albums')}`,
+    })
+  }
+  return badges
+}
+
+/** Full sentence for the inspector, Liked Songs included. */
+const describeSources = (sources: LibrarySongSources) => {
+  const parts: string[] = []
+  if (sources.isLiked) parts.push('Liked Songs')
+  if (sources.playlistCount > 0) {
+    parts.push(
+      `${pluralize(sources.playlistCount, 'playlist', 'playlists')} you own`,
+    )
+  }
+  if (sources.albumCount > 0) {
+    parts.push(pluralize(sources.albumCount, 'saved album', 'saved albums'))
+  }
+  if (parts.length === 0) return 'Not held by any Spotify source right now.'
+  const list =
+    parts.length === 1
+      ? parts[0]
+      : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+  return `In your library through ${list}.`
+}
+
+const SourceBadges = ({ sources }: { sources: LibrarySongSources }) => {
+  const badges = sourceBadges(sources)
+  if (badges.length === 0) return null
+  return (
+    <span className='mt-1 flex flex-wrap gap-1'>
+      {badges.map((badge) => (
+        <Badge
+          key={badge.key}
+          className='min-h-5 px-1.5 py-0.5'
+          title={badge.description}
+          variant='outline'
+        >
+          <span className='sr-only'>Source: </span>
+          {badge.label}
+        </Badge>
+      ))}
+    </span>
   )
 }
 
@@ -222,6 +295,9 @@ const SelectedSong = ({ className, song, onClose }: SelectedSongProps) => {
             {title}
           </h2>
           <p className='text-sm text-muted-foreground'>{artists}</p>
+          <p className='text-xs text-muted-foreground'>
+            {describeSources(song.sources)}
+          </p>
         </div>
 
         <LibraryTagEditor
@@ -405,6 +481,7 @@ export const LibraryTable = ({
                       >
                         {artists}
                       </span>
+                      <SourceBadges sources={song.sources} />
                     </div>
                   </th>
                   <TableCell className='w-0 p-0 md:w-auto md:p-2'>

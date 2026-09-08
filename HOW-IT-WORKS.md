@@ -246,9 +246,12 @@ known energy, era, or tempo still cannot satisfy those filters.
 
 ## Finding songs in the library
 
-The Library lists a user's songs newest-added first, a page at a time. One
-search box does both jobs: typed words search titles and artists, and choosing
-a suggested genre or mood adds it as a filter pill.
+The Library lists a user's songs newest-added first, a page at a time. A row
+whose song came in through one of the user's own playlists or a saved album
+says so with a small badge; the song inspector names every source that holds
+it, Liked Songs included, which is also the answer to why an unliked song is
+still there. One search box does both jobs: typed words search titles and
+artists, and choosing a suggested genre or mood adds it as a filter pill.
 
 **Everything narrows.** Several typed words must all match the same song's
 title or artist, not merely one of them. Several pills must all be on the song.

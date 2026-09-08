@@ -200,7 +200,9 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   genre/mood filter pills, or OR-combined Confidence band pills, over a
   first/last/numbered paginated table with a Confidence band, private AI-tag
   hiding, and personal tags. The row's title cell is its `<th scope='row'>`, so
-  the tag editor is announced against a song name. There is **no** per-song
+  the tag editor is announced against a song name; it also carries a
+  `Playlist` / `Album` source badge (counts when several) for songs held by
+  something other than Liked Songs, and the inspector spells out every source. There is **no** per-song
   analysis control: the panel names the current recipe (model, effort, batch
   size, rank, snapshot hash) beside **Enrich**, plus a line per stronger
   recipe the next run would escalate to and how many songs move, and each row's
@@ -421,8 +423,10 @@ never snapped (product rule in `HOW-IT-WORKS.md` § Personal tags).
 boundary while the panels and the typed query stay put. `LibraryResults` →
 `searchLibrary` → `library_search_page()` filters, counts, orders, and pages
 in Postgres and returns thin ids; the app hydrates song detail and the six
-tag embeds with one `.in('song_id', ids)` and scopes
-`library_song_recipes()` to the same ids. Free text ANDs its
+tag embeds with one `.in('song_id', ids)`, scopes
+`library_song_recipes()` to the same ids, and reads the page's
+`user_song_sources` rows (RLS-scoped, plain select — the table has no key to
+`songs`) to fold per-source counts onto each row. Free text ANDs its
 whitespace-separated terms (longest first so the seed drives the trigram
 index); genre/mood pills AND by relational division; Confidence-band pills OR
 through `confidence_band()`, the single SQL band definition, kept sargable by

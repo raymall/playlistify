@@ -540,21 +540,6 @@ would duplicate an existing item, contradict one, or make one obsolete:
   on every sync, and playlist paging is the phase most exposed to Spotify rate
   limits.
 
-## The library table does not say where a song came from
-
-- **In plain terms:** a song may be in the library because it is liked, on one
-  of your playlists, on a saved album, or several of those at once, and the
-  table shows none of that. Small per-source badges would explain why a song
-  is there and why an unlike did not remove it.
-- **Complexity:** Low to Medium — the data is in `user_song_sources`; the
-  page's hydration pass needs one more `.in('song_id', ids)` read, and the row
-  needs a compact treatment that survives narrow widths.
-- **Issue:** `user_song_sources` has an own-rows `select` policy, so the RLS
-  client can read it, but nothing on `/library` does; `HOW-IT-WORKS.md`
-  explains the stay-while-any-source-holds-it rule with no UI to back it.
-- **Why fix:** without it, "I unliked this, why is it still here?" has no
-  answer on the page.
-
 ## Retired recipe rows accumulate with no pruning path
 
 - **In plain terms:** every recipe change mints a new row and disables the old
