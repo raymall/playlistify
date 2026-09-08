@@ -1,37 +1,23 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
+
 import {
   fetchArtistGenres,
-  fetchLikedTracksPage,
-  fetchSavedTrackStates,
-  LIKED_TRACKS_PAGE_SIZE,
   type SavedTrackItem,
+  type SpotifyTrack,
 } from '@/lib/spotify/api'
-import { getValidSpotifyToken } from '@/lib/spotify/token'
-import { createAdminClient } from '@/lib/supabase/admin'
-import type { TablesInsert } from '@/lib/supabase/types'
+import type { Database, TablesInsert } from '@/lib/supabase/types'
 
 /**
- * Route → client response. HTTP 200 for every non-error status (`rate_limited`
- * is data, not an HTTP 429 from us); the client parses this one union.
+ * Shared song-import helpers for the library sync engine (`sync.ts`): the
+ * Spotify → `songs` row mapping and the shared-table upsert. Nothing here
+ * touches a per-user table.
  */
-export type ImportBatchResponse =
-  | {
-      status: 'progress'
-      nextOffset: number
-      total: number
-      importedCount: number
-      syncStartedAt: string
-    }
-  | {
-      status: 'done'
-      total: number
-      importedCount: number
-      removedCount: number
-    }
-  | { status: 'rate_limited'; retryAfterSeconds: number }
-  | { status: 'reconnect_required' }
-  | { status: 'error'; message: string; safeToRetry?: boolean }
 
-type ImportErrorResponse = Extract<ImportBatchResponse, { status: 'error' }>
+export type ImportErrorResponse = {
+  status: 'error'
+  message: string
+  safeToRetry?: boolean
+}
 
 const TRANSIENT_FETCH_FAILURE_PATTERN =
   /fetch failed|network request failed|connect timeout|socket disconnected/i
@@ -39,7 +25,11 @@ const TRANSIENT_FETCH_FAILURE_PATTERN =
 export const isTransientImportFailure = (message: string) =>
   TRANSIENT_FETCH_FAILURE_PATTERN.test(message)
 
-const importFailure = (message: string): ImportErrorResponse =>
+/**
+ * A transport-level failure is reported as `safeToRetry`: every sync write is
+ * idempotent, so the client may repeat the same cursor for free.
+ */
+export const importFailure = (message: string): ImportErrorResponse =>
   isTransientImportFailure(message)
     ? {
         status: 'error',
@@ -49,21 +39,15 @@ const importFailure = (message: string): ImportErrorResponse =>
     : { status: 'error', message }
 
 /**
- * Pages fetched per invocation. Two pages (100 tracks) keeps each call well
- * inside serverless limits (~1.5–2.5s) while minimising round-trips.
+ * The nine Spotify-sourced metadata columns a song row may set. Enrichment
+ * never writes `songs` from TypeScript (canonical writes happen inside
+ * `promote_song_enrichment_attempt`), so the two writers cannot collide.
+ * Every key is optional in the generated insert type; `mapTrack` always
+ * materialises all nine, and `mapAlbumTrack` omits `popularity` — a
+ * simplified album track has none, and an omitted key leaves a liked song's
+ * value alone on conflict-update.
  */
-const PAGES_PER_BATCH = 2
-
-const STALE_LIBRARY_PAGE_SIZE = 1000
-const DELETE_CHUNK_SIZE = 100
-
-/**
- * The nine Spotify-sourced metadata columns every song row always sets.
- * Enrichment never writes `songs` from TypeScript (canonical writes happen
- * inside `promote_song_enrichment_attempt`), so the two writers cannot
- * collide.
- */
-type SongMetadata = Pick<
+export type SongMetadata = Pick<
   TablesInsert<'songs'>,
   | 'spotify_track_id'
   | 'title'
@@ -76,10 +60,11 @@ type SongMetadata = Pick<
   | 'explicit'
 >
 
-interface MappedTrack {
+export type MappedTrack = {
   row: SongMetadata
   artistIds: string[]
-  likedAt: string | null
+  /** When the source says the song was added; null when Spotify omitted it. */
+  addedAt: string | null
 }
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
@@ -91,7 +76,7 @@ const YEAR_PATTERN = /^\d{4}$/
  * the `date` column accepts, or null when it can't be trusted. Year `0000`
  * (Spotify's "unknown") is always rejected.
  */
-const normalizeReleaseDate = (
+export const normalizeReleaseDate = (
   raw: string | null,
   precision: string | null,
 ): string | null => {
@@ -102,18 +87,12 @@ const normalizeReleaseDate = (
   return null
 }
 
-/**
- * Map a raw saved-track entry to a song row + its artist ids. Returns null for
- * entries with no usable track (local files, unparseable items). The row always
- * materialises the same nine keys — null where unknown — so bulk upsert payloads
- * are uniform by construction.
- */
-const mapSavedTrack = (item: SavedTrackItem): MappedTrack | null => {
-  const { track } = item
-  if (track === null) return null
-
+/** The eight columns every source can vouch for — null where unknown. */
+const buildSongRow = (
+  track: SpotifyTrack,
+): Omit<SongMetadata, 'popularity'> => {
   const { images } = track.album
-  const row: SongMetadata = {
+  return {
     spotify_track_id: track.id,
     title: track.name,
     artists: track.artists.map((artist) => artist.name),
@@ -124,188 +103,86 @@ const mapSavedTrack = (item: SavedTrackItem): MappedTrack | null => {
       track.album.release_date,
       track.album.release_date_precision,
     ),
-    popularity: track.popularity,
     explicit: track.explicit,
   }
+}
 
+const collectArtistIds = (track: SpotifyTrack): string[] => {
   const artistIds: string[] = []
   for (const artist of track.artists) {
     if (artist.id !== null) artistIds.push(artist.id)
   }
-
-  return { row, artistIds, likedAt: item.added_at }
+  return artistIds
 }
 
-type ReconcileResult =
-  | { status: 'ok'; removedCount: number }
-  | Extract<
-      ImportBatchResponse,
-      { status: 'error' | 'rate_limited' | 'reconnect_required' }
-    >
+/**
+ * Map a full track object (Liked Songs, playlist items) to a song row + its
+ * artist ids. The row always materialises the same nine keys, so bulk upsert
+ * payloads are uniform by construction.
+ */
+export const mapTrack = (
+  track: SpotifyTrack,
+  addedAt: string | null,
+): MappedTrack => ({
+  row: { ...buildSongRow(track), popularity: track.popularity },
+  artistIds: collectArtistIds(track),
+  addedAt,
+})
 
 /**
- * Remove only rows that this completed import did not see and Spotify confirms
- * are no longer saved. The confirmation protects against offset drift and
- * overlapping tabs; a partial import never calls this function.
+ * Map a simplified album track. The row omits `popularity` on purpose: the
+ * endpoint never reports it, and an omitted key cannot clobber the value a
+ * Liked Songs read already stored for the same song.
  */
-const reconcileRemovedSongs = async (
-  userId: string,
+export const mapAlbumTrack = (
+  track: SpotifyTrack,
+  addedAt: string | null,
+): MappedTrack => ({
+  row: buildSongRow(track),
+  artistIds: collectArtistIds(track),
+  addedAt,
+})
+
+/**
+ * Map a raw saved-track entry (Liked Songs or a playlist item). Returns null
+ * for entries with no usable track (local files, episodes, unparseable items).
+ */
+export const mapSavedTrack = (item: SavedTrackItem): MappedTrack | null =>
+  item.track === null ? null : mapTrack(item.track, item.added_at)
+
+/**
+ * Dedupe mapped tracks by Spotify id: offset drift can repeat a track across
+ * pages, and duplicate conflict keys in a single INSERT are a Postgres error.
+ */
+export const dedupeMappedTracks = (
+  tracks: (MappedTrack | null)[],
+): MappedTrack[] => {
+  const byTrackId = new Map<string, MappedTrack>()
+  for (const track of tracks) {
+    if (track !== null) byTrackId.set(track.row.spotify_track_id, track)
+  }
+  return [...byTrackId.values()]
+}
+
+export type SongUpsertResult =
+  | { status: 'ok'; songIdByTrackId: Map<string, string> }
+  | { status: 'rate_limited'; retryAfterSeconds: number }
+  | ImportErrorResponse
+
+/**
+ * Upsert song rows for the mapped tracks and return song ids by Spotify id.
+ * Songs already carrying genres get a metadata-only upsert; the rest get an
+ * artist-genre lookup first, which degrades to `[]` — never null — when the
+ * batch `/artists` endpoint refuses (it 403s for this app). A rate limit on
+ * that lookup returns before any write, so no row lands partially genre'd.
+ */
+export const upsertSongs = async (
+  admin: SupabaseClient<Database>,
   accessToken: string,
-  syncStartedAt: string,
-): Promise<ReconcileResult> => {
-  const admin = createAdminClient()
-  const candidates: { songId: string; spotifyTrackId: string }[] = []
-
-  for (let from = 0; ; from += STALE_LIBRARY_PAGE_SIZE) {
-    const result = await admin
-      .from('user_songs')
-      .select('song_id, songs!inner(spotify_track_id)')
-      .eq('user_id', userId)
-      .lt('imported_at', syncStartedAt)
-      .order('song_id', { ascending: true })
-      .range(from, from + STALE_LIBRARY_PAGE_SIZE - 1)
-    if (result.error) return importFailure(result.error.message)
-    for (const row of result.data) {
-      candidates.push({
-        songId: row.song_id,
-        spotifyTrackId: row.songs.spotify_track_id,
-      })
-    }
-    if (result.data.length < STALE_LIBRARY_PAGE_SIZE) break
-  }
-
-  if (candidates.length === 0) return { status: 'ok', removedCount: 0 }
-
-  const statesResult = await fetchSavedTrackStates(
-    accessToken,
-    candidates.map((candidate) => candidate.spotifyTrackId),
-  )
-  if (statesResult.status === 'auth_failed') {
-    return { status: 'reconnect_required' }
-  }
-  if (statesResult.status !== 'ok') return statesResult
-
-  const songIdsToRemove = candidates
-    .filter(
-      (candidate) => statesResult.data.get(candidate.spotifyTrackId) === false,
-    )
-    .map((candidate) => candidate.songId)
-
-  let removedCount = 0
-  for (
-    let index = 0;
-    index < songIdsToRemove.length;
-    index += DELETE_CHUNK_SIZE
-  ) {
-    const result = await admin
-      .from('user_songs')
-      .delete()
-      .eq('user_id', userId)
-      .in('song_id', songIdsToRemove.slice(index, index + DELETE_CHUNK_SIZE))
-      .select('song_id')
-    if (result.error) return importFailure(result.error.message)
-    removedCount += result.data.length
-  }
-
-  return { status: 'ok', removedCount }
-}
-
-/**
- * Import one batch (up to two pages) of the user's Liked Songs starting at
- * `offset`. The server-issued sync timestamp makes it resumable without a
- * database run record. All writes go through the service-role client (`songs`
- * is SELECT-only under RLS).
- */
-export const importLikedSongsBatch = async (
-  userId: string,
-  offset: number,
-  syncStartedAt: string,
-): Promise<ImportBatchResponse> => {
-  const tokenResult = await getValidSpotifyToken(userId)
-  if (tokenResult.status === 'reconnect_required') {
-    return { status: 'reconnect_required' }
-  }
-  if (tokenResult.status === 'error') {
-    return importFailure(tokenResult.message)
-  }
-  const { accessToken } = tokenResult
-
-  const items: SavedTrackItem[] = []
-  let total = 0
-  let lastPageNext: string | null = null
-
-  for (let pageIndex = 0; pageIndex < PAGES_PER_BATCH; pageIndex += 1) {
-    const pageOffset = offset + pageIndex * LIKED_TRACKS_PAGE_SIZE
-    // Stop once the previous page was the last one, or we've passed the total.
-    if (pageIndex > 0 && (lastPageNext === null || pageOffset >= total)) break
-
-    const pageResult = await fetchLikedTracksPage(accessToken, pageOffset)
-    if (pageResult.status === 'auth_failed') {
-      return { status: 'reconnect_required' }
-    }
-    if (pageResult.status === 'error') {
-      return importFailure(pageResult.message)
-    }
-    if (pageResult.status === 'rate_limited') {
-      // The first page must surface the rate limit so the client waits. A later
-      // page is instead dropped and retried next invocation: the collected item
-      // count hasn't advanced past it, so the next call resumes at its offset
-      // and meets the 429 cleanly.
-      if (pageIndex === 0) {
-        return {
-          status: 'rate_limited',
-          retryAfterSeconds: pageResult.retryAfterSeconds,
-        }
-      }
-      break
-    }
-
-    const page = pageResult.data
-    total = page.total
-    items.push(...page.items)
-    lastPageNext = page.next
-  }
-
-  // Dedupe by track id: offset drift can repeat a track across pages, and
-  // duplicate conflict keys in a single INSERT are a Postgres error.
-  const mappedByTrackId = new Map<string, MappedTrack>()
-  for (const item of items) {
-    const mapped = mapSavedTrack(item)
-    if (mapped !== null)
-      mappedByTrackId.set(mapped.row.spotify_track_id, mapped)
-  }
-  const mappedTracks = [...mappedByTrackId.values()]
-
-  const nextOffset = offset + items.length
-  const isDone = nextOffset >= total || lastPageNext === null
-
-  // Nothing to write (empty library, or an all-local batch): still advance.
-  if (mappedTracks.length === 0) {
-    if (!isDone) {
-      return {
-        status: 'progress',
-        nextOffset,
-        total,
-        importedCount: 0,
-        syncStartedAt,
-      }
-    }
-    const reconciliation = await reconcileRemovedSongs(
-      userId,
-      accessToken,
-      syncStartedAt,
-    )
-    return reconciliation.status === 'ok'
-      ? {
-          status: 'done',
-          total,
-          importedCount: 0,
-          removedCount: reconciliation.removedCount,
-        }
-      : reconciliation
-  }
-
-  const admin = createAdminClient()
+  mappedTracks: MappedTrack[],
+): Promise<SongUpsertResult> => {
+  const songIdByTrackId = new Map<string, string>()
+  if (mappedTracks.length === 0) return { status: 'ok', songIdByTrackId }
 
   // Which of these songs already carry genres? Their artists' genres never need
   // re-fetching — the whole point of the step-4 optimisation.
@@ -329,7 +206,7 @@ export const importLikedSongsBatch = async (
 
   // Resolve genres for the songs missing them — best-effort. A rate limit
   // returns before ANY write, so no row lands partially genre'd; the client
-  // retries the same offset and the idempotent upserts absorb the repeat.
+  // retries the same cursor and the idempotent upserts absorb the repeat.
   const genresByTrackId = new Map<string, string[]>()
   if (needsGenres.length > 0) {
     const artistIdSet = new Set<string>()
@@ -347,11 +224,11 @@ export const importLikedSongsBatch = async (
 
     // Genres are optional and a deferred step-5 concern. Spotify's batch
     // "Get Several Artists" endpoint is forbidden (403) for apps without
-    // extended quota, even though /me/tracks and single-artist reads succeed
-    // with the same token — so the valid token already proved itself on the
-    // page fetch above. On any auth failure or error here, degrade to empty
-    // genres and keep importing rather than derailing the whole import. Songs
-    // land with spotify_genres = [] (never null), so the invariant and the
+    // extended quota, even though the library reads succeed with the same
+    // token — so the valid token already proved itself on the page fetch. On
+    // any auth failure or error here, degrade to empty genres and keep
+    // importing rather than derailing the whole sync. Songs land with
+    // spotify_genres = [] (never null), so the invariant and the
     // needs-genres optimisation both stay sound.
     if (genresResult.status === 'ok') {
       const genresByArtist = genresResult.data
@@ -370,13 +247,13 @@ export const importLikedSongsBatch = async (
   // Invariant: song payloads carry ONLY the nine metadata keys (+ spotify_genres
   // for the needsGenres group), which `SongMetadata` enforces at compile time.
   // They never include any enrichment column (those are written only by the
-  // promote_song_enrichment_attempt RPC), nor apple_music_id or id. Omitted columns are
-  // untouched on conflict-update and take their defaults on insert — so new
-  // songs land 'pending' and a re-sync can never reset an already-enriched song.
-  const songIdByTrackId = new Map<string, string>()
-  const upsertSongs = async (
+  // promote_song_enrichment_attempt RPC), nor apple_music_id or id. Omitted
+  // columns are untouched on conflict-update and take their defaults on
+  // insert — so new songs land 'pending' and a re-sync can never reset an
+  // already-enriched song.
+  const upsertPayload = async (
     payload: TablesInsert<'songs'>[],
-  ): Promise<{ status: 'error'; message: string } | null> => {
+  ): Promise<ImportErrorResponse | null> => {
     if (payload.length === 0) return null
     const result = await admin
       .from('songs')
@@ -389,7 +266,7 @@ export const importLikedSongsBatch = async (
     return null
   }
 
-  const needsGenresError = await upsertSongs(
+  const needsGenresError = await upsertPayload(
     needsGenres.map((track) => ({
       ...track.row,
       spotify_genres: genresByTrackId.get(track.row.spotify_track_id) ?? [],
@@ -398,53 +275,10 @@ export const importLikedSongsBatch = async (
   if (needsGenresError !== null) return needsGenresError
 
   // Metadata only — refreshes popularity/art, never touches existing genres.
-  const hasGenresError = await upsertSongs(hasGenres.map((track) => track.row))
+  const hasGenresError = await upsertPayload(
+    hasGenres.map((track) => track.row),
+  )
   if (hasGenresError !== null) return hasGenresError
 
-  // `liked_at` self-heals an unlike/re-like. `imported_at` is the current
-  // sync's server-issued marker, used only after a complete run to find rows
-  // Spotify may have removed.
-  const userSongsPayload: TablesInsert<'user_songs'>[] = []
-  for (const track of mappedTracks) {
-    const songId = songIdByTrackId.get(track.row.spotify_track_id)
-    if (songId === undefined) continue
-    userSongsPayload.push({
-      user_id: userId,
-      song_id: songId,
-      liked_at: track.likedAt,
-      imported_at: syncStartedAt,
-    })
-  }
-
-  if (userSongsPayload.length > 0) {
-    const result = await admin
-      .from('user_songs')
-      .upsert(userSongsPayload, { onConflict: 'user_id,song_id' })
-    if (result.error) return importFailure(result.error.message)
-  }
-
-  const importedCount = userSongsPayload.length
-  if (!isDone) {
-    return {
-      status: 'progress',
-      nextOffset,
-      total,
-      importedCount,
-      syncStartedAt,
-    }
-  }
-
-  const reconciliation = await reconcileRemovedSongs(
-    userId,
-    accessToken,
-    syncStartedAt,
-  )
-  return reconciliation.status === 'ok'
-    ? {
-        status: 'done',
-        total,
-        importedCount,
-        removedCount: reconciliation.removedCount,
-      }
-    : reconciliation
+  return { status: 'ok', songIdByTrackId }
 }

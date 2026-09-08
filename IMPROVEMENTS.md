@@ -424,9 +424,30 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Issue:** `/me/playlists` includes collaborative playlists only when
   `playlist-read-collaborative` is granted. Playlistify currently requests
   private-playlist read access plus the modify scopes, matching the confirmed
-  management scope but not a later collaborative conversion in Spotify.
+  management scope but not a later collaborative conversion in Spotify. Since
+  the whole-library sync (2026-09-08) takes its owned-playlist snapshot from
+  the same listing, an owned playlist made collaborative also drops out of
+  the library sync, and a completed pass treats its songs as removed from that
+  source.
 - **Why fix:** without the extra scope, a collaborative playlist can be marked
-  "Deleted in Spotify" even though it still exists there.
+  "Deleted in Spotify" even though it still exists there, and its songs can
+  leave the library on the next sync.
+
+## Album-sourced songs carry no popularity
+
+- **In plain terms:** a song that reaches the library only through a saved
+  album has no Spotify popularity score: the album endpoints return simplified
+  tracks without one, and the batch track lookup that would fill it in is
+  forbidden for this app. Nothing reads the column today; backfill it if
+  something starts to.
+- **Complexity:** Low — a rate-limited per-song `GET /tracks/{id}` sweep over
+  rows with a null `popularity`, or one batch call if Spotify ever allows it.
+- **Issue:** `mapAlbumTrack` in `lib/spotify/import.ts` deliberately omits the
+  key so a liked song's stored value is never clobbered by an album read;
+  `verify:sync-endpoints` records that batch `GET /tracks?ids=` answers 403
+  here.
+- **Why fix:** only matters once popularity feeds a filter, a sort, or the
+  enrichment identity line — none of which read it today.
 
 ## Playlist reachability changes wait for a full sync
 
@@ -499,6 +520,40 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** the verifier should exercise the same SQL contracts the app uses;
   otherwise a green result can prove only that the TypeScript mirror still
   agrees with itself.
+
+## Unchanged playlists are re-read on every sync
+
+- **In plain terms:** each sync reads every owned playlist end to end, even the
+  ones that have not changed since the last pass. Spotify hands back a
+  `snapshot_id` that changes only when a playlist changes; remembering it would
+  let the sync skip unchanged playlists.
+- **Complexity:** Low to Medium — a `user_playlist_snapshots` table (`user_id`,
+  `playlist_id`, `snapshot_id`, `synced_at`); on a matching snapshot,
+  bulk-touch that playlist's `user_song_sources.last_seen_at` to the pass's
+  marker instead of paging its items, and store the snapshot after every full
+  read.
+- **Issue:** `fetchUserPlaylists` already parses `snapshot_id`, and the
+  playlists-phase cursor already carries the owned ids, but nothing keeps the
+  snapshot between passes, so `runPlaylistsBatch` in `lib/spotify/sync.ts`
+  always pages `/playlists/{id}/items`.
+- **Why fix:** a library with many large, stable playlists pays the full read
+  on every sync, and playlist paging is the phase most exposed to Spotify rate
+  limits.
+
+## The library table does not say where a song came from
+
+- **In plain terms:** a song may be in the library because it is liked, on one
+  of your playlists, on a saved album, or several of those at once, and the
+  table shows none of that. Small per-source badges would explain why a song
+  is there and why an unlike did not remove it.
+- **Complexity:** Low to Medium — the data is in `user_song_sources`; the
+  page's hydration pass needs one more `.in('song_id', ids)` read, and the row
+  needs a compact treatment that survives narrow widths.
+- **Issue:** `user_song_sources` has an own-rows `select` policy, so the RLS
+  client can read it, but nothing on `/library` does; `HOW-IT-WORKS.md`
+  explains the stay-while-any-source-holds-it rule with no UI to back it.
+- **Why fix:** without it, "I unliked this, why is it still here?" has no
+  answer on the page.
 
 ## Retired recipe rows accumulate with no pruning path
 

@@ -1,5 +1,7 @@
-// Import verification: asserts the invariants the Liked Songs import guarantees,
-// then prints informational counts. Prints counts only, never track values.
+// Import verification: asserts the invariants the library sync guarantees —
+// Liked Songs, owned playlists, saved albums, and the per-source membership
+// rows behind them — then prints informational counts. Prints counts only,
+// never track values.
 //
 // In this MVP every song in `songs` is created by an import that also writes a
 // `user_songs` row, so the global `songs` table equals the user-referenced set —
@@ -65,6 +67,41 @@ hard(
   `count=${nullGenres.count}`,
 )
 
+// Hard: every library row is held by at least one source. The whole-library
+// sync removes a song only when a completed pass finds it in no source, so a
+// row with zero source rows would be unprunable and unexplained. PostgREST
+// cannot express NOT EXISTS, so both sides are paged and compared here.
+const PAGE = 1000
+const readPairs = async (table) => {
+  const pairs = new Set()
+  for (let from = 0; ; from += PAGE) {
+    const page = await service
+      .from(table)
+      .select('user_id, song_id')
+      .order('user_id', { ascending: true })
+      .order('song_id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (page.error) return { pairs, error: page.error }
+    for (const row of page.data) pairs.add(`${row.user_id}:${row.song_id}`)
+    if (page.data.length < PAGE) return { pairs, error: null }
+  }
+}
+const libraryPairs = await readPairs('user_songs')
+const sourcePairs = await readPairs('user_song_sources')
+let sourcelessCount = 0
+for (const pair of libraryPairs.pairs) {
+  if (!sourcePairs.pairs.has(pair)) sourcelessCount += 1
+}
+hard(
+  'user_songs rows with no user_song_sources row = 0',
+  libraryPairs.error === null &&
+    sourcePairs.error === null &&
+    sourcelessCount === 0,
+  libraryPairs.error || sourcePairs.error
+    ? `err(${(libraryPairs.error ?? sourcePairs.error).message})`
+    : `count=${sourcelessCount}`,
+)
+
 // Hard: an anonymous client must see zero user_songs (RLS canary).
 const anonUserSongs = await anon
   .from('user_songs')
@@ -74,6 +111,17 @@ hard(
   'anon sees 0 user_songs (RLS)',
   anonBlocked,
   anonUserSongs.error ? 'denied' : `count=${anonUserSongs.count}`,
+)
+
+// Hard: same canary for the per-source membership table.
+const anonSources = await anon
+  .from('user_song_sources')
+  .select('song_id', { count: 'exact', head: true })
+const anonSourcesBlocked = anonSources.error !== null || anonSources.count === 0
+hard(
+  'anon sees 0 user_song_sources (RLS)',
+  anonSourcesBlocked,
+  anonSources.error ? 'denied' : `count=${anonSources.count}`,
 )
 
 console.log('')
@@ -88,6 +136,16 @@ const userSongsTotal = await headCount(
 console.log(
   `INFO  songs=${songsTotal.count}  user_songs=${userSongsTotal.count}`,
 )
+
+for (const sourceType of ['liked', 'playlist', 'album']) {
+  const row = await headCount(
+    service
+      .from('user_song_sources')
+      .select('song_id', { count: 'exact', head: true })
+      .eq('source_type', sourceType),
+  )
+  console.log(`INFO  user_song_sources source_type=${sourceType}: ${row.count}`)
+}
 
 const emptyGenres = await headCount(
   service
@@ -127,8 +185,10 @@ console.log(
   `INFO  release_date range: ${minRow.data?.release_date ?? 'n/a'} .. ${maxRow.data?.release_date ?? 'n/a'}`,
 )
 
-// Optional: compare Spotify's reported Liked Songs total against the imported
-// count for one user with a still-valid token (skipped otherwise). The diff is
+// Optional: compare Spotify's reported Liked Songs total against the user's
+// `liked` source rows for one user with a still-valid token (skipped
+// otherwise). Only the liked source is comparable — playlists and albums add
+// library rows Spotify's Liked Songs total knows nothing about. The diff is
 // expected to be non-zero — Spotify counts local files, which we don't import.
 const tokenRow = await service
   .from('spotify_tokens')
@@ -148,12 +208,13 @@ if (
     const spotifyTotal = typeof body?.total === 'number' ? body.total : 'n/a'
     const userCount = await headCount(
       service
-        .from('user_songs')
+        .from('user_song_sources')
         .select('song_id', { count: 'exact', head: true })
-        .eq('user_id', tokenRow.data.user_id),
+        .eq('user_id', tokenRow.data.user_id)
+        .eq('source_type', 'liked'),
     )
     hard(
-      'imported user rows do not exceed Spotify total',
+      'liked source rows do not exceed the Spotify Liked Songs total',
       userCount.error === null &&
         typeof spotifyTotal === 'number' &&
         userCount.count <= spotifyTotal,
@@ -162,7 +223,7 @@ if (
         : `spotify=${spotifyTotal} imported=${userCount.count}`,
     )
     console.log(
-      `INFO  spotify total=${spotifyTotal} vs user_songs=${userCount.count} (diff includes local files)`,
+      `INFO  spotify liked total=${spotifyTotal} vs liked source rows=${userCount.count} (diff includes local files)`,
     )
   } else {
     console.log(`INFO  spotify check skipped (HTTP ${response.status})`)

@@ -807,6 +807,41 @@ export type Database = {
           },
         ]
       }
+      user_song_sources: {
+        Row: {
+          added_at: string
+          last_seen_at: string
+          song_id: string
+          source_id: string
+          source_type: string
+          user_id: string
+        }
+        Insert: {
+          added_at: string
+          last_seen_at: string
+          song_id: string
+          source_id?: string
+          source_type: string
+          user_id: string
+        }
+        Update: {
+          added_at?: string
+          last_seen_at?: string
+          song_id?: string
+          source_id?: string
+          source_type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'user_song_sources_user_id_song_id_fkey'
+            columns: ['user_id', 'song_id']
+            isOneToOne: false
+            referencedRelation: 'user_songs'
+            referencedColumns: ['user_id', 'song_id']
+          },
+        ]
+      }
       user_songs: {
         Row: {
           imported_at: string
@@ -931,6 +966,10 @@ export type Database = {
           total: number
         }[]
       }
+      import_user_songs_from_source: {
+        Args: { p_rows: Json; p_synced_at: string; p_user_id: string }
+        Returns: undefined
+      }
       library_effective_tagged_songs: {
         Args: { p_kind: string; p_tag_ids: string[] }
         Returns: {
@@ -1048,6 +1087,10 @@ export type Database = {
           is_promoted: boolean
           reason: string
         }[]
+      }
+      prune_user_songs_without_sources: {
+        Args: { p_user_id: string }
+        Returns: number
       }
       record_song_enrichment_attempt: {
         Args: {

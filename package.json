@@ -29,6 +29,7 @@
     "verify:genres": "node --env-file=.env.local --import tsx scripts/verify-genres.mts",
     "verify:chat-prompt": "node --env-file=.env.local --import tsx scripts/verify-chat-prompt.mts",
     "verify:playlists": "node --env-file=.env.local --import tsx scripts/verify-playlists.mts",
+    "verify:sync-endpoints": "node --env-file=.env.local --import tsx scripts/verify-sync-endpoints.mts",
     "verify:refresh": "node --env-file=.env.local --import tsx scripts/exercise-refresh.mts"
   },
   "dependencies": {

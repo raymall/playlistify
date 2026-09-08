@@ -4,26 +4,27 @@ import {
   requireUser,
 } from '@/lib/api/route-helpers'
 import { isRecord, readJson, readString } from '@/lib/json'
+import { isTransientImportFailure } from '@/lib/spotify/import'
+import { runLibrarySyncBatch } from '@/lib/spotify/sync'
 import {
-  importLikedSongsBatch,
-  isTransientImportFailure,
-} from '@/lib/spotify/import'
+  isSyncStartCursor,
+  readSyncCursor,
+  type SyncCursor,
+} from '@/lib/spotify/sync-contract'
 import { createClient } from '@/lib/supabase/server'
 
 type ImportPayload = {
-  offset: number
+  cursor: SyncCursor
   syncStartedAt: string | null
 }
 
 const readPayload = (value: unknown): ImportPayload | null => {
   if (!isRecord(value)) return null
-  const { offset } = value
-  if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) {
-    return null
-  }
-  if (offset === 0) {
+  const cursor = readSyncCursor(value.cursor)
+  if (cursor === null) return null
+  if (isSyncStartCursor(cursor)) {
     return value.syncStartedAt === null || value.syncStartedAt === undefined
-      ? { offset, syncStartedAt: null }
+      ? { cursor, syncStartedAt: null }
       : null
   }
   const syncStartedAt = readString(value.syncStartedAt)
@@ -34,13 +35,14 @@ const readPayload = (value: unknown): ImportPayload | null => {
   ) {
     return null
   }
-  return { offset, syncStartedAt }
+  return { cursor, syncStartedAt }
 }
 
 /**
- * Imports one batch of Liked Songs for the signed-in user. Not covered by
- * proxy.ts route protection, so it gates on getUser() itself. The user id
- * always comes from the session — never the request body.
+ * Runs one batch of the signed-in user's library sync from the echoed cursor
+ * (Liked Songs, owned playlists, saved albums). Not covered by proxy.ts route
+ * protection, so it gates on getUser() itself. The user id always comes from
+ * the session — never the request body.
  *
  * CSRF posture: Supabase auth cookies are SameSite=Lax, acceptable for this
  * authenticated MVP endpoint.
@@ -56,7 +58,7 @@ export async function POST(request: Request) {
 
   try {
     return jsonRetryableResult(
-      await importLikedSongsBatch(user.id, payload.offset, syncStartedAt),
+      await runLibrarySyncBatch(user.id, payload.cursor, syncStartedAt),
     )
   } catch (error) {
     const message =

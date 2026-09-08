@@ -79,8 +79,13 @@ the same commit (rule in `AGENTS.md`).
   bands, the per-rank answer budget, and the shared-result/budget copy), and
   `schema.ts` (the bounded `output_spec` parser + per-recipe zod schema
   builder, confidence threshold, `ai_attributes` parser).
-- `lib/spotify/` — `api.ts` (typed Web API client), `import.ts` (Liked Songs
-  batch import), `token.ts` (Spotify access-token refresh).
+- `lib/spotify/` — `api.ts` (typed Web API client: Liked Songs, playlist
+  items, saved albums, album tracks, playlist listing and management),
+  `sync.ts` (the whole-library sync engine — one phase batch per call,
+  per-source reconcile, prune), `sync-contract.ts` (client-safe cursor and
+  batch-response types + parsers shared by the route and the panel),
+  `import.ts` (shared Spotify → `songs` row mapping and the `songs` upsert),
+  `token.ts` (Spotify access-token refresh).
 - `lib/playlists/` — playlist creation and post-creation management:
   `tracks.ts` (ordered RLS-scoped Spotify-id resolution), `build.ts` (shared
   create/chunk-add/empty-shell cleanup), `create.ts`, `sync.ts`, `update.ts`,
@@ -121,6 +126,10 @@ the same commit (rule in `AGENTS.md`).
   it is the executable form of the guarded-re-enrichment test matrix.
   `verify-playlists.mts` live-checks Spotify playlist create, list, add,
   generated cover metadata, details-update, and unfollow endpoints;
+  `verify-sync-endpoints.mts` live-proves the reads the whole-library sync
+  depends on — `/playlists/{id}/items`, `/me/albums`, `/albums/{id}/tracks`,
+  and the owner/snapshot/count fields on `/me/playlists` — where a 403 is a
+  hard stop (this app's retired-endpoint history);
   `verify-rls.mjs`, `verify-import.mjs`, `verify-enrichment.mjs`,
   `verify-genres.mts`, and `verify-chat-prompt.mts` cover their own domains,
   and `exercise-refresh.mts` probes the Spotify token
@@ -132,8 +141,12 @@ the same commit (rule in `AGENTS.md`).
   recomputes them).
 - `supabase/migrations/` — schema source of truth. Core tables are `profiles`,
   `spotify_tokens`, `songs`, `genres`, `moods`, AI and personal tag links,
-  `user_songs`, `playlists`, `playlist_songs`, `llm_models`, and
-  `unmatched_tags`. Guarded re-enrichment adds `enrichment_recipes`,
+  `user_songs`, `user_song_sources` (one row per source — liked, owned
+  playlist, saved album — holding a library row, with the source's own
+  `added_at` and a `last_seen_at` sync marker; the service-role RPCs
+  `import_user_songs_from_source()` and `prune_user_songs_without_sources()`
+  own the source-driven library insert and the zero-source prune),
+  `playlists`, `playlist_songs`, `llm_models`, and `unmatched_tags`. Guarded re-enrichment adds `enrichment_recipes`,
   `song_enrichment_jobs`, immutable `song_enrichment_attempts`, and private
   `user_{genre,mood}_suppressions`; recipe snapshots add service-role-only
   `vocabulary_snapshots` (frozen approved lists, shared by content hash) and
@@ -228,11 +241,15 @@ an auth service that merely blinked is a 503 the client may retry for free:
   (`app/auth/callback/route.ts`).
 - `POST /auth/signout` — clears the session, redirects to `/`
   (`app/auth/signout/route.ts`).
-- `POST /api/import` — one Liked Songs batch, body
-  `{offset, syncStartedAt}`. The server issues `syncStartedAt` on the first
-  batch (`offset: 0` must send `null`) and every later batch echoes it back, so
-  one client loop is one sync pass (`app/api/import/route.ts` →
-  `lib/spotify/import.ts`).
+- `POST /api/import` — one whole-library sync batch, body
+  `{cursor, syncStartedAt}`. The cursor walks `{phase: 'liked', offset}` →
+  `{phase: 'playlists', playlists, index, itemOffset}` (the owned-playlist id
+  snapshot rides in the cursor, `null` until the phase's first batch) →
+  `{phase: 'albums', offset}`. The server issues `syncStartedAt` on the start
+  cursor (which must send `null`) and every later batch echoes it back, so one
+  client loop is one sync pass; every echoed cursor is re-validated by
+  `readSyncCursor` (`app/api/import/route.ts` → `lib/spotify/sync.ts`,
+  contract in `lib/spotify/sync-contract.ts`).
 - `POST /api/enrich` — claim and process one batch of system-selected analysis,
   body `{processedSoFar}` and nothing else. `maxDuration` 300
   (`app/api/enrich/route.ts` → `lib/enrichment/engine.ts`).
@@ -280,18 +297,34 @@ access tokens refresh on demand in `lib/spotify/token.ts`
 state.
 
 **Import** — `components/library-import-panel.tsx` loops `POST /api/import`
-until done, riding out `safeToRetry` failures (`MAX_SAFE_RETRIES`).
-`lib/spotify/import.ts` fetches up to 2 pages of `/me/tracks` through
-`lib/spotify/api.ts` and upserts `songs` + `user_songs`, stamping each seen
-join row with the pass's `syncStartedAt` (issued server-side on the first
-batch, echoed by the client afterwards, re-validated). Only a completed pass
-prunes, and every removal candidate is re-confirmed via
-`/me/library/contains` first — that guards offset drift and overlapping tabs.
-The `SongMetadata` alias pins the upsert to the nine Spotify columns;
-canonical enrichment columns are written only inside
-`promote_song_enrichment_attempt`, so the two writers cannot collide.
-Artist-genre lookup degrades to `[]` on failure — the batch `/artists`
-endpoint 403s for this app (divergence: MVP-PLAN assumed it works).
+until done, riding out `safeToRetry` failures (`MAX_SAFE_RETRIES`) and drawing
+one bar with a segment per phase. `lib/spotify/sync.ts` runs one batch per
+call from the echoed cursor. Liked phase: ≤2 pages of `/me/tracks`. Playlists
+phase: list `/me/playlists` once, keep the ids whose `owner.id` equals
+`profiles.spotify_user_id` in the cursor (capped at `SYNC_MAX_PLAYLISTS`; a
+missing Spotify user id is `reconnect_required`, since sign-in repopulates
+it), then ≤2 pages of `/playlists/{id}/items` per call — a 404 skips the
+playlist, and any other failure fails the batch, so a retired-endpoint 403
+can never read as an empty playlist and prune its songs. Albums phase: one
+`/me/albums` page per call with inline `/albums/{id}/tracks` continuations,
+the parent album injected into each simplified track and `popularity`
+omitted from the upsert. Every phase upserts `songs` through
+`lib/spotify/import.ts`, writes `user_songs` — the liked phase's full upsert
+keeps `liked_at` self-healing; playlist/album rows go through
+`import_user_songs_from_source`, which sets `liked_at` only on insert — and
+stamps one `user_song_sources` row per (source, song) with the pass's
+`syncStartedAt`. Only the final albums batch reconciles: stale liked source
+rows are re-confirmed via `/me/library/contains` before deletion (guards
+offset drift and overlapping tabs), stale playlist/album rows are deleted
+outright (the completed re-read is authoritative — this is also how deleted
+playlists and unsaved albums fall out), then
+`prune_user_songs_without_sources` removes library rows no source holds. The
+`SongMetadata` alias pins the upsert to the nine Spotify columns; canonical
+enrichment columns are written only inside `promote_song_enrichment_attempt`,
+so the two writers cannot collide. Artist-genre lookup degrades to `[]` on
+failure — the batch `/artists` endpoint 403s for this app (divergence:
+MVP-PLAN assumed it works), and so does batch `GET /tracks`, which is why
+album-sourced songs carry no popularity.
 
 **Enrichment** — `components/library-enrichment-panel.tsx` loops
 `POST /api/enrich` with only `processedSoFar`. `lib/enrichment/engine.ts`
@@ -448,6 +481,18 @@ Load-bearing rules the code already satisfies — each is enforced somewhere
 and would break quietly if undone; they are not open work. Product reasoning
 behind them lives in `HOW-IT-WORKS.md`; this section keeps the enforcement
 and the failure mode.
+
+**`user_song_sources` carries no direct key to `profiles` or `songs`.**
+PostgREST treats a table keyed to two others as a junction between them, so
+the direct keys the table was created with made every `user_songs → songs`
+embed ambiguous ("more than one relationship was found") and broke the
+Library page, chat's candidate fetch, and playlist track resolution at once.
+Only the composite key to `user_songs` remains (migration
+`20260908221104`); it still cascades from both parents. Any new table that
+references both `user_songs` (or `profiles`) and `songs` reintroduces the
+ambiguity unless every embed between those tables names its foreign key, and
+`lib/spotify/sync.ts` looks Spotify ids up in chunks instead of embedding
+`songs` from the sources table for the same reason.
 
 **The browser has no enrichment authority at all.** `/api/enrich` accepts
 `processedSoFar` and nothing else — no song id, model, recipe, or rank.

@@ -498,8 +498,8 @@ export const PlaylistifyMeshLanding = ({
       </div>
 
       <p className='sr-only' id='playlistify-mesh-description'>
-        {description} Continue with Spotify to import your Liked Songs and
-        create playlists from a sentence.
+        {description} Continue with Spotify to import your library and create
+        playlists from a sentence.
       </p>
     </section>
   )

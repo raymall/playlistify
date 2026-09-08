@@ -7,49 +7,64 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { signInWithSpotify } from '@/lib/auth/spotify'
-import { isRecord, readJson, readNumber, readString } from '@/lib/json'
+import { readJson } from '@/lib/json'
 import { wait } from '@/lib/sleep'
-import { type ImportBatchResponse } from '@/lib/spotify/import'
+import {
+  parseSyncBatchResponse,
+  SYNC_PHASES,
+  SYNC_START_CURSOR,
+  type SyncCursor,
+  type SyncPhase,
+} from '@/lib/spotify/sync-contract'
 
 type LibraryImportPanelProps = {
   hasLibrary: boolean
 }
 
+/** Everything the loop needs to continue, and the bar needs to draw. */
+type SyncProgress = {
+  cursor: SyncCursor
+  syncStartedAt: string | null
+  syncPhase: SyncPhase
+  phaseCurrent: number
+  phaseTotal: number | null
+  imported: number
+}
+
 type ImportState =
   | { phase: 'idle' }
-  | {
-      phase: 'running'
-      offset: number
-      total: number | null
-      imported: number
-      syncStartedAt: string | null
-    }
+  | { phase: 'running'; progress: SyncProgress }
   | {
       phase: 'waiting'
-      offset: number
+      progress: SyncProgress
       secondsLeft: number
       reason: 'rate_limit' | 'transient'
-      total: number | null
-      imported: number
-      syncStartedAt: string | null
     }
-  | {
-      phase: 'error'
-      offset: number
-      message: string
-      total: number | null
-      imported: number
-      syncStartedAt: string | null
-    }
+  | { phase: 'error'; progress: SyncProgress; message: string }
   | { phase: 'reconnect' }
-  | { phase: 'done'; imported: number; removed: number; total: number }
+  | { phase: 'done'; total: number; removed: number }
+
+const START_PROGRESS: SyncProgress = {
+  cursor: SYNC_START_CURSOR,
+  syncStartedAt: null,
+  syncPhase: 'liked',
+  phaseCurrent: 0,
+  phaseTotal: null,
+  imported: 0,
+}
+
+const PHASE_ANNOUNCEMENTS: Record<SyncPhase, string> = {
+  liked: 'Syncing Liked Songs.',
+  playlists: 'Liked Songs synced. Syncing your playlists.',
+  albums: 'Playlists synced. Syncing saved albums.',
+}
 
 /** router.refresh() cadence so the table fills in live behind the panel. */
 const REFRESH_EVERY_N_BATCHES = 5
 
 /**
- * Failures the server marks `safeToRetry` can be repeated at the same offset
- * because every import write is idempotent. This covers auth blips and
+ * Failures the server marks `safeToRetry` can be repeated at the same cursor
+ * because every sync write is idempotent. This covers auth blips and
  * exhausted transport retries even when the server lost the response after a
  * write landed. Ten attempts at the delays below rides out roughly two minutes.
  */
@@ -59,56 +74,50 @@ const MAX_SAFE_RETRIES = 10
 const transientDelaySeconds = (failures: number) =>
   Math.min(15, 2 ** (failures - 1))
 
-/** Parse the route's JSON body into the response contract, or null if malformed. */
-const parseResponse = (value: unknown): ImportBatchResponse | null => {
-  if (!isRecord(value)) return null
-  const { status } = value
-  if (status === 'progress') {
-    const nextOffset = readNumber(value.nextOffset)
-    const total = readNumber(value.total)
-    const importedCount = readNumber(value.importedCount)
-    const syncStartedAt = readString(value.syncStartedAt)
-    if (
-      nextOffset === null ||
-      total === null ||
-      importedCount === null ||
-      syncStartedAt === null
-    ) {
-      return null
-    }
-    return { status, nextOffset, total, importedCount, syncStartedAt }
+/**
+ * One bar, three equal segments — one per phase. A phase's total can appear
+ * late (playlists are listed on the phase's first batch), so the bar only ever
+ * moves forward: a phase with no total yet sits at its segment's start.
+ */
+const progressPercent = ({
+  syncPhase,
+  phaseCurrent,
+  phaseTotal,
+}: SyncProgress) => {
+  const ratio =
+    phaseTotal === null || phaseTotal === 0
+      ? 0
+      : Math.min(phaseCurrent / phaseTotal, 1)
+  return Math.round(
+    ((SYNC_PHASES.indexOf(syncPhase) + ratio) / SYNC_PHASES.length) * 100,
+  )
+}
+
+const phaseLabel = ({ syncPhase, phaseCurrent, phaseTotal }: SyncProgress) => {
+  switch (syncPhase) {
+    case 'liked':
+      return phaseTotal === null
+        ? 'Preparing…'
+        : `Liked Songs — ${Math.min(phaseCurrent, phaseTotal).toLocaleString()} / ${phaseTotal.toLocaleString()}`
+    case 'playlists':
+      return phaseTotal === null
+        ? 'Listing playlists…'
+        : phaseTotal === 0
+          ? 'No playlists'
+          : `Playlist ${Math.min(phaseCurrent + 1, phaseTotal).toLocaleString()} of ${phaseTotal.toLocaleString()}`
+    case 'albums':
+      return phaseTotal === null
+        ? 'Preparing albums…'
+        : `Albums — ${Math.min(phaseCurrent, phaseTotal).toLocaleString()} / ${phaseTotal.toLocaleString()}`
   }
-  if (status === 'done') {
-    const total = readNumber(value.total)
-    const importedCount = readNumber(value.importedCount)
-    const removedCount = readNumber(value.removedCount)
-    if (total === null || importedCount === null || removedCount === null) {
-      return null
-    }
-    return { status, total, importedCount, removedCount }
-  }
-  if (status === 'rate_limited') {
-    const retryAfterSeconds = readNumber(value.retryAfterSeconds)
-    if (retryAfterSeconds === null) return null
-    return { status, retryAfterSeconds }
-  }
-  if (status === 'reconnect_required') return { status }
-  if (status === 'error') {
-    return {
-      status,
-      message: readString(value.message) ?? 'Something went wrong.',
-      safeToRetry: value.safeToRetry === true,
-    }
-  }
-  return null
 }
 
 /**
- * Drives the client-side import loop: repeatedly POSTs one batch to
- * /api/import, folding each response into a small state machine. The loop is a
- * plain async function started by the button (never an effect), so React strict
- * mode can't double-fire it; unmount safety comes from aborting the run's
- * controller on unmount and checking its signal after every await.
+ * Drives the client-side sync loop: repeatedly POSTs the echoed cursor to
+ * /api/import, folding each response into a small state machine. The loop is
+ * a plain async function started by the button (never an effect), so React
+ * strict mode can't double-fire it; unmount safety comes from aborting the
+ * run's controller on unmount and checking its signal after every await.
  */
 export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
   const router = useRouter()
@@ -118,12 +127,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  const runImport = async (
-    startOffset: number,
-    startImported: number,
-    startTotal: number | null,
-    startSyncStartedAt: string | null,
-  ) => {
+  const runSync = async (start: SyncProgress) => {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -134,46 +138,36 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
     // later check as redundant. Funnelling through a call keeps each check live.
     const isStopped = () => signal.aborted
 
-    let offset = startOffset
-    let imported = startImported
-    let total = startTotal
-    let syncStartedAt = startSyncStartedAt
+    let progress = start
     let batchesSinceRefresh = 0
-    let lastDecile = -1
     let hasAnnouncedWaiting = false
     let safeRetries = 0
     let hasAnnouncedRetrying = false
 
-    setAnnouncement('Import started.')
+    setAnnouncement('Sync started.')
 
     while (!isStopped()) {
-      setState({
-        phase: 'running',
-        offset,
-        total,
-        imported,
-        syncStartedAt,
-      })
+      setState({ phase: 'running', progress })
 
       let response: Response
       try {
         response = await fetch('/api/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ offset, syncStartedAt }),
+          body: JSON.stringify({
+            cursor: progress.cursor,
+            syncStartedAt: progress.syncStartedAt,
+          }),
           signal,
         })
       } catch {
         if (isStopped()) return
         setState({
           phase: 'error',
-          offset,
+          progress,
           message: 'Network error — check your connection and retry.',
-          total,
-          imported,
-          syncStartedAt,
         })
-        setAnnouncement('Import paused by a network error.')
+        setAnnouncement('Sync paused by a network error.')
         return
       }
       if (isStopped()) return
@@ -181,17 +175,14 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
       const payload = await readJson(response)
       if (isStopped()) return
 
-      const parsed = parseResponse(payload)
+      const parsed = parseSyncBatchResponse(payload)
       if (parsed === null) {
         setState({
           phase: 'error',
-          offset,
+          progress,
           message: 'The server returned an unexpected response.',
-          total,
-          imported,
-          syncStartedAt,
         })
-        setAnnouncement('Import paused by an error.')
+        setAnnouncement('Sync paused by an error.')
         return
       }
 
@@ -202,59 +193,46 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
       }
       if (parsed.status === 'error') {
         // Idempotent transport failures ride it out rather than dropping the
-        // user into a manual Retry — a connection blip is not an import problem.
+        // user into a manual Retry — a connection blip is not a sync problem.
         if (parsed.safeToRetry === true && safeRetries < MAX_SAFE_RETRIES) {
           safeRetries += 1
           if (!hasAnnouncedRetrying) {
             hasAnnouncedRetrying = true
             setAnnouncement(
-              'Connection problem; the import will resume automatically.',
+              'Connection problem; the sync will resume automatically.',
             )
           }
           let secondsLeft = transientDelaySeconds(safeRetries)
           while (secondsLeft > 0 && !isStopped()) {
             setState({
               phase: 'waiting',
-              offset,
+              progress,
               secondsLeft,
               reason: 'transient',
-              total,
-              imported,
-              syncStartedAt,
             })
             await wait(1000, signal)
             secondsLeft -= 1
           }
           continue
         }
-        setState({
-          phase: 'error',
-          offset,
-          message: parsed.message,
-          total,
-          imported,
-          syncStartedAt,
-        })
-        setAnnouncement('Import paused by an error.')
+        setState({ phase: 'error', progress, message: parsed.message })
+        setAnnouncement('Sync paused by an error.')
         return
       }
       if (parsed.status === 'rate_limited') {
         if (!hasAnnouncedWaiting) {
           hasAnnouncedWaiting = true
           setAnnouncement(
-            'Spotify rate limit reached; the import will resume automatically.',
+            'Spotify rate limit reached; the sync will resume automatically.',
           )
         }
         let secondsLeft = parsed.retryAfterSeconds
         while (secondsLeft > 0 && !isStopped()) {
           setState({
             phase: 'waiting',
-            offset,
+            progress,
             secondsLeft,
             reason: 'rate_limit',
-            total,
-            imported,
-            syncStartedAt,
           })
           await wait(1000, signal)
           secondsLeft -= 1
@@ -265,42 +243,39 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
       // A batch that lands clears the transient budget: the next outage gets a
       // full allowance rather than inheriting an exhausted one.
       safeRetries = 0
-      imported += parsed.importedCount
-      total = parsed.total
 
       if (parsed.status === 'done') {
         setState({
           phase: 'done',
-          imported,
+          total: parsed.total,
           removed: parsed.removedCount,
-          total,
         })
         const removedSummary =
           parsed.removedCount === 0
             ? ''
-            : ` Removed ${parsed.removedCount.toLocaleString()} no longer liked ${
+            : ` Removed ${parsed.removedCount.toLocaleString()} ${
                 parsed.removedCount === 1 ? 'song' : 'songs'
-              }.`
+              } no longer in your Spotify library.`
         setAnnouncement(
-          total === 0
-            ? `No Liked Songs found.${removedSummary}`
-            : `Import complete. ${imported.toLocaleString()} songs imported.${removedSummary}`,
+          parsed.total === 0
+            ? `No songs found in your Spotify library.${removedSummary}`
+            : `Sync complete. ${parsed.total.toLocaleString()} songs in your library.${removedSummary}`,
         )
         router.refresh()
         return
       }
 
-      offset = parsed.nextOffset
-      syncStartedAt = parsed.syncStartedAt
-      if (total > 0) {
-        const decile = Math.min(
-          Math.floor((Math.min(offset, total) / total) * 10),
-          9,
-        )
-        if (decile > lastDecile) {
-          lastDecile = decile
-          if (decile > 0) setAnnouncement(`${decile * 10}% imported.`)
-        }
+      const previousPhase = progress.syncPhase
+      progress = {
+        cursor: parsed.next,
+        syncStartedAt: parsed.syncStartedAt,
+        syncPhase: parsed.phase,
+        phaseCurrent: parsed.phaseCurrent,
+        phaseTotal: parsed.phaseTotal,
+        imported: progress.imported + parsed.batchImported,
+      }
+      if (parsed.phase !== previousPhase) {
+        setAnnouncement(PHASE_ANNOUNCEMENTS[parsed.phase])
       }
       batchesSinceRefresh += 1
       if (batchesSinceRefresh >= REFRESH_EVERY_N_BATCHES) {
@@ -311,16 +286,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
   }
 
   const handleStart = () => {
-    if (state.phase === 'error') {
-      void runImport(
-        state.offset,
-        state.imported,
-        state.total,
-        state.syncStartedAt,
-      )
-    } else {
-      void runImport(0, 0, null, null)
-    }
+    void runSync(state.phase === 'error' ? state.progress : START_PROGRESS)
   }
 
   const isPrimaryDisabled =
@@ -329,8 +295,8 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
     state.phase === 'error'
       ? 'Retry'
       : hasLibrary
-        ? 'Sync Liked Songs'
-        : 'Import Liked Songs'
+        ? 'Sync Library'
+        : 'Import Library'
 
   const isProgressVisible =
     state.phase === 'running' || state.phase === 'waiting'
@@ -341,9 +307,7 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         ? state.reason === 'rate_limit'
           ? `Rate limited — resuming in ${state.secondsLeft}s`
           : `Connection problem — retrying in ${state.secondsLeft}s`
-        : state.total === null
-          ? 'Preparing…'
-          : `${Math.min(state.offset, state.total).toLocaleString()} / ${state.total.toLocaleString()} songs`
+        : phaseLabel(state.progress)
       : ''
 
   return (
@@ -352,14 +316,10 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         {isProgressVisible ? (
           <div className='flex w-full min-w-0 flex-col gap-1'>
             <Progress
-              aria-label='Liked Songs import progress'
+              aria-label='Library sync progress'
               className='w-full motion-reduce:**:data-[slot=progress-indicator]:transition-none'
-              max={state.total ?? 100}
-              value={
-                state.total === null
-                  ? null
-                  : Math.min(state.offset, state.total)
-              }
+              max={100}
+              value={progressPercent(state.progress)}
             />
             <p className='truncate font-mono text-[0.6875rem] text-muted-foreground tabular-nums'>
               {progressLabel}
@@ -383,12 +343,9 @@ export const LibraryImportPanel = ({ hasLibrary }: LibraryImportPanelProps) => {
         ) : state.phase === 'done' ? (
           <p className='line-clamp-2 text-xs leading-tight text-muted-foreground'>
             {state.total === 0
-              ? 'No Liked Songs found.'
-              : `${state.imported.toLocaleString()} songs synced.`}
-            {state.removed > 0 &&
-              ` ${state.removed.toLocaleString()} no longer liked ${
-                state.removed === 1 ? 'song' : 'songs'
-              } removed.`}
+              ? 'No songs found in your Spotify library.'
+              : `${state.total.toLocaleString()} songs synced.`}
+            {state.removed > 0 && ` ${state.removed.toLocaleString()} removed.`}
           </p>
         ) : (
           <span aria-hidden='true' />

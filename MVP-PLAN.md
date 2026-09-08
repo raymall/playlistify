@@ -2,11 +2,11 @@
 
 ## Project Summary
 
-Playlistify is a web app that turns a user's Spotify library into AI-generated playlists through a conversational interface. The user logs in with Spotify, the app imports their Liked Songs and enriches each track with AI-inferred attributes (genres, moods, descriptors), and the user then describes the playlist they want in natural language ("chill Sunday morning, nothing sad"). The AI selects matching tracks from the user's own enriched library and creates the playlist directly in their Spotify account.
+Playlistify is a web app that turns a user's Spotify library into AI-generated playlists through a conversational interface. The user logs in with Spotify, the app imports their library — Liked Songs, the playlists they own, and their saved albums — and enriches each track with AI-inferred attributes (genres, moods, descriptors), and the user then describes the playlist they want in natural language ("chill Sunday morning, nothing sad"). The AI selects matching tracks from the user's own enriched library and creates the playlist directly in their Spotify account.
 
 ## Goal
 
-A user can log in with Spotify, watch their Liked Songs import and enrich, chat to describe a playlist, review the AI's track selection, and end up with a real playlist in their Spotify account — built only from songs they already saved. The MVP is done when that loop works end to end for a real library of a few thousand tracks, in light and dark mode, deployed on Vercel.
+A user can log in with Spotify, watch their library import and enrich, chat to describe a playlist, review the AI's track selection, and end up with a real playlist in their Spotify account — built only from songs they already saved. The MVP is done when that loop works end to end for a real library of a few thousand tracks, in light and dark mode, deployed on Vercel.
 
 ## Stack
 
@@ -46,7 +46,10 @@ Stated by the user (treat as non-negotiable):
 Decided during planning (user confirmed):
 
 - Auth: **Spotify OAuth only** (email + password was considered on 2026-07-16 and reverted the same day — the product is unusable without a connected Spotify account, so a second auth method added a linking flow and edge cases with no MVP benefit).
-- Import scope: **Liked Songs only** (not saved albums or playlists).
+- Import scope: **the whole Spotify library** — Liked Songs, the playlists the
+  user owns, and saved albums (decision updated 2026-09-08; the MVP shipped
+  Liked Songs only). Followed and editorial playlists are excluded, and a song
+  leaves the library only when a completed sync finds it in none of its sources.
 - Unknown songs: **mark as unknown**, no web-search fallback in the MVP.
   Unknown tracks get no trusted AI tags and are skipped by AI selection unless
   the user supplies personal tags. A strictly stronger analysis recipe may
@@ -76,7 +79,7 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 **End-user:**
 
 1. Sign in / sign out with Spotify (OAuth via Supabase Auth; scopes: `user-library-read`, `playlist-read-private`, `playlist-modify-public`, `playlist-modify-private`).
-2. Import Liked Songs into the global songs table + personal library join table, with a visible progress indicator; re-sync on demand to pick up newly liked songs and, once a pass completes, drop songs Spotify confirms are no longer saved.
+2. Import the user's Spotify library — Liked Songs, owned playlists, and saved albums — into the global songs table + personal library join table, recording which source holds each song, with a visible per-phase progress indicator; re-sync on demand to pick up new additions and, once a pass completes, drop songs no source holds any more (Liked Songs removals are confirmed with Spotify first).
 3. AI enrichment of every imported track (genres, moods, energy, era,
    descriptors + recognition confidence), batched, cached globally, resumable,
    with progress shown. The system chooses an owner-curated recipe, which also
@@ -125,7 +128,7 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
    controls to add personal tags and hide AI tags privately. There is no
    per-song re-analysis control — the recipe decides what runs.
    Includes Pending / None / Low / Medium / High confidence counts and
-   "Re-sync Liked Songs".
+   "Sync Library".
    Serves features 2, 3, 4, 5.
 3. **Chat — `/chat`** (the home screen once imported) — conversation pane with streaming responses and visible tool activity; proposed-playlist panel (track list with album art, per-track rationale, remove buttons); name/description fields; "Create playlist" button. Serves features 6, 7, 8.
 4. **Playlists — `/playlists`** — management for created playlists: cached
@@ -138,7 +141,8 @@ Hand-rolling only makes sense when the chat needs something the SDK can't expres
 ## Out of Scope
 
 - Apple Music integration (only the nullable `apple_music_id` column exists).
-- Importing saved albums or followed/owned playlists (Liked Songs only).
+- Importing followed or editorial playlists (only playlists the user owns are
+  synced; saved albums and Liked Songs are in scope since 2026-09-08).
 - Web-search fallback for unrecognized songs (marked `unknown` instead).
 - Persisting chat history across sessions (a chat is ephemeral; only resulting playlists are saved).
 - Email + password auth (considered and reverted: every feature requires a connected Spotify account anyway, so a second sign-in method only added an identity-linking flow and its edge cases; Spotify OAuth is the sole login).
@@ -263,12 +267,23 @@ via the service-role `log_unmatched_tags` RPC)
 
 **user_songs** — each user's library (join table)
 
-| column      | type            | notes                                        |
-| ----------- | --------------- | -------------------------------------------- |
-| user_id     | uuid → profiles | PK part 1                                    |
-| song_id     | uuid → songs    | PK part 2                                    |
-| liked_at    | timestamptz     | `added_at` from Spotify                      |
-| imported_at | timestamptz     | last completed/resumable Spotify sync marker |
+| column      | type            | notes                                                                                       |
+| ----------- | --------------- | ------------------------------------------------------------------------------------------- |
+| user_id     | uuid → profiles | PK part 1                                                                                   |
+| song_id     | uuid → songs    | PK part 2                                                                                   |
+| liked_at    | timestamptz     | when the song entered the library: the Liked Songs date, else the first source's `added_at` |
+| imported_at | timestamptz     | marker of the last sync pass that saw the song                                              |
+
+**user_song_sources** — why each library row exists (one row per source that holds it)
+
+| column       | type        | notes                                                          |
+| ------------ | ----------- | -------------------------------------------------------------- |
+| user_id      | uuid        | PK part 1; `(user_id, song_id)` → `user_songs`, on cascade     |
+| song_id      | uuid        | PK part 2; no direct key to `songs` (PostgREST junction clash) |
+| source_type  | text        | PK part 3: `liked` \| `playlist` \| `album`                    |
+| source_id    | text        | PK part 4: Spotify playlist/album id; `''` for liked           |
+| added_at     | timestamptz | the source's own added/saved date                              |
+| last_seen_at | timestamptz | marker of the last completed-or-running pass that re-read it   |
 
 **playlists** — playlists created through the app
 
@@ -428,7 +443,7 @@ open hardening items are tracked in `IMPROVEMENTS.md`.
 2. **Auth** — Supabase project; Spotify app registration; Supabase Auth Spotify provider with the four scopes; login/logout; capture `provider_token` + `provider_refresh_token` into `spotify_tokens` at sign-in; server-side helper that returns a valid access token (refreshing against Spotify when expired) and surfaces `invalid_grant` as a "reconnect Spotify" state.
 3. **Schema** — migrations for the product, enrichment evidence/queue, private
    overlay tables, RLS policies, RPCs, constraints, and indexes.
-4. **Import** — paginated `/me/tracks` fetch → upsert `songs` (Spotify metadata; the artist-genre lookup degrades to `[]`) + `user_songs`; completed re-syncs remove songs Spotify confirms are no longer liked; progress UI on `/library`.
+4. **Import** — paginated `/me/tracks` fetch → upsert `songs` (Spotify metadata; the artist-genre lookup degrades to `[]`) + `user_songs`; completed re-syncs remove songs Spotify confirms are no longer liked; progress UI on `/library`. Extended to the whole library in step 14.
 5. **Enrichment** — AI SDK structured output; system-selected versioned
    recipes carrying their own reasoning effort and batch size; globally
    deduplicated leased jobs; immutable candidate attempts;
@@ -475,6 +490,17 @@ open hardening items are tracked in `IMPROVEMENTS.md`.
     `library_enrichment_recipes()` names the current one and any escalation,
     `library_song_recipes()` names the one behind each row. The legacy
     model-rank and omission columns are dropped.
+
+14. **Whole-library sync (implemented 2026-09-08)** — one resumable pass reads
+    Liked Songs, then every playlist the user owns (`/playlists/{id}/items`),
+    then saved albums (`/me/albums`, with `/albums/{id}/tracks`
+    continuations), driven by a server-issued, client-echoed cursor instead of
+    a bare offset. `user_song_sources` records which source holds each library
+    row; a completed pass deletes the source rows it did not re-see (Liked
+    removals still confirmed via `/me/library/contains`) and prunes library
+    rows left with no source. `liked_at` keeps its role as the library order:
+    a row entering through a playlist or album takes that source's date on
+    insert and is never moved by a later source.
 
 Steps 4–6 and 7–8 are the two halves of the product; each is independently demoable.
 

@@ -40,7 +40,7 @@ export default async function ChatPage() {
       {totalSongs === 0 ? (
         <div className='mt-8 flex flex-col items-start gap-4'>
           <p className='max-w-prose text-sm text-muted-foreground'>
-            Import your Spotify Liked Songs first — then I can put playlists
+            Import your Spotify library first — then I can put playlists
             together from your own music.
           </p>
           <Link className={buttonVariants()} href='/library'>

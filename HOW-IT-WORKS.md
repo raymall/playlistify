@@ -6,16 +6,38 @@ the code, `MVP-PLAN.md` is the product spec, and this file is the reasoning.
 
 ## Library sync
 
-A re-sync converges the library in both directions: it adds newly liked songs,
-refreshes saved-song metadata, and removes songs that are no longer in Liked
-Songs. Removal happens only after every Spotify page completes. A paused or
-failed import never removes anything.
+The library is everything a user has kept in Spotify in three places: Liked
+Songs, the playlists they made themselves, and the albums they saved. Followed
+playlists — someone else's, or Spotify's own — are not part of it: those are
+other people's curation, and the product's promise is playlists made only from
+songs the user chose to keep.
 
-Before removing a song that was not encountered during the completed pass,
-Playlistify asks Spotify whether it is still saved. That final confirmation
-protects against a song moving between offset-based pages or two browser tabs
-syncing at once. Removing the private library row does not erase the shared song
-or its cached analysis, so another user—and a future re-like—can reuse it.
+A sync reads all three, in that order, and converges the library in both
+directions: it adds newly kept songs, refreshes saved-song metadata, and
+removes songs that are no longer held anywhere. Each song remembers which
+sources hold it. A song stays in the library while at least one of them still
+does — unliking a song that also sits on one of your own playlists keeps it —
+and leaves only when a completed sync finds it in none of them. The same rule
+covers a playlist you deleted and an album you unsaved: their songs stay if
+they are still liked or on another playlist you own, and go otherwise.
+
+Removal happens only after every source has been read to the end. A paused or
+failed sync never removes anything. Before dropping a song from the Liked Songs
+source, Playlistify asks Spotify whether it is still liked; that final
+confirmation protects against a song moving between pages or two browser tabs
+syncing at once. Playlist and album membership has no such check, so there the
+completed re-read is what counts. Removing the private library row does not
+erase the shared song or its cached analysis, so another user—and a future
+re-save—can reuse it.
+
+The library is ordered by when a song entered it. Liking a song sets that date
+to the moment it was liked; a song that arrived only through a playlist or an
+album keeps the date it was added there. A song already in the library keeps
+its date when a later sync also finds it on a playlist or album.
+
+A larger library is also a larger analysis: songs that arrive from playlists
+and albums join the enrichment queue unanalyzed and are picked up the next time
+**Enrich** is pressed, so the cost stays under the user's control.
 
 ## Enrichment
 
@@ -224,7 +246,7 @@ known energy, era, or tempo still cannot satisfy those filters.
 
 ## Finding songs in the library
 
-The Library lists a user's songs newest-liked first, a page at a time. One
+The Library lists a user's songs newest-added first, a page at a time. One
 search box does both jobs: typed words search titles and artists, and choosing
 a suggested genre or mood adds it as a filter pill.
 
@@ -309,7 +331,8 @@ part of every check.
 
 Recreate uses the stored song order rather than asking the assistant to make a
 new selection. Songs no longer in the user's library are skipped — the library
-only drops a song after a completed re-sync confirms the unlike — and the
+only drops a song after a completed re-sync finds it in none of its
+sources — and the
 result reports how many of the original songs were restored. A changed title or
 description becomes the title or description of the recreated playlist.
 

@@ -1,7 +1,8 @@
 # Playlistify
 
 Turn the music you already like into playlists you'd never think to build.
-Playlistify imports your Spotify Liked Songs, enriches every track with
+Playlistify imports your Spotify library — Liked Songs, the playlists you
+own, and your saved albums — enriches every track with
 AI-inferred genres, moods, energy, and era, and then lets you describe a
 playlist in plain language — "something warm for a rainy Sunday, nothing too
 sad" — and creates it in your Spotify account, built only from songs you

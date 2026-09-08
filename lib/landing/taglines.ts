@@ -5,7 +5,7 @@ export const LANDING_TAGLINES = [
   "You don't need new music. You need your music, curated.",
   'Liked. Curated. Played.',
   'No discovery. No filler. Just the songs you already liked.',
-  'Thousands of liked songs. One perfect playlist.',
+  'Your whole library. One perfect playlist.',
   "You did the liking. We'll do the rest.",
   'Nothing new. Everything you love.',
 ] as const

@@ -9,6 +9,15 @@ const SPOTIFY_API_BASE = 'https://api.spotify.com/v1'
 /** Max page size the Saved Tracks endpoint accepts. */
 export const LIKED_TRACKS_PAGE_SIZE = 50
 
+/** Max page size the Get Playlist Items endpoint accepts. */
+export const PLAYLIST_ITEMS_PAGE_SIZE = 50
+
+/** Max page size the Get User's Saved Albums endpoint accepts. */
+export const SAVED_ALBUMS_PAGE_SIZE = 20
+
+/** Max page size the Get Album Tracks endpoint accepts. */
+export const ALBUM_TRACKS_PAGE_SIZE = 50
+
 /** Max ids the Get Several Artists endpoint accepts per call. */
 const ARTIST_CHUNK_SIZE = 50
 
@@ -25,11 +34,15 @@ const RETRY_AFTER_FALLBACK_SECONDS = 5
 const RETRY_AFTER_MIN_SECONDS = 1
 const RETRY_AFTER_MAX_SECONDS = 3600
 
+/**
+ * `httpStatus` is set only for a non-ok HTTP response (never for a network
+ * or parse failure), so callers can tell a 404 apart from everything else.
+ */
 export type SpotifyApiResult<T> =
   | { status: 'ok'; data: T }
   | { status: 'rate_limited'; retryAfterSeconds: number }
   | { status: 'auth_failed' }
-  | { status: 'error'; message: string }
+  | { status: 'error'; message: string; httpStatus?: number }
 
 export interface SpotifyArtistRef {
   id: string | null
@@ -67,17 +80,64 @@ export interface SavedTrackItem {
   track: SpotifyTrack | null
 }
 
+/** One page of saved-track-shaped items: Liked Songs or playlist items. */
 export interface LikedTracksPage {
   items: SavedTrackItem[]
   total: number
   next: string | null
 }
 
+/**
+ * `GET /playlists/{id}/items` answers 404 for a playlist that no longer
+ * exists; the sync treats that as "skip", not as a failure, so it gets its
+ * own arm rather than being folded into `error`.
+ */
+export type PlaylistItemsResult =
+  SpotifyApiResult<LikedTracksPage> | { status: 'not_found' }
+
 export type SpotifyPlaylistMetadata = {
   description: string | null
   id: string
   imageUrl: string | null
   name: string
+  /** Spotify user id of the playlist owner; null when the payload omits it. */
+  ownerId: string | null
+  snapshotId: string | null
+  /** Item count Spotify reports on the listing; null when omitted. */
+  trackTotal: number | null
+}
+
+/**
+ * A saved album with the page of tracks Spotify embeds in the listing. Every
+ * track carries the parent album and `popularity: null` — simplified track
+ * objects have neither. `embeddedTrackCount` is the raw embedded item count
+ * (local files included), which is the offset a continuation page starts at.
+ */
+export type SpotifySavedAlbum = {
+  id: string
+  album: SpotifyAlbum
+  trackTotal: number
+  tracks: SpotifyTrack[]
+  embeddedTrackCount: number
+}
+
+/** `album` is null for unparseable entries; the entry is kept for offset math. */
+export type SavedAlbumItem = {
+  added_at: string | null
+  album: SpotifySavedAlbum | null
+}
+
+export type SavedAlbumsPage = {
+  items: SavedAlbumItem[]
+  total: number
+  next: string | null
+}
+
+/** Null entries are local files or unparseable tracks, kept for offset math. */
+export type AlbumTracksPage = {
+  items: (SpotifyTrack | null)[]
+  total: number
+  next: string | null
 }
 
 const readBoolean = (value: unknown): boolean | null =>
@@ -142,6 +202,7 @@ const reduceResponse = async (
     return {
       status: 'error',
       message: `Spotify request failed (HTTP ${response.status})`,
+      httpStatus: response.status,
     }
   }
 
@@ -288,6 +349,10 @@ const parseTrack = (value: unknown): SpotifyTrack | null => {
   if (!isRecord(value)) return null
   // Local files carry no stable metadata and cannot be added to playlists.
   if (value.is_local === true) return null
+  // Playlists can hold podcast episodes. They have no artists or album, so
+  // parsing one as a track would mint a garbage song row.
+  const type = readString(value.type)
+  if (type !== null && type !== 'track') return null
   const id = readString(value.id)
   if (id === null || id.length === 0) return null
   const name = readString(value.name)
@@ -307,7 +372,88 @@ const parseSavedTrackItem = (value: unknown): SavedTrackItem => {
   if (!isRecord(value)) return { added_at: null, track: null }
   return {
     added_at: readString(value.added_at),
-    track: parseTrack(value.track),
+    // Saved Tracks wraps the track as `track`; the renamed playlist-items
+    // endpoint wraps it as `item` (verified live 2026-09-08). Accept either.
+    track: parseTrack(value.track ?? value.item),
+  }
+}
+
+/**
+ * A simplified track (album listings, album-tracks pages) has no album or
+ * popularity of its own; the parent album is injected by the caller.
+ */
+const parseSimplifiedTrack = (
+  value: unknown,
+  album: SpotifyAlbum,
+): SpotifyTrack | null => {
+  const track = parseTrack(value)
+  if (track === null) return null
+  return { ...track, album, popularity: null }
+}
+
+const parseSavedAlbumItem = (value: unknown): SavedAlbumItem => {
+  if (!isRecord(value)) return { added_at: null, album: null }
+  const addedAt = readString(value.added_at)
+  const raw = value.album
+  if (!isRecord(raw)) return { added_at: addedAt, album: null }
+  const id = readString(raw.id)
+  if (id === null || id.length === 0) {
+    return { added_at: addedAt, album: null }
+  }
+
+  const album = parseAlbum(raw)
+  const paging = isRecord(raw.tracks)
+    ? raw.tracks
+    : isRecord(raw.items)
+      ? raw.items
+      : null
+  const rawTracks = paging === null ? null : readArray(paging.items)
+  const tracks: SpotifyTrack[] = []
+  for (const entry of rawTracks ?? []) {
+    const track = parseSimplifiedTrack(entry, album)
+    if (track !== null) tracks.push(track)
+  }
+  const trackTotal =
+    (paging === null ? null : readNumber(paging.total)) ??
+    readNumber(raw.total_tracks) ??
+    (rawTracks ?? []).length
+
+  return {
+    added_at: addedAt,
+    album: {
+      id,
+      album,
+      trackTotal,
+      tracks,
+      embeddedTrackCount: (rawTracks ?? []).length,
+    },
+  }
+}
+
+const parseSavedAlbumsPage = (value: unknown): SavedAlbumsPage | null => {
+  if (!isRecord(value)) return null
+  const rawItems = readArray(value.items)
+  const total = readNumber(value.total)
+  if (rawItems === null || total === null) return null
+  return {
+    items: rawItems.map(parseSavedAlbumItem),
+    total,
+    next: readString(value.next),
+  }
+}
+
+const parseAlbumTracksPage = (
+  value: unknown,
+  album: SpotifyAlbum,
+): AlbumTracksPage | null => {
+  if (!isRecord(value)) return null
+  const rawItems = readArray(value.items)
+  const total = readNumber(value.total)
+  if (rawItems === null || total === null) return null
+  return {
+    items: rawItems.map((entry) => parseSimplifiedTrack(entry, album)),
+    total,
+    next: readString(value.next),
   }
 }
 
@@ -349,6 +495,71 @@ export const fetchLikedTracksPage = async (
   const page = parseLikedTracksPage(result.data)
   if (page === null) {
     return { status: 'error', message: 'Unexpected liked tracks payload' }
+  }
+  return { status: 'ok', data: page }
+}
+
+/**
+ * Fetch one page (50 items) of a playlist's contents at `offset`. Items share
+ * the Saved Tracks shape (`added_at` + a track), so the parser is shared too.
+ *
+ * Path is `/items`, NOT the older `/tracks`: the retired segment 403s for
+ * every caller (see `addPlaylistTracksChunk`). A 404 means the playlist is
+ * gone and surfaces as `not_found` so a sync can skip it.
+ */
+export const fetchPlaylistItemsPage = async (
+  accessToken: string,
+  playlistId: string,
+  offset: number,
+): Promise<PlaylistItemsResult> => {
+  const url = `${SPOTIFY_API_BASE}/playlists/${encodeURIComponent(playlistId)}/items?limit=${PLAYLIST_ITEMS_PAGE_SIZE}&offset=${offset}`
+  const result = await spotifyGet(accessToken, url)
+  if (result.status === 'error' && result.httpStatus === 404) {
+    return { status: 'not_found' }
+  }
+  if (result.status !== 'ok') return result
+  const page = parseLikedTracksPage(result.data)
+  if (page === null) {
+    return { status: 'error', message: 'Unexpected playlist items payload' }
+  }
+  return { status: 'ok', data: page }
+}
+
+/**
+ * Fetch one page (20 albums) of the user's saved albums at `offset`. Each
+ * album embeds its first page of simplified tracks; albums with more tracks
+ * than `embeddedTrackCount` continue through `fetchAlbumTracksPage`.
+ */
+export const fetchSavedAlbumsPage = async (
+  accessToken: string,
+  offset: number,
+): Promise<SpotifyApiResult<SavedAlbumsPage>> => {
+  const url = `${SPOTIFY_API_BASE}/me/albums?limit=${SAVED_ALBUMS_PAGE_SIZE}&offset=${offset}`
+  const result = await spotifyGet(accessToken, url)
+  if (result.status !== 'ok') return result
+  const page = parseSavedAlbumsPage(result.data)
+  if (page === null) {
+    return { status: 'error', message: 'Unexpected saved albums payload' }
+  }
+  return { status: 'ok', data: page }
+}
+
+/**
+ * Fetch one page (50 tracks) of an album's tracks at `offset`. The endpoint
+ * returns simplified tracks, so the caller passes the parent album to inject.
+ */
+export const fetchAlbumTracksPage = async (
+  accessToken: string,
+  albumId: string,
+  offset: number,
+  album: SpotifyAlbum,
+): Promise<SpotifyApiResult<AlbumTracksPage>> => {
+  const url = `${SPOTIFY_API_BASE}/albums/${encodeURIComponent(albumId)}/tracks?limit=${ALBUM_TRACKS_PAGE_SIZE}&offset=${offset}`
+  const result = await spotifyGet(accessToken, url)
+  if (result.status !== 'ok') return result
+  const page = parseAlbumTracksPage(result.data, album)
+  if (page === null) {
+    return { status: 'error', message: 'Unexpected album tracks payload' }
   }
   return { status: 'ok', data: page }
 }
@@ -451,11 +662,21 @@ export const fetchUserPlaylists = async (
       ) {
         return { status: 'error', message: 'Unexpected playlist item' }
       }
+      // The item-count object is `items` on the current listing (renamed
+      // alongside the contents endpoint) and `tracks` on the classic payload.
+      const trackCounts = isRecord(item.tracks)
+        ? item.tracks
+        : isRecord(item.items)
+          ? item.items
+          : null
       playlists.set(id, {
         description: readString(item.description),
         id,
         imageUrl: parseImages(item.images)[0]?.url ?? null,
         name,
+        ownerId: isRecord(item.owner) ? readString(item.owner.id) : null,
+        snapshotId: readString(item.snapshot_id),
+        trackTotal: trackCounts === null ? null : readNumber(trackCounts.total),
       })
     }
     if (items.length < USER_PLAYLISTS_PAGE_SIZE) {

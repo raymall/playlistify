@@ -21,6 +21,7 @@ const TABLES = [
   'spotify_tokens',
   'profiles',
   'user_songs',
+  'user_song_sources',
   'user_genres',
   'user_moods',
   'playlists',

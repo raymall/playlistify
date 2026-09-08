@@ -149,8 +149,7 @@ const eslintConfig = defineConfig([
       'app/auth/callback/route.ts',
       'components/account-menu.tsx',
       'lib/enrichment/engine.ts',
-      'lib/enrichment/requests.ts',
-      'lib/spotify/import.ts',
+      'lib/spotify/sync.ts',
       'lib/spotify/token.ts',
     ],
     rules: {

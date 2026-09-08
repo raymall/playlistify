@@ -46,7 +46,7 @@ export default async function LibraryPage({
     <PageSection>
       <header className='flex flex-col gap-6 border-b-2 border-border pb-8 sm:flex-row sm:items-end sm:justify-between'>
         <div className='flex flex-col gap-4'>
-          <p className='editorial-kicker'>01 / Liked Songs</p>
+          <p className='editorial-kicker'>01 / Spotify Library</p>
           <h1 className='editorial-title'>Library</h1>
         </div>
         <LibraryImportPanel hasLibrary={totalSongs > 0} />
@@ -54,8 +54,9 @@ export default async function LibraryPage({
 
       {totalSongs === 0 && (
         <p className='mt-8 max-w-prose text-sm text-muted-foreground'>
-          Import your Spotify Liked Songs to build your library. Large libraries
-          take a few minutes and the import resumes where it left off.
+          Import your Spotify library — Liked Songs, the playlists you own, and
+          your saved albums. Large libraries take a few minutes and the import
+          resumes where it left off.
         </p>
       )}
 

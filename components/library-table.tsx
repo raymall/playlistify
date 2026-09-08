@@ -320,8 +320,8 @@ export const LibraryTable = ({
             <col className='w-18 sm:w-28' />
           </colgroup>
           <TableCaption className='sr-only'>
-            Your imported Liked Songs, most recently liked first. Select artwork
-            to inspect and edit a song.
+            Your imported Spotify library, most recently added first. Select
+            artwork to inspect and edit a song.
           </TableCaption>
           <TableHeader>
             <TableRow className='border-border hover:bg-transparent'>
