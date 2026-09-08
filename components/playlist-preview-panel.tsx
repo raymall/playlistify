@@ -141,7 +141,9 @@ const PlaylistArtworkPlaceholder = ({ imageUrls }: { imageUrls: string[] }) => {
  * tracks, then create it in Spotify. Remounted (via `key`) on each new
  * proposal, so its edit state resets by construction. The create flow is a
  * small state machine mirroring the import panel — a plain async function
- * started by the button, aborted on unmount.
+ * started by the button, aborted on unmount. Below `lg` the whole panel
+ * scrolls (the stacked header is taller than the mobile height cap); at `lg`
+ * the header pins and only the track list scrolls.
  */
 export const PlaylistPreviewPanel = ({
   proposal,
@@ -290,7 +292,7 @@ export const PlaylistPreviewPanel = ({
   return (
     <section
       aria-label='Playlist preview'
-      className='flex h-full min-h-0 w-full max-w-full min-w-0 flex-col overflow-x-hidden border-2 border-border'
+      className='flex h-full min-h-0 w-full max-w-full min-w-0 flex-col overflow-x-hidden overflow-y-auto border-2 border-border lg:overflow-y-hidden'
     >
       <div className='grid min-w-0 shrink-0 border-b-2 border-border md:grid-cols-[minmax(12rem,0.72fr)_minmax(0,1.28fr)]'>
         <div className='min-h-56 bg-muted md:min-h-72'>
@@ -374,7 +376,7 @@ export const PlaylistPreviewPanel = ({
 
       <div
         aria-label='Playlist tracks'
-        className='min-h-0 max-w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 sm:px-5'
+        className='max-w-full min-w-0 shrink-0 overflow-x-hidden px-4 py-2 sm:px-5 lg:min-h-0 lg:flex-1 lg:shrink lg:overflow-y-auto'
         role='region'
         tabIndex={0}
       >
