@@ -68,6 +68,11 @@ export interface SpotifyTrack {
   duration_ms: number | null
   popularity: number | null
   explicit: boolean | null
+  /**
+   * Whether Spotify will play the track for this listener, resolved against
+   * the token's own market; null when the payload omits it.
+   */
+  is_playable: boolean | null
 }
 
 /**
@@ -353,7 +358,13 @@ const parseTrack = (value: unknown): SpotifyTrack | null => {
   // parsing one as a track would mint a garbage song row.
   const type = readString(value.type)
   if (type !== null && type !== 'track') return null
-  const id = readString(value.id)
+  // A market-scoped read may relink a track to a playable equivalent with a
+  // different id; `linked_from` keeps the one the user saved, which is the id
+  // the library is keyed by.
+  const linkedFrom = isRecord(value.linked_from)
+    ? readString(value.linked_from.id)
+    : null
+  const id = linkedFrom ?? readString(value.id)
   if (id === null || id.length === 0) return null
   const name = readString(value.name)
   if (name === null || name.length === 0) return null
@@ -365,6 +376,7 @@ const parseTrack = (value: unknown): SpotifyTrack | null => {
     duration_ms: readNumber(value.duration_ms),
     popularity: readNumber(value.popularity),
     explicit: readBoolean(value.explicit),
+    is_playable: readBoolean(value.is_playable),
   }
 }
 
@@ -526,6 +538,13 @@ export const fetchPlaylistItemsPage = async (
 }
 
 /**
+ * Simplified album tracks report `is_playable` only for a market-scoped read
+ * (verified live 2026-10-23); Liked Songs and playlist items report it
+ * without one. `from_token` resolves to the listener's own market.
+ */
+const ALBUM_MARKET_PARAM = 'market=from_token'
+
+/**
  * Fetch one page (20 albums) of the user's saved albums at `offset`. Each
  * album embeds its first page of simplified tracks; albums with more tracks
  * than `embeddedTrackCount` continue through `fetchAlbumTracksPage`.
@@ -534,7 +553,7 @@ export const fetchSavedAlbumsPage = async (
   accessToken: string,
   offset: number,
 ): Promise<SpotifyApiResult<SavedAlbumsPage>> => {
-  const url = `${SPOTIFY_API_BASE}/me/albums?limit=${SAVED_ALBUMS_PAGE_SIZE}&offset=${offset}`
+  const url = `${SPOTIFY_API_BASE}/me/albums?limit=${SAVED_ALBUMS_PAGE_SIZE}&offset=${offset}&${ALBUM_MARKET_PARAM}`
   const result = await spotifyGet(accessToken, url)
   if (result.status !== 'ok') return result
   const page = parseSavedAlbumsPage(result.data)
@@ -554,7 +573,7 @@ export const fetchAlbumTracksPage = async (
   offset: number,
   album: SpotifyAlbum,
 ): Promise<SpotifyApiResult<AlbumTracksPage>> => {
-  const url = `${SPOTIFY_API_BASE}/albums/${encodeURIComponent(albumId)}/tracks?limit=${ALBUM_TRACKS_PAGE_SIZE}&offset=${offset}`
+  const url = `${SPOTIFY_API_BASE}/albums/${encodeURIComponent(albumId)}/tracks?limit=${ALBUM_TRACKS_PAGE_SIZE}&offset=${offset}&${ALBUM_MARKET_PARAM}`
   const result = await spotifyGet(accessToken, url)
   if (result.status !== 'ok') return result
   const page = parseAlbumTracksPage(result.data, album)

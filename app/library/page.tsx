@@ -6,6 +6,7 @@ import { LibraryImportPanel } from '@/components/library-import-panel'
 import { LibraryResults } from '@/components/library-results'
 import { LibrarySearchBar } from '@/components/library-search-bar'
 import { LibraryTableSkeleton } from '@/components/library-table-skeleton'
+import { LibraryUnavailableSongs } from '@/components/library-unavailable-songs'
 import { PageSection } from '@/components/page-section'
 import { getLibraryEnrichmentRecipes } from '@/lib/enrichment/recipes'
 import {
@@ -76,6 +77,11 @@ export default async function LibraryPage({
             }}
             recipes={recipes}
           />
+          {/* Its own boundary with no fallback: the notice is absent until a
+              sync finds a song Spotify no longer plays, so nothing shifts. */}
+          <Suspense fallback={null}>
+            <LibraryUnavailableSongs />
+          </Suspense>
           <LibrarySearchBar state={state} />
           {/* A changed key mounts a *new* boundary, which is never "already
               revealed" — without it React would not revert the revealed

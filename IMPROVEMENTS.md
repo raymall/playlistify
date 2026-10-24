@@ -202,6 +202,23 @@ would duplicate an existing item, contradict one, or make one obsolete:
 - **Why fix:** explicit approved branding makes the source unmistakable and
   brings the cover presentation fully in line with Spotify's display guidance.
 
+## Chat can put songs Spotify no longer plays into a playlist
+
+- **In plain terms:** the Library now knows which songs Spotify will not play
+  for the user, but chat still treats them like any other song, so a new
+  playlist can arrive with greyed-out tracks. Leave them out of what chat may
+  pick (or flag them in the preview).
+- **Severity:** Medium — the playlist is created and works, but every
+  unplayable track is a wasted slot the user has to notice and remove.
+- **Issue:** `user_songs.is_playable` is written by every sync and read only by
+  the Library's unavailable-songs list (`lib/library/unavailable.ts`). The chat
+  candidate path (`library_selectable_songs` / `lib/chat/library-search.ts`)
+  and playlist track resolution (`lib/playlists/tracks.ts`) ignore it. The
+  2026-10-23 live probe found 40 of 1,913 Liked Songs unplayable.
+- **Why fix:** a playlist built from a sentence should only hold songs the
+  user can actually play; excluding `is_playable = false` (keeping null, which
+  means "not checked yet") is a small change to the selection RPC.
+
 ## Landing hero text contrast changes with the shader frame
 
 - **In plain terms:** the wordmark and tagline sit directly on an animated light
@@ -314,6 +331,22 @@ would duplicate an existing item, contradict one, or make one obsolete:
   filter now makes the divergence directly reachable — filtering Library by Low
   lists exactly the songs whose AI tags chat refuses — so the assertion has an
   obvious fixture to build on.
+
+## Library cover art breaks when the image optimizer times out
+
+- **In plain terms:** while a sync is running, some Library thumbnails show as
+  broken images because the app's image resizer gives up fetching Spotify's
+  cover art. Reloading usually fixes it; a fallback tile would hide it.
+- **Severity:** Low — cosmetic and transient, but it looks like missing data.
+- **Issue:** on 2026-10-23, during a sync, `/_next/image?…&w=256` answered 500
+  and 504 for several table rows, and the dev server logged
+  `TimeoutError: The operation was aborted due to timeout` for each. The
+  `SongArtwork` component in `components/library-table.tsx` has no `onError`
+  fallback, so a failed optimization renders as a broken image. Only seen in
+  `next dev` so far; production behaviour is unmeasured.
+- **Why fix:** show the existing "P" placeholder on load failure (or serve
+  Spotify's already-sized images unoptimized), so a slow CDN fetch never
+  renders as a broken row.
 
 ## Prompt tag lists still carry a silent 600-name cap
 

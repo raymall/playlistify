@@ -35,6 +35,17 @@ to the moment it was liked; a song that arrived only through a playlist or an
 album keeps the date it was added there. A song already in the library keeps
 its date when a later sync also finds it on a playlist or album.
 
+Spotify sometimes stops playing a song a user kept — a release gets pulled, or
+its license lapses in the user's country — and greys it out without removing
+it. Every sync asks Spotify, for each song it reads, whether it still plays for
+this user, and remembers the answer per user rather than on the shared song,
+because the same song can be playable in one country and not in another. Such a
+song stays in the library: it is still kept, and removing it is the user's call
+in Spotify. The Library instead says how many songs are no longer available and
+lists them, each with the sources that hold it and a link to it in Spotify, so
+they are easy to find and clean up. The answer is only as fresh as the last
+sync, and a song no sync has checked yet is not listed.
+
 A larger library is also a larger analysis: songs that arrive from playlists
 and albums join the enrichment queue unanalyzed and are picked up the next time
 **Enrich** is pressed, so the cost stays under the user's control.

@@ -65,6 +65,11 @@ export type MappedTrack = {
   artistIds: string[]
   /** When the source says the song was added; null when Spotify omitted it. */
   addedAt: string | null
+  /**
+   * Spotify's per-listener playability. It belongs on the caller's
+   * `user_songs` row, never on the shared song row.
+   */
+  isPlayable: boolean | null
 }
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
@@ -127,6 +132,7 @@ export const mapTrack = (
   row: { ...buildSongRow(track), popularity: track.popularity },
   artistIds: collectArtistIds(track),
   addedAt,
+  isPlayable: track.is_playable,
 })
 
 /**
@@ -141,6 +147,7 @@ export const mapAlbumTrack = (
   row: buildSongRow(track),
   artistIds: collectArtistIds(track),
   addedAt,
+  isPlayable: track.is_playable,
 })
 
 /**

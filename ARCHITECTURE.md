@@ -61,7 +61,9 @@ the same commit (rule in `AGENTS.md`).
 - `lib/library/` — `/library` search: `search-params.ts` (isomorphic URL state —
   parse/canonicalize/build plus the transition helpers; only `withLibraryPage`
   keeps the page), `search.ts` (server-only `searchLibrary` over
-  `library_search_page` + the hydration pass), `song.ts` (`LibrarySong` /
+  `library_search_page` + the hydration pass), `unavailable.ts` (server-only
+  `getUnavailableSongs`: the caller's `is_playable = false` rows with their
+  sources), `song.ts` (`LibrarySong` /
   `LibraryTag` row shapes), `pagination.ts` (pure slot model), and
   `use-tag-suggestions.ts` (client-side debounced typeahead with a bounded
   module cache).
@@ -145,7 +147,9 @@ the same commit (rule in `AGENTS.md`).
   playlist, saved album — holding a library row, with the source's own
   `added_at` and a `last_seen_at` sync marker; the service-role RPCs
   `import_user_songs_from_source()` and `prune_user_songs_without_sources()`
-  own the source-driven library insert and the zero-source prune),
+  own the source-driven library insert and the zero-source prune;
+  `user_songs.is_playable` is Spotify's per-listener playability, restamped by
+  every sync and null until one has checked the song),
   `playlists`, `playlist_songs`, `llm_models`, and `unmatched_tags`. Guarded re-enrichment adds `enrichment_recipes`,
   `song_enrichment_jobs`, immutable `song_enrichment_attempts`, and private
   `user_{genre,mood}_suppressions`; recipe snapshots add service-role-only
@@ -202,7 +206,12 @@ Pages — protected prefixes are `PROTECTED_PREFIXES` in `proxy.ts`:
   hiding, and personal tags. The row's title cell is its `<th scope='row'>`, so
   the tag editor is announced against a song name; it also carries a
   `Playlist` / `Album` source badge (counts when several) for songs held by
-  something other than Liked Songs, and the inspector spells out every source. There is **no** per-song
+  something other than Liked Songs, and the inspector spells out every source.
+  Below the enrichment panel, a notice appears once a sync has found songs
+  Spotify no longer plays for the user; its dialog lists them with their
+  sources and a Spotify link (`components/library-unavailable-songs.tsx`, a
+  server component in its own Suspense boundary → `lib/library/unavailable.ts`).
+  There is **no** per-song
   analysis control: the panel names the current recipe (model, effort, batch
   size, rank, snapshot hash) beside **Enrich**, plus a line per stronger
   recipe the next run would escalate to and how many songs move, and each row's
@@ -215,7 +224,7 @@ current` when it is the default, otherwise the recipe's label. URL
   panels and the typed query survive every search
   (`app/library/page.tsx`, `app/library/loading.tsx` (instant skeleton
   streamed while the page's counts and recipe queries run) +
-  `components/library-{import-panel,enrichment-panel,search-bar,results,table,table-skeleton,pagination,tag-editor,confidence-info}.tsx`
+  `components/library-{import-panel,enrichment-panel,unavailable-songs,search-bar,results,table,table-skeleton,pagination,tag-editor,confidence-info}.tsx`
   → `lib/library/*`).
 - `/chat` — describe a playlist; conversation streams beside a live preview
   panel (rename, edit, drop tracks, create). Server-rendered empty states for
@@ -308,12 +317,16 @@ missing Spotify user id is `reconnect_required`, since sign-in repopulates
 it), then ≤2 pages of `/playlists/{id}/items` per call — a 404 skips the
 playlist, and any other failure fails the batch, so a retired-endpoint 403
 can never read as an empty playlist and prune its songs. Albums phase: one
-`/me/albums` page per call with inline `/albums/{id}/tracks` continuations,
+`/me/albums` page per call with inline `/albums/{id}/tracks` continuations
+(both read with `market=from_token`, the only form whose simplified tracks
+carry `is_playable`; a relinked track keeps its `linked_from` id),
 the parent album injected into each simplified track and `popularity`
 omitted from the upsert. Every phase upserts `songs` through
 `lib/spotify/import.ts`, writes `user_songs` — the liked phase's full upsert
 keeps `liked_at` self-healing; playlist/album rows go through
-`import_user_songs_from_source`, which sets `liked_at` only on insert — and
+`import_user_songs_from_source`, which sets `liked_at` only on insert; both
+paths restamp `is_playable` from the track's own flag, which `MappedTrack`
+carries beside (never inside) the shared `songs` row — and
 stamps one `user_song_sources` row per (source, song) with the pass's
 `syncStartedAt`. Only the final albums batch reconciles: stale liked source
 rows are re-confirmed via `/me/library/contains` before deletion (guards

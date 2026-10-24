@@ -845,18 +845,21 @@ export type Database = {
       user_songs: {
         Row: {
           imported_at: string
+          is_playable: boolean | null
           liked_at: string | null
           song_id: string
           user_id: string
         }
         Insert: {
           imported_at?: string
+          is_playable?: boolean | null
           liked_at?: string | null
           song_id: string
           user_id: string
         }
         Update: {
           imported_at?: string
+          is_playable?: boolean | null
           liked_at?: string | null
           song_id?: string
           user_id?: string

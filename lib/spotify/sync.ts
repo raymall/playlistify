@@ -95,7 +95,10 @@ const writeSourceTracks = async (
   const likedRows: TablesInsert<'user_songs'>[] = []
   // Keyed by song id: the same song on two albums must reach the RPC once —
   // ON CONFLICT DO UPDATE cannot touch a row twice in one statement.
-  const sourcedRows = new Map<string, { song_id: string; added_at: string }>()
+  const sourcedRows = new Map<
+    string,
+    { song_id: string; added_at: string; is_playable: boolean | null }
+  >()
   const sourceRows = new Map<string, TablesInsert<'user_song_sources'>>()
   for (const source of sources) {
     for (const track of source.tracks) {
@@ -108,9 +111,14 @@ const writeSourceTracks = async (
           song_id: songId,
           liked_at: track.addedAt,
           imported_at: syncStartedAt,
+          is_playable: track.isPlayable,
         })
       } else if (!sourcedRows.has(songId)) {
-        sourcedRows.set(songId, { song_id: songId, added_at: addedAt })
+        sourcedRows.set(songId, {
+          song_id: songId,
+          added_at: addedAt,
+          is_playable: track.isPlayable,
+        })
       }
       sourceRows.set(`${source.sourceType}:${source.sourceId}:${songId}`, {
         user_id: userId,
